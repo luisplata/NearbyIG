@@ -1,11 +1,11 @@
-import { useEffect, useRef } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { fmt } from '../generated/copy';
 import type { Profile } from '../generated/fixtures';
 import { useReducedMotion } from '../hooks/useReducedMotion';
-import { colors } from '../theme/theme';
+import { colors, fontSize } from '../theme/theme';
 
 import { ProfileDotLayer } from './ProfileDotLayer';
 import { RadarSvg, sweepWedgePath } from './RadarSvg';
@@ -25,6 +25,13 @@ export function RadarView({
 }) {
   const reduced = useReducedMotion();
   const spin = useRef(new Animated.Value(0)).current;
+  const [side, setSide] = useState(0);
+
+  const onLayout = (event: LayoutChangeEvent): void => {
+    const { width, height } = event.nativeEvent.layout;
+    const next = Math.max(0, Math.floor(Math.min(width, height)));
+    setSide((current) => (current === next ? current : next));
+  };
 
   useEffect(() => {
     if (reduced) {
@@ -46,8 +53,8 @@ export function RadarView({
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   return (
-    <View style={styles.wrap} accessibilityLabel={fmt('a11y.radar')}>
-      <View style={styles.radar}>
+    <View style={styles.wrap} accessibilityLabel={fmt('a11y.radar')} onLayout={onLayout}>
+      <View style={side > 0 ? { width: side, height: side } : styles.hidden}>
         <View style={StyleSheet.absoluteFill}>
           <RadarSvg />
         </View>
@@ -78,15 +85,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  radar: {
-    width: '100%',
-    maxWidth: 420,
-    aspectRatio: 1,
+  hidden: {
+    width: 0,
+    height: 0,
   },
   caption: {
     textAlign: 'center',
     color: colors.muted,
-    fontSize: 11,
+    fontSize: fontSize[0],
     paddingBottom: 4,
   },
 });
