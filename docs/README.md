@@ -5,7 +5,16 @@ Actions (GitHub Pages).
 
 ## Estado
 
-**Vacío a propósito.** No hay generador de sitio elegido todavía.
+La carpeta ya tiene documentos de trabajo. El sitio publicado todavía no tiene generador elegido.
+
+## Documentos
+
+| Documento | Para qué sirve |
+|---|---|
+| [`changes/nearbyig-mvp/exploration.md`](changes/nearbyig-mvp/exploration.md) | Análisis técnico greenfield, alternativas de frontend y decisiones abiertas. |
+| [`costos-operacion.md`](costos-operacion.md) | Costos de infraestructura, escenarios de carga y justificación por componente. |
+| [`checklist-piloto.md`](checklist-piloto.md) | Qué comprar, qué crear gratis y qué datos entregar para arrancar el piloto. |
+| [`plan-sprints-mvp.md`](plan-sprints-mvp.md) | Features, dependencias, orden de ejecución y demo esperada por sprint. |
 
 ## Requisito
 
