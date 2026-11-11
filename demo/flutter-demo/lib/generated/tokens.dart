@@ -29,8 +29,8 @@ abstract final class Tokens {
   static const List<double> space = <double>[4.0, 8.0, 12.0, 16.0, 24.0, 32.0];
   static const List<double> radii = <double>[8.0, 12.0, 20.0, 28.0, 999.0];
 
-  static const double shadowSheetOffsetY = 0.0;
-  static const double shadowSheetBlur = -8.0;
+  static const double shadowSheetOffsetY = -8.0;
+  static const double shadowSheetBlur = 24.0;
   static const Color shadowSheetColor = Color(0x73000000);
 
   static const double breakpointFrameMax = 480.0;

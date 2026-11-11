@@ -51,6 +51,11 @@ function tsJson(value) {
   return JSON.stringify(deepSort(value), null, 2);
 }
 
+/**
+ * CSS `box-shadow` sin spread: `offsetX offsetY blur rgba(r, g, b, a)`.
+ * El primer valor es el desplazamiento horizontal (no se emite), el segundo el
+ * vertical y el tercero el blur — `0 -8 24` → offsetY=-8, blur=24.
+ */
 function parseShadow(sheet) {
   const match = /^(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(
     String(sheet).trim(),
@@ -58,7 +63,7 @@ function parseShadow(sheet) {
   if (!match) {
     throw new Error(`Sombra no soportada: ${sheet}`);
   }
-  const [, offsetY, blur, , red, green, blue, alpha] = match;
+  const [, , offsetY, blur, red, green, blue, alpha] = match;
   const a = Math.round(Number(alpha) * 255);
   const argb = ((a << 24) | (Number(red) << 16) | (Number(green) << 8) | Number(blue)) >>> 0;
   return {

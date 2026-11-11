@@ -319,59 +319,71 @@ class _OverlayLayer extends StatelessWidget {
             child: FractionallySizedBox(
               heightFactor: full ? 0.96 : 0.84,
               widthFactor: 1,
-              child: Material(
-                color: Tokens.colorSurface,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(20),
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      offset: Offset(0, Tokens.shadowSheetOffsetY),
+                      blurRadius: Tokens.shadowSheetBlur,
+                      color: Tokens.shadowSheetColor,
+                    ),
+                  ],
                 ),
-                child: Semantics(
-                  scopesRoute: true,
-                  namesRoute: true,
-                  explicitChildNodes: true,
-                  label: title,
-                  child: FocusScope(
-                    autofocus: true,
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        Tokens.space[3],
-                        Tokens.space[1],
-                        Tokens.space[3],
-                        Tokens.space[2],
-                      ),
-                      child: Column(
-                        children: <Widget>[
-                          Row(
-                            children: <Widget>[
-                              IconButton(
-                                onPressed: onBack,
-                                tooltip: fmt('common.back'),
-                                icon: const Icon(Icons.arrow_back),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: Tokens.fontSizes[3],
-                                    fontWeight: FontWeight.w600,
-                                    color: Tokens.colorText,
+                child: Material(
+                  color: Tokens.colorSurface,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
+                  child: Semantics(
+                    scopesRoute: true,
+                    namesRoute: true,
+                    explicitChildNodes: true,
+                    label: title,
+                    child: FocusScope(
+                      autofocus: true,
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          Tokens.space[3],
+                          Tokens.space[1],
+                          Tokens.space[3],
+                          Tokens.space[2],
+                        ),
+                        child: Column(
+                          children: <Widget>[
+                            Row(
+                              children: <Widget>[
+                                IconButton(
+                                  onPressed: onBack,
+                                  tooltip: fmt('common.back'),
+                                  icon: const Icon(Icons.arrow_back),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: Tokens.fontSizes[3],
+                                      fontWeight: FontWeight.w600,
+                                      color: Tokens.colorText,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              Semantics(
-                                button: true,
-                                label: fmt('common.close'),
-                                child: IconButton(
-                                  onPressed: onBack,
-                                  tooltip: fmt('common.close'),
-                                  icon: const Icon(Icons.close),
+                                Semantics(
+                                  button: true,
+                                  label: fmt('common.close'),
+                                  child: IconButton(
+                                    onPressed: onBack,
+                                    tooltip: fmt('common.close'),
+                                    icon: const Icon(Icons.close),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          Expanded(child: child),
-                        ],
+                              ],
+                            ),
+                            Expanded(child: child),
+                          ],
+                        ),
                       ),
                     ),
                   ),
