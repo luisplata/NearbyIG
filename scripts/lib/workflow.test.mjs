@@ -88,7 +88,8 @@ test('audita el artefacto antes de subirlo', () => {
   const uploadAt = build.indexOf('actions/upload-pages-artifact@v4');
   assert.ok(assembleAt >= 0, 'build debe ensamblar y auditar site/');
   assert.ok(uploadAt > assembleAt, 'la auditoría debe correr antes del upload');
-  assert.ok(build.includes('include-hidden-files: true'), 'el artefacto debe conservar .nojekyll');
+  assert.ok(build.includes('path: site'), 'el upload debe apuntar al artefacto site/');
+  assert.ok(!build.includes('include-hidden-files'), 'no usar inputs no soportados por upload-pages-artifact@v4');
 });
 
 test('publica con permisos de Pages sólo en el job de deploy', () => {
