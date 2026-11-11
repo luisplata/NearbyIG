@@ -69,6 +69,10 @@ verificado `#3B82F6`, peligro `#EF4444`.
 
 - **Avatares procedurales**, sin binarios de retratos: gradiente lineal de 2 stops +
   2–3 círculos translúcidos posicionados por `seed` + iniciales centradas.
+- Nota de contrato: la spec habla de “retratos sintéticos y variantes pre-desenfocadas”.
+  La decisión A1 del design las implementa como avatares procedurales con dos estados de
+  render (no como PNG/SVG por perfil); es la lectura vinculante de ese requisito. No hay
+  binarios de retratos en el repo ni en el artefacto.
 - Dos **estados de render**, no archivos:
   - `blurred` (default): gradiente al 55 % de opacidad, sin iniciales, overlay de
     superficie al 45 %, icono de candado.
@@ -97,8 +101,8 @@ Los timers se derivan de acciones, no del reloj de pared. No hay timers al carga
 | 1 | Descubrimiento | F-2, F-3 | radar / mapa / lista, radio 500 m–5 km, 4 filtros, contador, leyenda "mapa simulado" |
 | 2 | Perfil de otro | F-1, F-4 | foto (blur/clear), intención, distancia, verificado/online, ping, seguridad, bloqueo |
 | 3 | Chat | F-5, F-9 | mensajes guionados, typing 1.2 s, revelar foto, bloqueo |
-| 4 | Pings | F-4, F-5 | bandeja, aceptar / rechazar, estado vacío |
-| 5 | Notificaciones | F-6 | badge, eventos, marcar leído / todo leído, "sin push real" |
+| 4 | Pings | F-4, F-5 | bandeja con recibidos (aceptar / rechazar) y enviados con estado “Enviado / esperando respuesta”, sin segunda acción de envío, estado vacío |
+| 5 | Notificaciones | F-6 | badge, eventos, marcar leído / todo leído, abrir el centro marca todo leído, "sin push real" |
 | 6 | Ajustes | F-1, F-7, F-8, F-12 | perfil propio, intención, Instagram (3 estados), fantasma, reiniciar demo |
 | 7 | Privacidad | F-11 | `privacy.noHistory` verbatim, sin ubicación real, sin persistencia |
 | 8 | Acerca de | F-15, SC-8 | marca, datasetId, schemaVersion, hoja "Qué es simulado" (8 ítems) |
@@ -143,9 +147,9 @@ install.
 | 1 | Perfil + 4 intenciones | Elegir "Actividades" se refleja en el perfil y en el filtro por defecto |
 | 2 | Radar / mapa / lista | 10 puntos, mismas distancias, orden asc, leyenda "mapa simulado", reduced-motion estático |
 | 3 | Radio + 4 filtros | 500 m deja solo ≤ 500 m; combinación imposible → vacío + "Limpiar filtros" |
-| 4 | Ping | "Enviado" e inhabilitado al segundo intento; entrante a 3.0 s; badge sube |
+| 4 | Ping | "Enviado" e inhabilitado al segundo intento; el enviado aparece en la bandeja con estado pendiente; entrante a 3.0 s; badge sube |
 | 5 | Match + chat | Aceptar → match a 2.5 s → chat; typing 1.2 s; respuesta guionada; rechazar borra el ping |
-| 6 | Notificaciones | Badge = 1, toast 4.0 s, "marcar todo leído" limpia el badge |
+| 6 | Notificaciones | Badge = 1, toast 4.0 s, abrir el centro limpia el badge (`MARK_NOTIFICATIONS_READ`), "marcar todo leído" también |
 | 7 | Instagram + verificación | 3 estados ciclables, disclaimer visible, sin OAuth |
 | 8 | Fantasma / pausa | Banner persistente y pings deshabilitados |
 | 9 | Blur + revelación | Reveal propio → el par a 1.5 s; sin reveal propio el otro sigue blurred |
@@ -194,15 +198,27 @@ del sitio (case-insensitive, por nombre y por extensión):
 - cualquier segmento `node_modules/`
 
 Hosts prohibidos en el texto del artefacto: `gstatic.com`, `googleapis.com`,
-`firebase*`, `unsplash.com`, `instagram.com`, `facebook.com`, `cdn.*`.
+`eascdn.net`, `firebase*`, `unsplash.com`, `instagram.com`, `facebook.com`, `cdn.*`.
 
-Excepción acotada: los archivos de framework de Flutter (`flutter.js`,
-`flutter_bootstrap.js`, `flutter_service_worker.js`, `main.dart.js`) embeben los
-fallbacks del loader del engine — `https://www.gstatic.com/flutter-canvaskit` y
-`https://fonts.gstatic.com/s/` — que **no** son requests de la app (CanvasKit se sirve
-local vía `canvasKitBaseUrl`). Sólo se ignoran esas cadenas exactas dentro de esos
-archivos; cualquier otro host o URL externa, y cualquier secreto, sigue bloqueando el
-artefacto. Cubierto por `scripts/lib/denylist.test.mjs`.
+Excepciones acotadas (cada una cubierta por `scripts/lib/denylist.test.mjs`):
+
+1. **Fallbacks del loader de Flutter.** `flutter.js`, `flutter_bootstrap.js`,
+   `flutter_service_worker.js` y `main.dart.js` embeben dos defaults del engine:
+   `https://www.gstatic.com/flutter-canvaskit` (el loader lo concatena con la revisión;
+   el engine ya trae la revisión de 40 hex en el path) y `https://fonts.gstatic.com/s/`
+   (la Inter va bundleada; el default sólo se usaría para glifos ausentes). CanvasKit se
+   sirve local vía `canvasKitBaseUrl`. Se ignoran **sólo esas formas exactas**: el
+   prefijo de CanvasKit tiene que estar entre comillas o seguido de `/revisión/`, y la
+   fuente tiene que terminar en la cadena. Un pedido real
+   (`https://fonts.gstatic.com/s/inter/v13/x.woff2`) no coincide y bloquea el artefacto.
+2. **Código muerto de Expo Go.** El bundle web de Expo incluye, desde `expo-asset`
+   (`AssetSources.js`), `https://classic-assets.eascdn.net/~assets/${…}` dentro de
+   `if (NativeModules['ExponentKernel'])`. `ExponentKernel` sólo existe en el cliente
+   nativo de Expo Go: en web la rama nunca se ejecuta, así que no es un request. Se ignora
+   únicamente esa forma exacta (prefijo de template literal con `${`) y sólo en
+   `expo/_expo/static/js/web/*.js`; cualquier otro uso de `eascdn.net` falla.
+
+Cualquier otro host o URL externa, en cualquier archivo, sigue bloqueando el artefacto.
 
 Patrones de secreto prohibidos: claves `AIza…`, `BEGIN … PRIVATE KEY`, `private_key`,
 `client_secret`, `apiKey` con valor.
@@ -227,12 +243,15 @@ apps ni la landing hardcodean el host. `/`, `/flutter/` y `/expo/` son directori
 
 Un único workflow (`.github/workflows/pages.yml`) publica un único artefacto de Pages:
 landing en `/`, Flutter en `/flutter/`, Expo en `/expo/`. `configure-pages` resuelve el
-base path antes de los builds; validación, drift, tests, builds y auditoría del
-artefacto bloquean el upload (nunca hay deploy parcial). `pages:write` e
-`id-token:write` viven sólo en el job de deploy y el workflow **no habilita Pages**.
+base path antes de los builds; lectura del sitio con `pages: read` a nivel workflow,
+mientras `pages: write` e `id-token: write` viven **sólo** en el job de deploy.
+Validación, drift, tests, builds y auditoría del artefacto bloquean el upload (nunca hay
+deploy parcial). El workflow **no habilita Pages**.
 
-Sin `Pages → Source: GitHub Actions` el job `build` falla en `configure-pages`, a
-propósito. Pasos manuales, verificación y rollback: [`../docs/pages-handoff.md`](../docs/pages-handoff.md).
+Pages está habilitado con `Source: GitHub Actions`; el primer deploy queda pendiente de
+la primera corrida del workflow. Si el sitio se deshabilita, el job `build` falla en
+`configure-pages`, a propósito. Pasos, verificación y rollback:
+[`../docs/pages-handoff.md`](../docs/pages-handoff.md).
 
 ## 14. Evidencia de verificación (paridad 15 puntos)
 
@@ -245,9 +264,9 @@ un navegador real y queda pendiente hasta la revisión con DevTools + lector de 
 | 1 | golden (`SET_SELF_INTENTION`), 4 intenciones válidas en `validate-fixtures` | cambio reflejado en perfil y filtro |
 | 2 | Flutter: radar con 10 puntos accesibles y reduced-motion estático | mismo orden/distancias en las 3 vistas de Expo |
 | 3 | `selectors.test.ts` / `selectors_test.dart`: radio 500 m, filtros y vacío | CTA “Limpiar filtros” en ambas |
-| 4 | golden timers + widget test de ping enviado/deshabilitado | ping entrante a 3.0 s en Expo |
+| 4 | golden timers + widget test de ping enviado/deshabilitado + bandeja con el enviado y su estado | ping entrante a 3.0 s en Expo |
 | 5 | golden (`ACCEPT_PING`, `SEND_MESSAGE`, `REJECT_PING`) | overlay de match a 2.5 s |
-| 6 | golden de notificaciones + `unreadCount` | badge y toast de 4.0 s |
+| 6 | golden `MARK_NOTIFICATIONS_READ` + widget test “abrir el centro limpia el badge” | badge y toast de 4.0 s |
 | 7 | `SET_VERIFICATION` en golden; disclaimer obligatorio en `validate-fixtures` | 3 estados ciclables |
 | 8 | `pingBlockedReason('paused')`; golden `TOGGLE_GHOST` | banner persistente |
 | 9 | `avatarState` / `isRevealed`; golden `REVEAL_PHOTO` | reveal del par a 1.5 s |
@@ -255,7 +274,7 @@ un navegador real y queda pendiente hasta la revisión con DevTools + lector de 
 | 11 | sin pantalla/modelo de historial; `privacy.noHistory` obligatorio | copy visible en privacidad |
 | 12 | widget test de reset; `store.test.ts` cancela timers | refresh en el navegador |
 | 13 | 360×640 sin overflow; labels con nombre + distancia + badges | 320/480/768/1440 y foco con teclado |
-| 14 | denylist de hosts en el artefacto; cero storage/fetch en el código | Network con dominios externos |
+| 14 | denylist de hosts en el artefacto (gstatic/`eascdn` con allowlist acotada); cero storage/fetch en el código; `lang="es"` en los tres documentos | Network con dominios externos |
 | 15 | widget test del chip DEMO y los 8 ítems | chip persistente en todas las pantallas |
 
 Automatizado y reproducible:

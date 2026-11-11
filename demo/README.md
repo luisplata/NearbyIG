@@ -140,14 +140,18 @@ Un único workflow (`.github/workflows/pages.yml`) publica un único artefacto:
 - Dispara en `push` a `main`, en `pull_request` y con `workflow_dispatch`. Los PR sólo
   corren `checks`: nunca publican.
 - `actions/configure-pages@v5` corre **antes** de los builds y aporta el base path real
-  (vacío en sitio de usuario, `/NearbyIG` en sitio de proyecto).
+  (vacío en sitio de usuario, `/NearbyIG` en sitio de proyecto). Lee el sitio con
+  `pages: read` declarado a nivel workflow; los jobs que no construyen (checks) no lo
+  ejecutan.
 - Gate previo al upload: `validate-fixtures`, `sync --check`, tests de tooling,
   typecheck/tests de Expo, analyze/tests de Flutter, export, build y
-  `assemble-site.mjs --strict site` (3 `index.html` + denylist + hosts + datasetId).
+  `assemble-site.mjs --strict site` (3 `index.html` + denylist + hosts + datasetId +
+  `lang="es"` del documento de Expo).
 - `pages:write` e `id-token:write` viven **sólo** en el job `deploy`; environment
   `github-pages`; `timeout-minutes: 25`.
-- **No habilita Pages.** Si todavía no está habilitado, el workflow falla antes de
-  construir. Los pasos manuales están en [`docs/pages-handoff.md`](../docs/pages-handoff.md).
+- **No habilita Pages.** Pages ya está habilitado en el repo con Source: GitHub Actions;
+  el primer deploy queda pendiente de la primera corrida del workflow. Runbook y
+  verificación en [`docs/pages-handoff.md`](../docs/pages-handoff.md).
 
 Comandos equivalentes a mano:
 
@@ -193,3 +197,14 @@ MSYS_NO_PATHCONV=1 PAGES_BASE_PATH=/NearbyIG node scripts/assemble-site.mjs --st
 - Nada de `lat`/`lng`, URLs externas, binarios de retratos ni configuración Firebase.
 - El ZIP del prototipo queda gitignored: sólo se extrajo `public/icon.svg`.
 - Un cambio de copy o de fixtures se propaga regenerando, no copiando strings.
+
+## Advertencias conocidas
+
+- `npm audit` en `demo/expo-demo` reporta 3 avisos moderados (`minimatch` vía
+  `@expo/fingerprint`). El fix exige un downgrade breaking de la cadena de Expo, así que
+  queda como warning rastreado: no se aplica y no bloquea el deploy. El artefacto se
+  audita igual por denylist, hosts y secretos en `assemble-site.mjs --strict`.
+- El motor de Flutter embebe los defaults `canvasKitBaseUrl`/`fontFallbackBaseUrl` y el
+  bundle de Expo incluye el asset URL de Expo Go (código muerto). No son requests de la
+  demo: quedan como excepciones exactas y acotadas en `scripts/lib/denylist.mjs`
+  (`demo/CONTRACT.md` §11). La auditoría de red real sigue pendiente de navegador (W3).

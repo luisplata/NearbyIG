@@ -1,18 +1,26 @@
 # Handoff — publicar las demos en GitHub Pages
 
-Estado: **Pages no está habilitado**. El workflow `.github/workflows/pages.yml` está
-commiteado y listo, pero publicar es un paso manual del dueño del repo. El workflow
-**no** habilita Pages por sí mismo.
+Estado: **Pages habilitado** con **Source: GitHub Actions** (`gh api repos/luisplata/NearbyIG/pages`
+devuelve `build_type: workflow`). **El primer deploy queda pendiente de la primera
+corrida del workflow**: hasta que ese run termine en verde no hay sitio vivo, y ninguna
+URL de este documento debe darse por publicada todavía.
 
-## 1. Habilitar Pages (una sola vez)
+El workflow `.github/workflows/pages.yml` está commiteado y publica en cada push a
+`main`; **no** habilita Pages por sí mismo (el sitio ya existe; el workflow sólo sube
+artefactos).
 
-1. Abrir `https://github.com/luisplata/NearbyIG/settings/pages`.
-2. En **Build and deployment → Source**, elegir **GitHub Actions**.
-   No elegir “Deploy from a branch”: este repo no publica desde una rama.
-3. Guardar. No hace falta crear un environment: lo crea el primer deploy.
+## 1. Estado del sitio y cómo volver a habilitarlo
 
-Con Pages sin habilitar, el job `build` falla en `actions/configure-pages@v5`
-(`Get Pages site failed`) **antes** de construir nada. No es un bug: es el gate.
+Ya está configurado así, no hace falta repetirlo:
+
+1. `https://github.com/luisplata/NearbyIG/settings/pages`.
+2. **Build and deployment → Source: GitHub Actions** (no “Deploy from a branch”: este
+   repo no publica desde una rama).
+
+Si alguna vez se deshabilita, el job `build` falla en `actions/configure-pages@v5`
+(`Get Pages site failed`) **antes** de construir nada. No es un bug: es el gate. El
+`configure-pages` de ese job lee el sitio con `pages: read` (permiso a nivel workflow);
+publicar sigue exigiendo `pages: write` + `id-token: write`, que sólo están en `deploy`.
 
 ## 2. Publicar
 
@@ -39,6 +47,9 @@ Ningún paso habilita Pages, ni pide secretos, ni hace `git push`.
 
 ## 3. Verificar la publicación
 
+El primer deploy está **pendiente**: estas URLs son las esperadas, no un sitio vivo
+hasta que el run termine en verde.
+
 URLs esperadas (sitio de proyecto):
 
 | Ruta | Contenido |
@@ -57,6 +68,7 @@ Checklist de aceptación:
 5. Los assets de Expo resuelven bajo `/NearbyIG/expo/` y los de Flutter bajo
    `/NearbyIG/flutter/` (sin dobles barras).
 6. La landing responde `noindex` (`<meta name="robots" content="noindex, nofollow">`).
+7. El documento de `/expo/` declara `<html lang="es">` y su `<noscript>` está en español.
 
 Para conocer el datasetId vigente en cualquier momento:
 
@@ -68,7 +80,7 @@ node scripts/validate-fixtures.mjs   # imprime el datasetId del contrato
 
 | Síntoma | Causa probable | Acción |
 |---|---|---|
-| `Get Pages site failed` | Pages no habilitado | paso 1 |
+| `Get Pages site failed` | Pages deshabilitado | re-habilitar `Source: GitHub Actions` (paso 1) |
 | `Resource not accessible by integration` en deploy | falta `pages: write` / `id-token: write` | revisar que los permisos sigan en el job `deploy` |
 | El job `checks` falla en “anti-drift” | un generado quedó desactualizado | `npm run sync` y commitear |
 | 404 de assets en `/flutter/` | build con `--base-href` incorrecto | revisar que `configure-pages` corra antes de los builds |

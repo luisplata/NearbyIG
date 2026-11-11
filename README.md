@@ -43,9 +43,20 @@ persistencia. Runbook en [`demo/README.md`](demo/README.md); contrato vinculante
 pantallas y checklist de paridad de 15 puntos) en [`demo/CONTRACT.md`](demo/CONTRACT.md).
 
 El workflow `.github/workflows/pages.yml` valida el contrato, construye ambas apps,
-audita el artefacto y lo publica. **GitHub Pages todavía no está habilitado**: los pasos
-manuales (Settings → Pages → Source: GitHub Actions), la verificación y el rollback
-están en [`docs/pages-handoff.md`](docs/pages-handoff.md).
+audita el artefacto y lo publica. **GitHub Pages ya está habilitado** (Build and
+deployment → Source: **GitHub Actions**); **el primer deploy queda pendiente de la
+primera corrida del workflow**, así que todavía no hay una URL viva que se pueda dar por
+publicada.
+
+URLs esperadas en cuanto corra el workflow:
+
+| Ruta del sitio | Contenido |
+|---|---|
+| `https://luisplata.github.io/NearbyIG/` | landing con datasetId y enlaces a ambas demos |
+| `https://luisplata.github.io/NearbyIG/flutter/` | demo Flutter web |
+| `https://luisplata.github.io/NearbyIG/expo/` | demo Expo web |
+
+Publicación, verificación y rollback: [`docs/pages-handoff.md`](docs/pages-handoff.md).
 
 ## Repositorio
 
