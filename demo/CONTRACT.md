@@ -248,9 +248,9 @@ mientras `pages: write` e `id-token: write` viven **sólo** en el job de deploy.
 Validación, drift, tests, builds y auditoría del artefacto bloquean el upload (nunca hay
 deploy parcial). El workflow **no habilita Pages**.
 
-Pages está habilitado con `Source: GitHub Actions`; el primer deploy queda pendiente de
-la primera corrida del workflow. Si el sitio se deshabilita, el job `build` falla en
-`configure-pages`, a propósito. Pasos, verificación y rollback:
+Pages está habilitado con `Source: GitHub Actions` y el primer deploy ya se completó.
+Si el sitio se deshabilita, el job `build` falla en `configure-pages`, a propósito.
+Pasos, verificación y rollback:
 [`../docs/pages-handoff.md`](../docs/pages-handoff.md).
 
 ## 14. Evidencia de verificación (paridad 15 puntos)

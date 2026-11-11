@@ -10,17 +10,17 @@ Repositorio raíz del producto. Acá conviven frontend, backend y documentación
 |---------|-----------|--------|
 | `frontend/` | App web / PWA y wrapper nativo (Capacitor) | Pendiente de análisis técnico |
 | `backend/` | API y servicios del producto | Pendiente de análisis técnico |
-| `demo/` | Dos demos mock (Flutter web + Expo web) y landing con contrato compartido | Funcional, publicable en Pages |
+| `demo/` | Dos demos mock (Flutter web + Expo web) y landing con contrato compartido | Publicado en GitHub Pages |
 | `docs/` | Documentación + sitio web publicado con GitHub Actions | Pendiente de análisis técnico |
-| `nearbyig-app-complete.zip` | Snapshot del prototipo generado en AI Studio (backup) | Congelado |
+| `nearbyig-app-complete.zip` | Snapshot del prototipo generado en AI Studio (backup) | Fuera del repo; ignorado por Git |
 
 ## Estado del proyecto
 
-**Fase 0 — estructura inicial.** No hay decisiones técnicas tomadas todavía.
+**Fase 1 — demos mock publicadas.** El producto real (backend, auth, ubicación y tiendas)
+sigue pendiente de implementación.
 
-El zip raíz es el prototipo completo tal cual se generó: React + Vite + Firebase + Capacitor.
-Se conserva como backup y como referencia para el análisis de opciones. No se extrae ni se
-modifica hasta que exista una decisión técnica documentada.
+El prototipo original se conserva como backup local fuera del repositorio y como referencia
+de producto. No se versiona porque contiene material de firma Android.
 
 ## Próximo paso
 
@@ -43,18 +43,18 @@ persistencia. Runbook en [`demo/README.md`](demo/README.md); contrato vinculante
 pantallas y checklist de paridad de 15 puntos) en [`demo/CONTRACT.md`](demo/CONTRACT.md).
 
 El workflow `.github/workflows/pages.yml` valida el contrato, construye ambas apps,
-audita el artefacto y lo publica. **GitHub Pages ya está habilitado** (Build and
-deployment → Source: **GitHub Actions**); **el primer deploy queda pendiente de la
-primera corrida del workflow**, así que todavía no hay una URL viva que se pueda dar por
-publicada.
+audita el artefacto y lo publica. **GitHub Pages está habilitado** (Build and deployment →
+Source: **GitHub Actions**) y el primer deploy ya se completó.
 
-URLs esperadas en cuanto corra el workflow:
+Sitio vivo:
 
-| Ruta del sitio | Contenido |
+| Ruta | Contenido |
 |---|---|
 | `https://luisplata.github.io/NearbyIG/` | landing con datasetId y enlaces a ambas demos |
 | `https://luisplata.github.io/NearbyIG/flutter/` | demo Flutter web |
 | `https://luisplata.github.io/NearbyIG/expo/` | demo Expo web |
+
+Dataset publicado: `ds-0f68eee4` (schema 1). Las tres páginas comparten el mismo contrato.
 
 Publicación, verificación y rollback: [`docs/pages-handoff.md`](docs/pages-handoff.md).
 

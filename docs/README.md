@@ -29,8 +29,8 @@ landing en `/`, demo Flutter en `/flutter/` y demo Expo en `/expo/`. No publica 
 carpeta `docs/`: cuando exista un generador, la documentación irá en `/docs/` sin
 romper `/`, `/flutter/` ni `/expo/`.
 
-Pages ya está habilitado (Source: GitHub Actions); el primer deploy queda pendiente de la
-primera corrida del workflow. Publicación, verificación y rollback:
+Pages ya está habilitado (Source: GitHub Actions) y el primer deploy de las demos ya se
+completó. Publicación, verificación y rollback:
 [`pages-handoff.md`](pages-handoff.md).
 
 ## Contenido esperado

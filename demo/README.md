@@ -150,8 +150,8 @@ Un único workflow (`.github/workflows/pages.yml`) publica un único artefacto:
 - `pages:write` e `id-token:write` viven **sólo** en el job `deploy`; environment
   `github-pages`; `timeout-minutes: 25`.
 - **No habilita Pages.** Pages ya está habilitado en el repo con Source: GitHub Actions;
-  el primer deploy queda pendiente de la primera corrida del workflow. Runbook y
-  verificación en [`docs/pages-handoff.md`](../docs/pages-handoff.md).
+  el primer deploy ya se completó. Runbook y verificación en
+  [`docs/pages-handoff.md`](../docs/pages-handoff.md).
 
 Comandos equivalentes a mano:
 

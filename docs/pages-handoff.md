@@ -1,9 +1,7 @@
 # Handoff — publicar las demos en GitHub Pages
 
-Estado: **Pages habilitado** con **Source: GitHub Actions** (`gh api repos/luisplata/NearbyIG/pages`
-devuelve `build_type: workflow`). **El primer deploy queda pendiente de la primera
-corrida del workflow**: hasta que ese run termine en verde no hay sitio vivo, y ninguna
-URL de este documento debe darse por publicada todavía.
+Estado: **Pages habilitado** con **Source: GitHub Actions** y **primer deploy completado**.
+El workflow corrió en verde y el sitio está vivo. Dataset publicado: `ds-0f68eee4`.
 
 El workflow `.github/workflows/pages.yml` está commiteado y publica en cada push a
 `main`; **no** habilita Pages por sí mismo (el sitio ya existe; el workflow sólo sube
@@ -47,10 +45,11 @@ Ningún paso habilita Pages, ni pide secretos, ni hace `git push`.
 
 ## 3. Verificar la publicación
 
-El primer deploy está **pendiente**: estas URLs son las esperadas, no un sitio vivo
-hasta que el run termine en verde.
+Deploy verificado con `gh run watch 43056915845`: `checks`, `build` y `deploy` en verde.
+Las tres URLs respondieron 200 y el Network del navegador mostró sólo requests al mismo
+origen (CanvasKit, Inter y Roboto locales).
 
-URLs esperadas (sitio de proyecto):
+URLs vivas (sitio de proyecto):
 
 | Ruta | Contenido |
 |---|---|
