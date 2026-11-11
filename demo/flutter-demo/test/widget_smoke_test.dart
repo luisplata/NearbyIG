@@ -1,0 +1,132 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:nearbyig_demo/app.dart';
+import 'package:nearbyig_demo/generated/copy.dart';
+import 'package:nearbyig_demo/generated/fixtures.dart';
+import 'package:nearbyig_demo/state/demo_action.dart';
+import 'package:nearbyig_demo/state/demo_store.dart';
+import 'package:nearbyig_demo/widgets/radar_view.dart';
+
+Future<DemoStore> _pumpApp(WidgetTester tester) async {
+  tester.view.physicalSize = const Size(360, 640);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  final store = DemoStore();
+  addTearDown(store.dispose);
+  await tester.pumpWidget(NearbyDemoApp(store: store));
+  await tester.pump();
+  return store;
+}
+
+void main() {
+  testWidgets('el radar expone 10 puntos con nombre y distancia', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await _pumpApp(tester);
+    expect(find.bySemanticsLabel(RegExp(r', a \d')), findsNWidgets(10));
+    expect(find.bySemanticsLabel(fmt('a11y.radar')), findsOneWidget);
+    handle.dispose();
+  });
+
+  testWidgets('la lista ordena por distancia ascendente', (tester) async {
+    await _pumpApp(tester);
+    await tester.tap(find.byIcon(Icons.view_list_outlined));
+    await tester.pump();
+
+    expect(find.text('Vale'), findsOneWidget);
+    expect(find.text('Nico'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Vale')).dy,
+      lessThan(tester.getTopLeft(find.text('Nico')).dy),
+    );
+    expect(find.text('240 m'), findsOneWidget);
+  });
+
+  testWidgets('el chip DEMO abre la hoja con los 8 ítems de simulación', (
+    tester,
+  ) async {
+    await _pumpApp(tester);
+    await tester.tap(find.text(fmt('common.demoChip')));
+    await tester.pump();
+
+    expect(find.text(fmt('common.simTitle')), findsOneWidget);
+    expect(find.byIcon(Icons.remove_circle_outline), findsNWidgets(8));
+    expect(find.text(fmt('common.simItems.1')), findsOneWidget);
+  });
+
+  testWidgets('a 360×640 ninguna vista ni ajustes desborda', (tester) async {
+    await _pumpApp(tester);
+    for (final icon in <IconData>[
+      Icons.map_outlined,
+      Icons.view_list_outlined,
+      Icons.radar,
+      Icons.person_outline,
+    ]) {
+      await tester.tap(find.byIcon(icon));
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: 'icono $icon');
+    }
+  });
+
+  testWidgets('reiniciar demo restaura el estado inicial', (tester) async {
+    final store = await _pumpApp(tester);
+    store.dispatch(const DemoAction.sendPing('p01'));
+    await tester.pump();
+    expect(store.state.pingsSent, <String>['p01']);
+
+    store.dispatch(const DemoAction.reset());
+    await tester.pump();
+    expect(store.state.pingsSent, isEmpty);
+    expect(store.pendingTimers, 0);
+  });
+
+  testWidgets('el ping muestra toast y deshabilita el segundo envío', (
+    tester,
+  ) async {
+    final store = await _pumpApp(tester);
+    await tester.tap(find.byIcon(Icons.view_list_outlined));
+    await tester.pump();
+    await tester.tap(find.text('Vale'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, fmt('profile.ping')));
+    await tester.pump();
+
+    expect(store.state.pingsSent, <String>['p01']);
+    expect(find.text(fmt('ping.sent')), findsOneWidget);
+    expect(
+      find.widgetWithText(FilledButton, fmt('profile.pingSent')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, fmt('profile.pingSent')),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    // Cierra los timers abiertos para no dejar pendientes al terminar el test.
+    store.dispatch(const DemoAction.reset());
+    await tester.pump();
+  });
+
+  testWidgets('con movimiento reducido el radar no anima', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(
+            disableAnimations: true,
+            size: Size(360, 360),
+          ),
+          child: Scaffold(
+            body: RadarView(profiles: kProfiles, radiusM: 5000, onOpen: (_) {}),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(RadarView), findsOneWidget);
+  });
+}
