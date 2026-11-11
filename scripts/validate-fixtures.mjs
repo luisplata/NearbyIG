@@ -19,7 +19,9 @@ import { fileURLToPath } from 'node:url';
 import { datasetIdOf } from './lib/canonical.mjs';
 import { SECRET_PATTERNS } from './lib/denylist.mjs';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = resolve(
+  process.env.NEARBYIG_CONTRACT_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), '..'),
+);
 const SHARED = join(ROOT, 'demo', 'shared');
 
 const EXPECTED_TIMERS = {
