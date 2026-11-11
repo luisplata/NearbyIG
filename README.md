@@ -54,7 +54,12 @@ Sitio vivo:
 | `https://luisplata.github.io/NearbyIG/flutter/` | demo Flutter web |
 | `https://luisplata.github.io/NearbyIG/expo/` | demo Expo web |
 
-Dataset publicado: `ds-0f68eee4` (schema 1). Las tres páginas comparten el mismo contrato.
+Dataset publicado: `ds-ddca69e0` (schema 2). Las tres páginas comparten el mismo contrato.
+
+Las demos arrancan en la **lista** (Lista → Radar → Mapa → Pings → Perfil), usan tres
+intenciones —amistad, actividades y networking— y toman su posicionamiento "Cowork Social
+Club Café" del catálogo de copy (`landing.eyebrow`, `about.club`, `about.positioning`).
+Es estilo y tono: el nombre, el icono, el bundle id y las URLs no cambian.
 
 Publicación, verificación y rollback: [`docs/pages-handoff.md`](docs/pages-handoff.md).
 

@@ -51,7 +51,7 @@ flowchart TD
 | **F1.1** | Repo, CI y secretos | Sacar el ZIP con keystore del historial, branch protection, CI, entornos y secretos fuera del repo. | F0.5 | 1 |
 | **F1.2** | Esqueleto backend | NestJS modular, Docker Compose con PostGIS, migraciones, health checks y configuración por entorno. | F1.1 | 1 |
 | **F1.3** | Cuenta y acceso | Registro/login con Apple, Google o email; sesión; eliminación de cuenta; gate 18+; consentimiento legal. | F1.2 | 1 |
-| **F1.4** | Perfil e intenciones | Nickname, fotos, estado, las 4 intenciones (networking, amistad, citas, actividades), género y audiencia. | F1.3 | 1 |
+| **F1.4** | Perfil e intenciones | Nickname, fotos, estado, las 3 intenciones (amistad, actividades, networking), género y audiencia. | F1.3 | 1 |
 | **F1.5** | Medios | Subida, compresión, variante desenfocada, almacenamiento S3/R2 y URLs firmadas. | F1.4 | 1 |
 | **F1.6** | Operación base | Logs, errores, uptime, backups, restore probado, alertas de presupuesto y feature flags. | F1.2 | 1 |
 | **F2.1** | Presencia y ubicación | Actualización foreground, fila vigente por usuario, vencimiento, invalidación por pausa y **sin historial de ruta**. | F1.4 | 2 |

@@ -128,6 +128,14 @@ main {
   padding: var(--space-4) 0;
 }
 
+/* Eyebrow de posicionamiento: único uso del acento cálido en la landing. */
+.eyebrow {
+  color: var(--color-accent-warm);
+  font-size: var(--font-size-2);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
 .hero h1 {
   background: linear-gradient(
     100deg,

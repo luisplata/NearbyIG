@@ -1,7 +1,8 @@
 # Handoff — publicar las demos en GitHub Pages
 
 Estado: **Pages habilitado** con **Source: GitHub Actions** y **primer deploy completado**.
-El workflow corrió en verde y el sitio está vivo. Dataset publicado: `ds-0f68eee4`.
+El workflow corrió en verde y el sitio está vivo. Dataset en el artefacto: `ds-ddca69e0`
+(schema 2).
 
 El workflow `.github/workflows/pages.yml` está commiteado y publica en cada push a
 `main`; **no** habilita Pages por sí mismo (el sitio ya existe; el workflow sólo sube
