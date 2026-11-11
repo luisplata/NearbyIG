@@ -101,6 +101,8 @@ PAGES_BASE_PATH="" node scripts/assemble-site.mjs
 
 - `demo/shared/*.json` es la única fuente de fixtures, copy, tokens y avatares. No se
   edita lo generado (`lib/generated/`, `src/generated/`, `landing/generated/`, `assets/`).
+- No corras `dart format` ni `prettier` sobre los generados: el gate de drift los compara
+  byte a byte y el formateo los reescribiría.
 - Nada de `lat`/`lng`, URLs externas, binarios de retratos ni configuración Firebase.
 - El ZIP del prototipo queda gitignored: sólo se extrajo `public/icon.svg`.
 - Un cambio de copy o de fixtures se propaga regenerando, no copiando strings.
