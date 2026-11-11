@@ -36,15 +36,28 @@ export const TEXT_EXTENSIONS = [
 
 /**
  * Fallbacks del **loader del engine de Flutter**. No son requests de la app: el
- * build usa CanvasKit local (`canvasKitBaseUrl` en `index.html`), así que estas
- * cadenas sólo se materializarían si esa configuración se perdiera. Se permiten
- * únicamente dentro de los archivos de framework que las embeben (ver
- * `FLUTTER_FRAMEWORK_FILE`); un host prohibido en cualquier otro archivo, o una
- * URL externa distinta dentro de esos archivos, sigue siendo un ofensor.
+ * build usa CanvasKit local (`canvasKitBaseUrl` en `index.html`) y la fuente Inter
+ * va bundleada, así que estas cadenas sólo se materializarían si esa configuración
+ * se perdiera. Se permiten únicamente las **formas exactas** que el engine embebe
+ * como default y sólo dentro de los archivos de framework (ver
+ * `FLUTTER_FRAMEWORK_FILE`); una URL real con ese host y un path distinto —o el
+ * mismo host en cualquier otro archivo— sigue siendo un ofensor.
  */
-export const FLUTTER_LOADER_FALLBACKS = [
-  'https://www.gstatic.com/flutter-canvaskit',
-  'https://fonts.gstatic.com/s/',
+export const FLUTTER_LOADER_FALLBACK_PATTERNS = [
+  {
+    label: 'canvasKitBaseUrl default',
+    // Dos formas reales: el loader embebe el prefijo solo
+    // (`I("https://www.gstatic.com/flutter-canvaskit", engineRevision)`) y el
+    // engine embebe el default ya resuelto con la revisión de 40 hex. Ninguna es
+    // un pedido de la app: `canvasKitBaseUrl` apunta a `canvaskit/` local.
+    pattern: /https:\/\/www\.gstatic\.com\/flutter-canvaskit(?:\/[0-9a-f]{40}\/|(?=["'`]))/g,
+  },
+  {
+    label: 'fontFallbackBaseUrl default',
+    // Default de `fontFallbackBaseUrl`: la cadena termina ahí (`".../s/"`). Un
+    // pedido real (p. ej. `.../s/inter/v13/x.woff2`) no coincide y falla el gate.
+    pattern: /https:\/\/fonts\.gstatic\.com\/s\/(?=["'`])/g,
+  },
 ];
 
 /** Archivos del engine/loader de Flutter donde viven esos fallbacks. */
@@ -52,18 +65,35 @@ const FLUTTER_FRAMEWORK_FILE =
   /^(?:main\.dart\.js|flutter(?:\.js|_bootstrap\.js|_service_worker\.js))$/i;
 
 /**
- * Quita los fallbacks conocidos del loader cuando `relativePath` es un archivo
- * de framework de Flutter. Devuelve el texto tal cual en cualquier otro caso.
+ * Código muerto de **Expo Go** embebido por `expo-asset` en el bundle web
+ * (`AssetSources.js` → `if (NativeModules['ExponentKernel'])`). `ExponentKernel`
+ * sólo existe dentro del cliente nativo de Expo Go: en web la rama nunca se
+ * ejecuta, así que la URL no es un request de la app. Se permite únicamente la
+ * forma exacta (prefijo de template literal con `${`) y sólo en el bundle web de
+ * Expo; cualquier otro uso de `eascdn.net` bloquea el artefacto.
  */
-export function stripFlutterLoaderFallbacks(relativePath, text) {
+export const EXPO_GO_DEAD_CODE = {
+  label: 'expo-go classic-assets',
+  path: /(?:^|\/)expo\/_expo\/static\/js\/web\/[\w.-]+\.js$/i,
+  pattern: /https:\/\/classic-assets\.eascdn\.net\/~assets\/\$\{/g,
+};
+
+/**
+ * Quita sólo las formas exactas conocidas cuando `relativePath` corresponde al
+ * archivo donde el framework las embebe. Devuelve el texto tal cual en cualquier
+ * otro caso.
+ */
+export function stripKnownDeadCode(relativePath, text) {
   const posix = toPosix(relativePath);
   const base = posix.split('/').pop() ?? posix;
-  if (!FLUTTER_FRAMEWORK_FILE.test(base)) {
-    return text;
-  }
   let out = text;
-  for (const token of FLUTTER_LOADER_FALLBACKS) {
-    out = out.split(token).join('');
+  if (FLUTTER_FRAMEWORK_FILE.test(base)) {
+    for (const entry of FLUTTER_LOADER_FALLBACK_PATTERNS) {
+      out = out.replace(entry.pattern, '');
+    }
+  }
+  if (EXPO_GO_DEAD_CODE.path.test(posix)) {
+    out = out.replace(EXPO_GO_DEAD_CODE.pattern, '');
   }
   return out;
 }
@@ -71,6 +101,7 @@ export function stripFlutterLoaderFallbacks(relativePath, text) {
 export const FORBIDDEN_HOSTS = [
   { label: 'gstatic.com', pattern: /gstatic\.com/i },
   { label: 'googleapis.com', pattern: /googleapis\.com/i },
+  { label: 'eascdn.net', pattern: /eascdn\.net/i },
   { label: 'firebase', pattern: /\bfirebase[a-z0-9-]*\.(?:com|io|app)\b/i },
   { label: 'unsplash.com', pattern: /unsplash\.com/i },
   { label: 'instagram.com', pattern: /instagram\.com/i },
@@ -126,13 +157,13 @@ export function isTextFile(fileName) {
 /**
  * Devuelve `{ kind, label, match }` para cada host o secreto encontrado en
  * `text`. Los secretos se escanean siempre sobre el texto original; los hosts
- * ignoran los fallbacks del loader de Flutter cuando se pasa `path` y el archivo
- * es parte del framework (ver `FLUTTER_LOADER_FALLBACKS`).
+ * ignoran las formas exactas de código muerto conocidas cuando se pasa `path`
+ * (ver `stripKnownDeadCode`).
  */
 export function scanText(text, { hosts = true, secrets = true, path = '' } = {}) {
   const findings = [];
   if (hosts) {
-    const hostText = path ? stripFlutterLoaderFallbacks(path, text) : text;
+    const hostText = path ? stripKnownDeadCode(path, text) : text;
     for (const rule of FORBIDDEN_HOSTS) {
       const match = rule.pattern.exec(hostText);
       if (match) findings.push({ kind: 'host', label: rule.label, match: match[0].slice(0, 120) });
