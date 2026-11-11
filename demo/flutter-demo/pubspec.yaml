@@ -1,0 +1,31 @@
+name: nearbyig_demo
+description: Demo mock de NearbyIG en Flutter web. Sin backend, sin red, sin persistencia.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+# SDK-only: la demo no usa paquetes de terceros. Todo lo generado entra por
+# `node scripts/sync-demo-assets.mjs` (ver demo/CONTRACT.md).
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/brand/
+
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600

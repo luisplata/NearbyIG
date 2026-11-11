@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <!--
+    Base path: `$FLUTTER_BASE_HREF` lo reemplaza Flutter con el valor de
+    `--base-href`. Nunca se hardcodea el repo ni el host (ver demo/CONTRACT.md §12).
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Demo mock de NearbyIG: datos ficticios, sin backend ni red.">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="NearbyIG Demo">
+  <link rel="apple-touch-icon" href="assets/assets/brand/icon-192.png">
+
+  <!-- Favicon derivado del icono de marca compartido (no se duplica el binario). -->
+  <link rel="icon" type="image/png" href="assets/assets/brand/icon-192.png">
+
+  <title>NearbyIG Demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #09090B; }
+    body { overscroll-behavior: none; }
+    noscript { display: block; padding: 24px; color: #F4F4F5; font: 15px/1.5 system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <noscript>Esta demo necesita JavaScript. No hay red ni servicios: todos los datos son ficticios.</noscript>
+  <script>
+    // CanvasKit local: evita que el motor pida el runtime a un CDN (cero red externa).
+    window.flutterConfiguration = { canvasKitBaseUrl: 'canvaskit/' };
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

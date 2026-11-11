@@ -102,7 +102,7 @@ nunca confía en la UI.
 | Acción | Guard | Cambios |
 |---|---|---|
 | `SET_VIEW` | `view` válido | `view`, cierra `overlay` si era `filters` |
-| `SET_SELF_INTENTION` | intención válida | `selfIntention`; `filters.intentions=null` para que el descubrimiento use la intención propia |
+| `SET_SELF_INTENTION` | intención válida | `selfIntention`; `filters.intentions=[selfIntention]` para que el descubrimiento la use como filtro por defecto (F-1) |
 | `OPEN_OVERLAY` | `overlay` válido; `profile`/`safety` requieren `profileId` visible y no bloqueado | `overlay`, `profileId` |
 | `CLOSE_OVERLAY` | — | `overlay=null`, `profileId=null` (mantiene `chatId` sólo si el overlay era `chat`) |
 | `SET_RADIUS` | valor de `fixtures.filters.radiiM` | `filters.radiusM` |
@@ -158,7 +158,7 @@ nuevo con la misma clave **reemplaza** al anterior (reprograma). `RESET`, el des
 
 | Selector | Semántica |
 |---|---|
-| `visibleProfiles(state)` | `profiles − blocked`, filtrados por `radiusM` (`distanceM <= radiusM`), intención (`filters.intentions` si no es `null`, si no `selfIntention`), género (`gender !== 'all'`), `verifiedOnly` y `onlineOnly`; orden `distanceM` asc, empate por `id` asc |
+| `visibleProfiles(state)` | `profiles − blocked`, filtrados por `radiusM` (`distanceM <= radiusM`), intención (`filters.intentions`; `null` = sin filtro, se ven los 10 perfiles del dataset), género (`gender !== 'all'`), `verifiedOnly` y `onlineOnly`; orden `distanceM` asc, empate por `id` asc |
 | `profileById(state, id)` | perfil de `fixtures.profiles` o `null` |
 | `unreadCount(state)` | notificaciones `read === false` |
 | `canPing(state, id)` | `!ghost` y perfil visible y no en `pingsSent`/`matches` y no bloqueado |
@@ -211,7 +211,9 @@ Reglas de serialización (idénticas en ambos lenguajes):
 - `null` → `-`; booleanos → `1` / `0`.
 - Listas → elementos ordenados asc, separados por `,`; lista vacía → `-`.
 - `filter.intentions` → `null` = `-`, si no las intenciones en el orden de `filters.intentions` del dataset.
-- `messages` → claves asc, cada una `id:from=textKey` unidos por `;`.
+- `messages` → chats por `id` ascendente, cada uno `id:` seguido de sus mensajes
+  `from=textKey` unidos por `+`; los chats se unen por `;`. Sin chats → `-`. Un match
+  sin mensajes queda como `id:`.
 - `notifications` → `id:kind:profileId:read` en orden de creación, unidos por `;`.
 - `toast` → `id:textKey` o `-`.
 - El resultado se une con `\n` (sin línea final) y se hashea con UTF-8 y sha256.

@@ -49,13 +49,26 @@ node scripts/sync-demo-assets.mjs --target landing    # solo landing
 node scripts/sync-demo-assets.mjs --no-raster         # reusa los PNG de marca ya commiteados
 ```
 
+## Golden de paridad
+
+`demo/shared/golden/expected.json` tiene un único productor: el dumper de Dart.
+Se corre desde `demo/flutter-demo`, después del sync, y la demo Expo compara sus
+digests contra ese archivo.
+
+```bash
+node scripts/sync-demo-assets.mjs
+(cd demo/flutter-demo && dart run tool/dump_golden.dart)   # regenera shared/golden/expected.json
+node scripts/sync-demo-assets.mjs                          # copia el expected.json a test/golden/
+(cd demo/flutter-demo && flutter test test/reducer_golden_test.dart)
+```
+
 ## Apps
 
 ```bash
 # Flutter web (desarrollo)
 (cd demo/flutter-demo && flutter run -d chrome --web-port 4180)
 
-# Flutter web (build de producción, base href sin barra final)
+# Flutter web (build de producción; --base-href con barra inicial y final)
 (cd demo/flutter-demo && flutter pub get && flutter analyze && flutter test)
 (cd demo/flutter-demo && flutter build web --release --pwa-strategy=none --base-href "/flutter/")
 

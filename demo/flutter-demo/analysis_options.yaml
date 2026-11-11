@@ -1,0 +1,22 @@
+# Reglas inline: la demo no depende de `flutter_lints` (SDK-only).
+# `exclude` protege los generados: se comparan byte a byte con el sync de assets.
+analyzer:
+  exclude:
+    - lib/generated/**
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    - always_declare_return_types
+    - avoid_print
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - prefer_final_locals
+    - prefer_single_quotes
+    - require_trailing_commas
+    - unawaited_futures
+    - unnecessary_lambdas
+    - use_super_parameters
