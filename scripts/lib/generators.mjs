@@ -435,7 +435,7 @@ export function dartPhotoMapFile(photos) {
 
 // --- Dart: dataset --------------------------------------------------------
 
-export function dartDatasetFile(datasetId, schemaVersion) {
+export function dartDatasetFile(datasetId, schemaVersion, demoVersion) {
   const lines = [];
   lines.push(banner('fixtures.json + copy.json + design-tokens.json + photos.json'));
   lines.push('/// Identificador estable derivado del contenido del contrato.');
@@ -443,6 +443,9 @@ export function dartDatasetFile(datasetId, schemaVersion) {
   lines.push(`const String kDatasetId = ${dartString(datasetId)};`);
   lines.push('');
   lines.push(`const int kDatasetSchemaVersion = ${dartInt(schemaVersion)};`);
+  lines.push('');
+  lines.push('/// Versión del repo (package.json); se muestra en "Acerca de".');
+  lines.push(`const String kDemoVersion = ${dartString(demoVersion)};`);
   return `${lines.join('\n')}\n`;
 }
 
@@ -507,7 +510,7 @@ export function tsPhotoMapFile(photos) {
   );
 }
 
-export function tsDatasetFile(datasetId, schemaVersion) {
+export function tsDatasetFile(datasetId, schemaVersion, demoVersion) {
   return (
     banner('fixtures.json + copy.json + design-tokens.json + photos.json') +
     'export const datasetId = ' +
@@ -515,6 +518,10 @@ export function tsDatasetFile(datasetId, schemaVersion) {
     ';\n' +
     'export const schemaVersion = ' +
     JSON.stringify(schemaVersion) +
+    ';\n\n' +
+    '/** Versión del repo (package.json); se muestra en "Acerca de". */\n' +
+    'export const demoVersion = ' +
+    JSON.stringify(demoVersion) +
     ';\n'
   );
 }
@@ -575,21 +582,21 @@ export function landingDatasetJs(datasetId, schemaVersion, copy) {
 /**
  * Todos los generados, por target. El sync escribe sólo los targets que existen.
  */
-export function buildGeneratedFiles({ fixtures, copy, tokens, photos, datasetId }) {
+export function buildGeneratedFiles({ fixtures, copy, tokens, photos, datasetId, demoVersion }) {
   return {
     flutter: {
       'lib/generated/tokens.dart': dartTokensFile(tokens),
       'lib/generated/fixtures.dart': dartFixturesFile(fixtures),
       'lib/generated/copy.dart': dartCopyFile(copy),
       'lib/generated/photo_map.dart': dartPhotoMapFile(photos),
-      'lib/generated/dataset.dart': dartDatasetFile(datasetId, fixtures.schemaVersion),
+      'lib/generated/dataset.dart': dartDatasetFile(datasetId, fixtures.schemaVersion, demoVersion),
     },
     expo: {
       'src/generated/tokens.ts': tsTokensFile(tokens),
       'src/generated/fixtures.ts': tsFixturesFile(fixtures),
       'src/generated/copy.ts': tsCopyFile(copy),
       'src/generated/photoMap.ts': tsPhotoMapFile(photos),
-      'src/generated/dataset.ts': tsDatasetFile(datasetId, fixtures.schemaVersion),
+      'src/generated/dataset.ts': tsDatasetFile(datasetId, fixtures.schemaVersion, demoVersion),
     },
     landing: {
       'generated/dataset.js': landingDatasetJs(datasetId, fixtures.schemaVersion, copy),

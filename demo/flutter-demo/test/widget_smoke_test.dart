@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nearbyig_demo/app.dart';
 import 'package:nearbyig_demo/generated/copy.dart';
+import 'package:nearbyig_demo/generated/dataset.dart';
 import 'package:nearbyig_demo/generated/fixtures.dart';
 import 'package:nearbyig_demo/state/demo_action.dart';
 import 'package:nearbyig_demo/state/demo_store.dart';
@@ -110,6 +111,37 @@ void main() {
     // Cierra los timers abiertos para no dejar pendientes al terminar el test.
     store.dispatch(const DemoAction.reset());
     await tester.pump();
+  });
+
+  testWidgets('acerca de muestra datasetId, esquema y versión', (tester) async {
+    await _pumpApp(tester);
+    await tester.tap(find.byIcon(Icons.person_outline));
+    await tester.pump();
+    await tester.ensureVisible(find.text(fmt('settings.about')));
+    await tester.pump();
+    await tester.tap(find.text(fmt('settings.about')));
+    await tester.pump();
+
+    expect(find.text(kDatasetId), findsOneWidget);
+    expect(find.text('$kDatasetSchemaVersion'), findsOneWidget);
+    expect(find.text(fmt('about.version')), findsOneWidget);
+    expect(find.text(kDemoVersion), findsOneWidget);
+  });
+
+  testWidgets('la tarjeta anuncia verificado y en línea con copy del catálogo', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await _pumpApp(tester);
+    await tester.tap(find.byIcon(Icons.view_list_outlined));
+    await tester.pump();
+
+    expect(
+      find.bySemanticsLabel(RegExp(fmt('a11y.verified'))),
+      findsWidgets,
+    );
+    expect(find.bySemanticsLabel(RegExp(fmt('a11y.online'))), findsWidgets);
+    handle.dispose();
   });
 
   testWidgets('con movimiento reducido el radar no anima', (tester) async {

@@ -205,6 +205,7 @@ async function main() {
   const copy = readJson('demo/shared/copy.json');
   const tokens = readJson('demo/shared/design-tokens.json');
   const photos = readJson('demo/shared/photos.json');
+  const demoVersion = readJson('package.json').version;
 
   const datasetId = datasetIdOf({ fixtures, copy, designTokens: tokens, photos });
   log(`  dataset   ${datasetId}`);
@@ -232,7 +233,7 @@ async function main() {
     }
   }
 
-  const generated = buildGeneratedFiles({ fixtures, copy, tokens, photos, datasetId });
+  const generated = buildGeneratedFiles({ fixtures, copy, tokens, photos, datasetId, demoVersion });
 
   for (const target of selectedTargets) {
     const { root, label } = TARGETS[target];

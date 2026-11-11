@@ -5,6 +5,9 @@
 
 /// Identificador estable derivado del contenido del contrato.
 /// Debe coincidir con el de la landing y con el de la demo Expo.
-const String kDatasetId = 'ds-082f0eae';
+const String kDatasetId = 'ds-23bd753f';
 
 const int kDatasetSchemaVersion = 1;
+
+/// Versión del repo (package.json); se muestra en "Acerca de".
+const String kDemoVersion = '0.1.0';

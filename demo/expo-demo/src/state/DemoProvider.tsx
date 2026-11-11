@@ -17,11 +17,20 @@ export type DemoStoreProviderProps = {
   children: ReactNode;
 };
 
-/** Provee el store y lo descarta al desmontar (E-7: no quedan timers vivos). */
+/**
+ * Provee el store y corta los timers al desmontar (E-7).
+ *
+ * No llama a `dispose()`: en desarrollo StrictMode monta, desmonta y vuelve a
+ * montar el mismo árbol, y `useMemo` reutiliza la instancia del store. Un
+ * `dispose()` en ese cleanup dejaría el store muerto para el segundo montaje y
+ * la demo no respondería. Cancelar timers alcanza para la garantía real: no
+ * queda ningún timer vivo después del desmontaje; un remount real de `App`
+ * crea un store nuevo.
+ */
 export function DemoStoreProvider({ store, children }: DemoStoreProviderProps) {
   useEffect(() => {
     return () => {
-      store.dispose();
+      store.cancelTimers();
     };
   }, [store]);
 

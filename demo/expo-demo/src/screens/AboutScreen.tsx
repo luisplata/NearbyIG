@@ -1,7 +1,7 @@
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
-import { datasetId, schemaVersion } from '../generated/dataset';
+import { datasetId, demoVersion, schemaVersion } from '../generated/dataset';
 import { colors, fontFamily, space, text } from '../theme/theme';
 
 import { Button } from '../components/Button';
@@ -28,6 +28,7 @@ export function AboutScreen({ onOpenSim }: { onOpenSim: () => void }) {
 
       <DataRow label={fmt('about.dataset')} value={datasetId} />
       <DataRow label={fmt('common.schemaVersion')} value={`${schemaVersion}`} />
+      <DataRow label={fmt('about.version')} value={demoVersion} />
 
       <View style={styles.action}>
         <Button label={fmt('common.simTitle')} variant="outline" fullWidth onPress={onOpenSim} />

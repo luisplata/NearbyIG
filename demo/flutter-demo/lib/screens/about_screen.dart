@@ -54,6 +54,7 @@ class AboutScreen extends StatelessWidget {
             label: fmt('common.schemaVersion'),
             value: '$kDatasetSchemaVersion',
           ),
+          _DataRow(label: fmt('about.version'), value: kDemoVersion),
           SizedBox(height: Tokens.space[2]),
           SizedBox(
             width: double.infinity,

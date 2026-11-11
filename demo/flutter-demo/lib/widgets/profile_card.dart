@@ -25,10 +25,14 @@ class ProfileCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = fmt('a11y.profileDot', <String, String>{
-      'name': profile.nickname,
-      'distance': formatDistance(profile.distanceM),
-    });
+    final label = <String>[
+      fmt('a11y.profileDot', <String, String>{
+        'name': profile.nickname,
+        'distance': formatDistance(profile.distanceM),
+      }),
+      if (profile.verified) fmt('a11y.verified'),
+      if (profile.online) fmt('a11y.online'),
+    ].join('. ');
     return Semantics(
       button: true,
       label: label,

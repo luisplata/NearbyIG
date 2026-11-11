@@ -5,8 +5,10 @@
 export const copy = {
   "a11y.map": "Mapa simulado de perfiles cercanos",
   "a11y.notificationsBadge": "{count} notificaciones sin leer",
+  "a11y.online": "En línea ahora",
   "a11y.profileDot": "{name}, a {distance}",
   "a11y.radar": "Radar de perfiles cercanos",
+  "a11y.verified": "Perfil verificado",
   "about.brand": "NearbyIG Demo",
   "about.dataset": "Dataset",
   "about.disclaimer": "Demo no funcional: no hay usuarios reales ni servicios conectados.",

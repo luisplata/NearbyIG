@@ -24,10 +24,14 @@ export function ProfileCard({
   renderState: AvatarRenderState;
   onTap: () => void;
 }) {
-  const label = fmt('a11y.profileDot', {
-    name: profile.nickname,
-    distance: formatDistance(profile.distanceM),
-  });
+  const label = [
+    fmt('a11y.profileDot', {
+      name: profile.nickname,
+      distance: formatDistance(profile.distanceM),
+    }),
+    ...(profile.verified ? [fmt('a11y.verified')] : []),
+    ...(profile.online ? [fmt('a11y.online')] : []),
+  ].join('. ');
 
   return (
     <PressableRow accessibilityLabel={label} onPress={onTap} style={styles.card}>
