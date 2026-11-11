@@ -4,8 +4,26 @@ import 'package:nearbyig_demo/state/demo_action.dart';
 import 'package:nearbyig_demo/state/demo_state.dart';
 import 'package:nearbyig_demo/state/demo_store.dart';
 import 'package:nearbyig_demo/state/projection.dart';
+import 'package:nearbyig_demo/state/selectors.dart';
 
 void main() {
+  test('initialState arranca en la lista ordenada por distancia', () {
+    final state = initialState();
+    expect(state.view, DemoView.list);
+    expect(visibleProfiles(state).map((profile) => profile.id).toList(), <String>[
+      'p01',
+      'p02',
+      'p03',
+      'p04',
+      'p05',
+      'p06',
+      'p07',
+      'p08',
+      'p09',
+      'p10',
+    ]);
+  });
+
   test('el ping entrante guionado llega a los 3.0 s', () {
     fakeAsync((async) {
       final store = DemoStore();

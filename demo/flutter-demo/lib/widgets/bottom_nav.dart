@@ -32,6 +32,13 @@ class BottomNav extends StatelessWidget {
       child: Row(
         children: <Widget>[
           _NavItem(
+            target: NavTarget.list,
+            icon: Icons.view_list_outlined,
+            label: fmt('nav.list'),
+            selected: view == DemoView.list,
+            onSelect: onSelect,
+          ),
+          _NavItem(
             target: NavTarget.radar,
             icon: Icons.radar,
             label: fmt('nav.radar'),
@@ -43,13 +50,6 @@ class BottomNav extends StatelessWidget {
             icon: Icons.map_outlined,
             label: fmt('nav.map'),
             selected: view == DemoView.map,
-            onSelect: onSelect,
-          ),
-          _NavItem(
-            target: NavTarget.list,
-            icon: Icons.view_list_outlined,
-            label: fmt('nav.list'),
-            selected: view == DemoView.list,
             onSelect: onSelect,
           ),
           _NavItem(

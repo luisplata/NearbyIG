@@ -41,6 +41,25 @@ class AboutScreen extends StatelessWidget {
           ),
           SizedBox(height: Tokens.space[2]),
           Text(
+            fmt('about.club'),
+            style: TextStyle(
+              fontSize: Tokens.fontSizes[1],
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.6,
+              color: Tokens.colorAccentWarm,
+            ),
+          ),
+          SizedBox(height: Tokens.space[1]),
+          Text(
+            fmt('about.positioning'),
+            style: TextStyle(
+              fontSize: Tokens.fontSizes[1],
+              height: Tokens.lineHeights[2],
+              color: Tokens.colorMuted,
+            ),
+          ),
+          SizedBox(height: Tokens.space[2]),
+          Text(
             fmt('about.disclaimer'),
             style: TextStyle(
               fontSize: Tokens.fontSizes[1],

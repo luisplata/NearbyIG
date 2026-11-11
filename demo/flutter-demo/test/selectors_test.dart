@@ -87,13 +87,27 @@ void main() {
     test('el filtro de intención acota el conjunto', () {
       expect(
         _ids(_state(intentions: <Intention>[Intention.activities])),
-        <String>['p04', 'p08'],
+        <String>['p04', 'p06', 'p08'],
       );
-      expect(_ids(_state(intentions: <Intention>[Intention.dating])), <String>[
-        'p03',
-        'p06',
-        'p10',
-      ]);
+      expect(
+        _ids(_state(intentions: <Intention>[Intention.friendship])),
+        <String>['p02', 'p03', 'p07'],
+      );
+      expect(
+        _ids(_state(intentions: <Intention>[Intention.networking])),
+        <String>['p01', 'p05', 'p09', 'p10'],
+      );
+    });
+
+    test('las tres intenciones del catálogo están en uso', () {
+      expect(Intention.values.length, 3);
+      for (final intention in Intention.values) {
+        expect(
+          _ids(_state(intentions: <Intention>[intention])).length,
+          greaterThanOrEqualTo(2),
+          reason: 'la intención ${intention.name} necesita al menos 2 perfiles',
+        );
+      }
     });
 
     test('elegir la intención propia la aplica como filtro por defecto', () {
@@ -103,7 +117,7 @@ void main() {
       ).state;
       expect(state.selfIntention, Intention.activities);
       expect(state.filters.intentions, <Intention>[Intention.activities]);
-      expect(_ids(state), <String>['p04', 'p08']);
+      expect(_ids(state), <String>['p04', 'p06', 'p08']);
 
       final cleared = reduce(state, const DemoAction.clearFilters()).state;
       expect(cleared.filters.intentions, isNull);
@@ -137,10 +151,7 @@ void main() {
 
     test('un bloqueado desaparece y una combinación imposible queda vacía', () {
       expect(_ids(_state(blocked: <String>['p01'])).first, 'p02');
-      expect(
-        _ids(_state(intentions: <Intention>[Intention.dating], radiusM: 500)),
-        isEmpty,
-      );
+      expect(_ids(_state(gender: Gender.nonbinary, radiusM: 500)), isEmpty);
     });
   });
 

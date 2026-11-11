@@ -172,7 +172,7 @@ class DemoState {
 /// `initialState()` derivado del dataset: refresh, `RESET` y primer arranque
 /// producen exactamente este estado (F-12).
 DemoState initialState() => DemoState(
-  view: DemoView.radar,
+  view: DemoView.list,
   overlay: null,
   profileId: null,
   chatId: null,

@@ -10,6 +10,8 @@ ThemeData buildAppTheme() {
     onPrimary: Tokens.colorText,
     secondary: Tokens.colorAccent,
     onSecondary: Tokens.colorBg,
+    tertiary: Tokens.colorAccentWarm,
+    onTertiary: Tokens.colorBg,
     surface: Tokens.colorSurface,
     onSurface: Tokens.colorText,
     error: Tokens.colorDanger,

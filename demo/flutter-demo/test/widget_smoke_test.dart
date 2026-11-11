@@ -23,20 +23,11 @@ Future<DemoStore> _pumpApp(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('el radar expone 10 puntos con nombre y distancia', (
+  testWidgets('la lista es la vista inicial y ordena por distancia', (
     tester,
   ) async {
-    final handle = tester.ensureSemantics();
-    await _pumpApp(tester);
-    expect(find.bySemanticsLabel(RegExp(r', a \d')), findsNWidgets(10));
-    expect(find.bySemanticsLabel(fmt('a11y.radar')), findsOneWidget);
-    handle.dispose();
-  });
-
-  testWidgets('la lista ordena por distancia ascendente', (tester) async {
-    await _pumpApp(tester);
-    await tester.tap(find.byIcon(Icons.view_list_outlined));
-    await tester.pump();
+    final store = await _pumpApp(tester);
+    expect(store.state.view, DemoView.list);
 
     expect(find.text('Vale'), findsOneWidget);
     expect(find.text('Nico'), findsOneWidget);
@@ -45,6 +36,56 @@ void main() {
       lessThan(tester.getTopLeft(find.text('Nico')).dy),
     );
     expect(find.text('240 m'), findsOneWidget);
+  });
+
+  testWidgets('la barra inferior ordena Lista, Radar, Mapa, Pings y Perfil', (
+    tester,
+  ) async {
+    await _pumpApp(tester);
+    final labels = <String>[
+      fmt('nav.list'),
+      fmt('nav.radar'),
+      fmt('nav.map'),
+      fmt('nav.pings'),
+      fmt('nav.profile'),
+    ];
+    final xs = labels
+        .map((label) => tester.getCenter(find.text(label)).dx)
+        .toList();
+    for (var index = 1; index < xs.length; index += 1) {
+      expect(
+        xs[index],
+        greaterThan(xs[index - 1]),
+        reason: '${labels[index]} debe estar a la derecha de ${labels[index - 1]}',
+      );
+    }
+  });
+
+  testWidgets('el radar sigue exponiendo 10 puntos con nombre y distancia', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    final store = await _pumpApp(tester);
+    store.dispatch(const DemoAction.setView(DemoView.radar));
+    await tester.pump();
+
+    expect(find.bySemanticsLabel(RegExp(r', a \d')), findsNWidgets(10));
+    expect(find.bySemanticsLabel(fmt('a11y.radar')), findsOneWidget);
+    handle.dispose();
+  });
+
+  testWidgets('reiniciar vuelve a la lista aunque la vista sea radar', (
+    tester,
+  ) async {
+    final store = await _pumpApp(tester);
+    store.dispatch(const DemoAction.setView(DemoView.radar));
+    await tester.pump();
+    expect(store.state.view, DemoView.radar);
+
+    store.dispatch(const DemoAction.reset());
+    await tester.pump();
+    expect(store.state.view, DemoView.list);
+    expect(find.text('Vale'), findsOneWidget);
   });
 
   testWidgets('el chip DEMO abre la hoja con los 8 ítems de simulación', (
@@ -89,8 +130,6 @@ void main() {
     tester,
   ) async {
     final store = await _pumpApp(tester);
-    await tester.tap(find.byIcon(Icons.view_list_outlined));
-    await tester.pump();
     await tester.tap(find.text('Vale'));
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, fmt('profile.ping')));
@@ -136,8 +175,6 @@ void main() {
     (tester) async {
       final handle = tester.ensureSemantics();
       await _pumpApp(tester);
-      await tester.tap(find.byIcon(Icons.view_list_outlined));
-      await tester.pump();
 
       expect(find.bySemanticsLabel(RegExp(fmt('a11y.verified'))), findsWidgets);
       expect(find.bySemanticsLabel(RegExp(fmt('a11y.online'))), findsWidgets);
@@ -167,8 +204,6 @@ void main() {
     tester,
   ) async {
     final store = await _pumpApp(tester);
-    await tester.tap(find.byIcon(Icons.view_list_outlined));
-    await tester.pump();
     await tester.tap(find.text('Vale'));
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, fmt('profile.ping')));
