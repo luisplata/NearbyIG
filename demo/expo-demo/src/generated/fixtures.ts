@@ -13,7 +13,6 @@ export const fixtures = {
     "intentions": [
       "networking",
       "friendship",
-      "dating",
       "activities"
     ],
     "radiiM": [
@@ -148,7 +147,7 @@ export const fixtures = {
       "id": "p03",
       "initials": "SO",
       "instagramHandle": "sofi.ciudad",
-      "intention": "dating",
+      "intention": "friendship",
       "nickname": "Sofi",
       "online": false,
       "photoId": "ph03",
@@ -193,7 +192,7 @@ export const fixtures = {
       "id": "p06",
       "initials": "FR",
       "instagramHandle": "fran.vecino",
-      "intention": "dating",
+      "intention": "activities",
       "nickname": "Fran",
       "online": false,
       "photoId": "ph06",
@@ -253,7 +252,7 @@ export const fixtures = {
       "id": "p10",
       "initials": "DE",
       "instagramHandle": "delf.esquina",
-      "intention": "dating",
+      "intention": "networking",
       "nickname": "Delf",
       "online": true,
       "photoId": "ph10",
@@ -268,7 +267,7 @@ export const fixtures = {
     "inappropriate",
     "other"
   ],
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "script": {
     "chatReplies": {
       "p07": [

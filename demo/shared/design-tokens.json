@@ -12,7 +12,8 @@
     "accent": "#FFD600",
     "online": "#22C55E",
     "verified": "#3B82F6",
-    "danger": "#EF4444"
+    "danger": "#EF4444",
+    "accentWarm": "#E8B27A"
   },
   "type": {
     "family": "Inter",

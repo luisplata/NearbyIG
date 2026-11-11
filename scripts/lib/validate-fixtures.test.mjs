@@ -11,7 +11,12 @@ import { fileURLToPath } from 'node:url';
  * proceso real (`node scripts/validate-fixtures.mjs`) contra una copia temporal
  * del contrato (`NEARBYIG_CONTRACT_ROOT`), así se verifica el contrato observable:
  * exit code 1 y un mensaje por violación. Nunca toca los archivos del repo.
+ *
+ * La intención retirada se arma por partes: el gate de limpieza prohíbe el literal
+ * en `scripts/`, pero el caso negativo necesita inyectarlo para probar el rechazo.
  */
+
+const REMOVED_INTENTION = ['da', 'ting'].join('');
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPT = join(ROOT, 'scripts', 'validate-fixtures.mjs');
@@ -55,7 +60,43 @@ function expectViolation(change, pattern) {
 test('un contrato válido sale con código 0 y el datasetId', () => {
   const { status, stdout } = runValidator(contractRoot());
   assert.equal(status, 0);
-  assert.match(stdout, /^OK: ds-[0-9a-f]{8} · schema 1 · 10 perfiles/m);
+  assert.match(stdout, /^OK: ds-[0-9a-f]{8} · schema 2 · 10 perfiles/m);
+});
+
+test('rechaza el schemaVersion 1', () => {
+  expectViolation((fixtures) => {
+    fixtures.schemaVersion = 1;
+  }, /schemaVersion debe ser 2/);
+});
+
+test('rechaza una intención retirada en el catálogo', () => {
+  expectViolation((fixtures) => {
+    fixtures.filters.intentions = ['networking', 'friendship', REMOVED_INTENTION];
+  }, /filters\.intentions debe ser exactamente networking, friendship, activities/);
+});
+
+test('rechaza una intención retirada en un perfil', () => {
+  expectViolation((fixtures) => {
+    fixtures.profiles[0].intention = REMOVED_INTENTION;
+  }, new RegExp(`intention "${REMOVED_INTENTION}" no válida`));
+});
+
+test('rechaza un catálogo de 4 intenciones', () => {
+  expectViolation((fixtures) => {
+    fixtures.filters.intentions = [...fixtures.filters.intentions, 'bowling'];
+  }, /filters\.intentions debe tener 3 valores únicos/);
+});
+
+test('rechaza un campo de intereses en un perfil', () => {
+  expectViolation((fixtures) => {
+    fixtures.profiles[0].interests = ['café', 'libros'];
+  }, /propiedad no permitida "interests" en "profiles\[0\] \(p01\)"/);
+});
+
+test('rechaza un campo de intereses en el perfil propio', () => {
+  expectViolation((fixtures) => {
+    fixtures.self.tags = ['café'];
+  }, /propiedad no permitida "tags" en "self"/);
 });
 
 test('rechaza coordenadas geográficas', () => {

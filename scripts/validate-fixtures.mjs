@@ -5,9 +5,13 @@
  * Reglas duras:
  *  - prohibido lat/lng/latitude/longitude en cualquier nivel
  *  - prohibidas URLs http(s) y patrones de secreto en cualquier string
+ *  - schemaVersion exactamente 2; 3 intenciones únicas (sin intenciones retiradas)
  *  - IDs únicos, 10 perfiles, distancias 200-5000 m, bearings 0-359
  *  - intenciones y géneros del catálogo, photoId existente, todo *Key resuelve en copy
+ *  - claves desconocidas en self/perfil rechazadas (no hay `interests` ni tags)
  *  - timers exactos, filtros coherentes, 8 ítems de simulación
+ *  - `landing.eyebrow` y `about.club` idénticos; `about.positioning` presente
+ *  - `color.accentWarm` requerido en los tokens
  *
  * Sale con código 1 y un mensaje por violación. Si todo pasa, imprime el datasetId.
  */
@@ -33,7 +37,9 @@ const EXPECTED_TIMERS = {
 };
 
 const REQUIRED_COPY_KEYS = [
+  'about.club',
   'about.dataset',
+  'about.positioning',
   'about.title',
   'a11y.profileDot',
   'chat.fallback',
@@ -49,6 +55,7 @@ const REQUIRED_COPY_KEYS = [
   'ig.state.linked',
   'ig.state.unverified',
   'ig.state.verified',
+  'landing.eyebrow',
   'match.title',
   'notif.markAllRead',
   'notif.title',
@@ -71,6 +78,7 @@ const REQUIRED_TOKEN_COLORS = [
   'gradientMid',
   'gradientEnd',
   'accent',
+  'accentWarm',
   'online',
   'verified',
   'danger',
@@ -78,6 +86,42 @@ const REQUIRED_TOKEN_COLORS = [
 
 const PROHIBITED_PROPERTY_NAMES = ['lat', 'lng', 'latitude', 'longitude'];
 const ALLOWED_PLACEHOLDERS = new Set(['name', 'distance', 'count', 'radius']);
+
+/** Catálogo cerrado de intenciones vigentes. El orden es el del dataset y la
+ * proyección golden lo usa para serializar `filter.intentions`; cambiarlo mueve
+ * los digests de paridad. Cualquier valor fuera de esta lista se rechaza y se
+ * nombra en el mensaje. */
+const EXPECTED_INTENTIONS = ['networking', 'friendship', 'activities'];
+
+/** Claves permitidas en `self` y en cada perfil: nada de `interests`/tags. */
+const SELF_KEYS = new Set([
+  'id',
+  'nickname',
+  'initials',
+  'intention',
+  'photoId',
+  'instagramHandle',
+  'statusKey',
+]);
+
+const PROFILE_KEYS = new Set([
+  'id',
+  'nickname',
+  'initials',
+  'intention',
+  'gender',
+  'verified',
+  'online',
+  'distanceM',
+  'bearingDeg',
+  'photoId',
+  'instagramHandle',
+  'statusKey',
+  'bioKey',
+]);
+
+/** Espacios de copy que no deben existir: la afinidad es copy, no datos. */
+const FORBIDDEN_COPY_NAMESPACES = ['interests', 'hobbies', 'tags'];
 
 const errors = [];
 const notes = [];
@@ -172,13 +216,27 @@ function collectCopyRefs(data) {
   return refs;
 }
 
+function checkAllowedKeys(sourceName, where, object, allowed) {
+  for (const key of Object.keys(object)) {
+    if (!allowed.has(key)) {
+      fail(
+        `${sourceName}: propiedad no permitida "${key}" en "${where}" ` +
+          `(claves válidas: ${[...allowed].join(', ')})`,
+      );
+    }
+  }
+}
+
 // --- fixtures --------------------------------------------------------------
 
 function validateFixtures(fixtures, copy, photos) {
   const name = 'fixtures.json';
 
-  if (fixtures.schemaVersion !== 1) {
-    fail(`${name}: schemaVersion debe ser 1 (encontrado ${JSON.stringify(fixtures.schemaVersion)})`);
+  if (fixtures.schemaVersion !== 2) {
+    fail(
+      `${name}: schemaVersion debe ser 2 (encontrado ${JSON.stringify(fixtures.schemaVersion)}); ` +
+        'la versión 1 del contrato ya no se acepta',
+    );
   }
 
   const timers = fixtures.timers ?? {};
@@ -198,8 +256,14 @@ function validateFixtures(fixtures, copy, photos) {
   const genders = Array.isArray(filters.genders) ? filters.genders : [];
   const radii = Array.isArray(filters.radiiM) ? filters.radiiM : [];
 
-  if (intentions.length !== 4 || new Set(intentions).size !== 4) {
-    fail(`${name}: filters.intentions debe tener 4 valores únicos (encontrado ${intentions.length})`);
+  if (intentions.length !== 3 || new Set(intentions).size !== 3) {
+    fail(`${name}: filters.intentions debe tener 3 valores únicos (encontrado ${intentions.length})`);
+  }
+  if (intentions.join(',') !== EXPECTED_INTENTIONS.join(',')) {
+    fail(
+      `${name}: filters.intentions debe ser exactamente ${EXPECTED_INTENTIONS.join(', ')} ` +
+        `(encontrado ${intentions.join(', ') || 'vacío'})`,
+    );
   }
   if (genders.length !== 3 || new Set(genders).size !== 3) {
     fail(`${name}: filters.genders debe tener 3 valores únicos (encontrado ${genders.length})`);
@@ -240,6 +304,7 @@ function validateFixtures(fixtures, copy, photos) {
   if (!isPlainObject(self) || typeof self.id !== 'string' || self.id.length === 0) {
     fail(`${name}: self.id es obligatorio`);
   }
+  if (isPlainObject(self)) checkAllowedKeys(name, 'self', self, SELF_KEYS);
   if (typeof self.intention !== 'string' || !intentions.includes(self.intention)) {
     fail(`${name}: self.intention = ${JSON.stringify(self.intention)} no está en filters.intentions`);
   }
@@ -258,8 +323,10 @@ function validateFixtures(fixtures, copy, photos) {
   }
 
   const seenDistances = [];
+  const intentionCounts = new Map(EXPECTED_INTENTIONS.map((value) => [value, 0]));
   profiles.forEach((profile, index) => {
     const where = `profiles[${index}] (${profile?.id ?? 'sin id'})`;
+    if (isPlainObject(profile)) checkAllowedKeys(name, where, profile, PROFILE_KEYS);
     if (typeof profile.nickname !== 'string' || profile.nickname.trim().length === 0) {
       fail(`${name}: ${where} sin nickname`);
     }
@@ -268,6 +335,8 @@ function validateFixtures(fixtures, copy, photos) {
     }
     if (!intentions.includes(profile.intention)) {
       fail(`${name}: ${where} intention "${profile.intention}" no válida`);
+    } else {
+      intentionCounts.set(profile.intention, (intentionCounts.get(profile.intention) ?? 0) + 1);
     }
     if (!genders.includes(profile.gender)) {
       fail(`${name}: ${where} gender "${profile.gender}" no válido`);
@@ -292,6 +361,12 @@ function validateFixtures(fixtures, copy, photos) {
 
   if (new Set(seenDistances).size !== seenDistances.length) {
     fail(`${name}: hay distancias repetidas (${seenDistances.join(', ')}); cada perfil debe tener una única`);
+  }
+
+  for (const [intention, count] of intentionCounts) {
+    if (count < 2) {
+      fail(`${name}: la intención "${intention}" la usa ${count} perfil(es); el dataset necesita al menos 2`);
+    }
   }
 
   const script = fixtures.script ?? {};
@@ -396,6 +471,19 @@ function validateCopy(copy) {
 
   for (const key of REQUIRED_COPY_KEYS) {
     if (!(key in copy)) fail(`${name}: falta la clave obligatoria "${key}"`);
+  }
+
+  for (const key of Object.keys(copy)) {
+    const namespace = key.split('.')[0];
+    if (FORBIDDEN_COPY_NAMESPACES.includes(namespace)) {
+      fail(`${name}: "${key}" pertenece a un espacio prohibido (${namespace}); los gustos son copy libre`);
+    }
+  }
+
+  if (typeof copy['landing.eyebrow'] === 'string' && typeof copy['about.club'] === 'string') {
+    if (copy['landing.eyebrow'] !== copy['about.club']) {
+      fail(`${name}: landing.eyebrow y about.club deben ser idénticos ("${copy['landing.eyebrow']}" ≠ "${copy['about.club']}")`);
+    }
   }
 
   for (let index = 1; index <= 8; index += 1) {

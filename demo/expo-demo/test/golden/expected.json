@@ -1,8 +1,8 @@
 {
-  "datasetId": "ds-0f68eee4",
+  "datasetId": "ds-ddca69e0",
   "digestLength": 12,
   "projectionVersion": 1,
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "steps": [
     {
       "n": 1,
@@ -190,7 +190,7 @@
     },
     {
       "n": 47,
-      "digest": "7d54f259ea55"
+      "digest": "18b9da102e3d"
     }
   ]
 }

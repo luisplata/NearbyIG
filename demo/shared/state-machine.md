@@ -16,7 +16,7 @@ agenda el store, que es el único que conoce timers.
 
 ```text
 DemoState {
-  view: 'radar' | 'map' | 'list'
+  view: 'list' | 'radar' | 'map'       // 'list' es la vista inicial (norma)
   overlay: null | 'profile' | 'chat' | 'pings' | 'notifications' | 'filters'
                 | 'settings' | 'about' | 'safety' | 'blocked' | 'privacy'
   profileId: string | null          // perfil enfocado por overlay profile/safety
@@ -25,7 +25,7 @@ DemoState {
   ghost: boolean
   filters: {
     intentions: Intention[] | null  // null = sin filtro de intención
-    gender: 'all' | Gender
+    gender: null | Gender           // null = "Todos"
     verifiedOnly: boolean
     onlineOnly: boolean
     radiusM: number
@@ -48,9 +48,9 @@ DemoState {
 }
 ```
 
-`initialState()` se deriva de `fixtures.json`: `view='radar'`, `overlay=null`,
+`initialState()` se deriva de `fixtures.json`: `view='list'`, `overlay=null`,
 `selfIntention=fixtures.self.intention`, `ghost=false`,
-`filters={intentions:null, gender:'all', verifiedOnly:false, onlineOnly:false,
+`filters={intentions:null, gender:null, verifiedOnly:false, onlineOnly:false,
 radiusM:fixtures.filters.defaultRadiusM}`, listas vacías, `verification='unverified'`,
 `matchCelebration=null`, `toast=null`, `notifSeq=0`, `toastSeq=0`, `replyCursor={}`.
 
@@ -107,9 +107,9 @@ nunca confía en la UI.
 | `CLOSE_OVERLAY` | — | `overlay=null`, `profileId=null` (mantiene `chatId` sólo si el overlay era `chat`) |
 | `SET_RADIUS` | valor de `fixtures.filters.radiiM` | `filters.radiusM` |
 | `TOGGLE_FILTER_INTENTION` | intención válida | agrega o quita de `filters.intentions`; lista vacía → `null` |
-| `SET_GENDER_FILTER` | `'all'` o género válido | `filters.gender` |
+| `SET_GENDER_FILTER` | `null` o género válido | `filters.gender` |
 | `TOGGLE_VERIFIED_ONLY` / `TOGGLE_ONLINE_ONLY` | — | invierte el booleano |
-| `CLEAR_FILTERS` | — | filtros al default (`intentions=null`, `gender='all'`, ambos false) |
+| `CLEAR_FILTERS` | — | filtros al default (`intentions=null`, `gender=null`, ambos false) |
 | `SEND_PING` | `!ghost`, perfil visible, no bloqueado, no en `pingsSent`, no en `matches` | `pingsSent+=id`; si `pingsSent` estaba vacío → effect `{incomingPing, incomingPingFromId, incomingPingMs}`; toast `ping.sent`; la bandeja lo lista como enviado (sin acción de envío) |
 | `ACCEPT_PING` | `!ghost`, `id` en `incomingPings`, no bloqueado | saca de `incomingPings`, `matches+=id`, `messages[id]=[]`, effect `{match, id, matchMs}` |
 | `REJECT_PING` | `id` en `incomingPings` | saca de `incomingPings`; sin match ni chat |
@@ -159,7 +159,7 @@ nuevo con la misma clave **reemplaza** al anterior (reprograma). `RESET`, el des
 
 | Selector | Semántica |
 |---|---|
-| `visibleProfiles(state)` | `profiles − blocked`, filtrados por `radiusM` (`distanceM <= radiusM`), intención (`filters.intentions`; `null` = sin filtro, se ven los 10 perfiles del dataset), género (`gender !== 'all'`), `verifiedOnly` y `onlineOnly`; orden `distanceM` asc, empate por `id` asc |
+| `visibleProfiles(state)` | `profiles − blocked`, filtrados por `radiusM` (`distanceM <= radiusM`), intención (`filters.intentions`; `null` = sin filtro, se ven los 10 perfiles del dataset), género (`gender != null`), `verifiedOnly` y `onlineOnly`; orden `distanceM` asc, empate por `id` asc |
 | `profileById(state, id)` | perfil de `fixtures.profiles` o `null` |
 | `unreadCount(state)` | notificaciones `read === false` |
 | `canPing(state, id)` | `!ghost` y perfil visible y no en `pingsSent`/`matches` y no bloqueado |
@@ -184,6 +184,9 @@ se usa.
 ## 7. Reset y determinismo
 
 - `RESET` devuelve exactamente `initialState()` y el store cancela timers.
+- La vista inicial es la **lista** (`view='list'`): primer arranque, `RESET` y refresh
+  aterrizan en la lista ordenada por distancia. La barra inferior mantiene el orden
+  Lista → Radar → Mapa → Pings → Perfil; radar y mapa siguen siendo alcanzables.
 - Refrescar la página produce el mismo estado inicial: no hay storage, cookies,
   `localStorage`, `sessionStorage` ni URL con estado.
 - Los timers se derivan de acciones, no del reloj de pared: el reducer no llama a

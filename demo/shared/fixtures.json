@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "timers": {
     "matchMs": 2500,
     "typingMs": 1200,
@@ -51,7 +51,7 @@
       "id": "p03",
       "nickname": "Sofi",
       "initials": "SO",
-      "intention": "dating",
+      "intention": "friendship",
       "gender": "female",
       "verified": true,
       "online": false,
@@ -96,7 +96,7 @@
       "id": "p06",
       "nickname": "Fran",
       "initials": "FR",
-      "intention": "dating",
+      "intention": "activities",
       "gender": "male",
       "verified": false,
       "online": false,
@@ -156,7 +156,7 @@
       "id": "p10",
       "nickname": "Delf",
       "initials": "DE",
-      "intention": "dating",
+      "intention": "networking",
       "gender": "nonbinary",
       "verified": false,
       "online": true,
@@ -192,7 +192,6 @@
     "intentions": [
       "networking",
       "friendship",
-      "dating",
       "activities"
     ],
     "genders": [

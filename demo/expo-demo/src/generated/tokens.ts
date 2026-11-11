@@ -10,6 +10,7 @@ export const tokens = {
   },
   "color": {
     "accent": "#FFD600",
+    "accentWarm": "#E8B27A",
     "bg": "#09090B",
     "border": "#2A2A33",
     "danger": "#EF4444",

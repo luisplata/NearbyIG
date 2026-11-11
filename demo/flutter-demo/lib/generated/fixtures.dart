@@ -3,11 +3,11 @@
 // Regenerate with: node scripts/sync-demo-assets.mjs
 
 
-enum Intention { networking, friendship, dating, activities }
+enum Intention { networking, friendship, activities }
 
 enum Gender { female, male, nonbinary }
 
-const int kSchemaVersion = 1;
+const int kSchemaVersion = 2;
 
 class DemoTimers {
   const DemoTimers({
@@ -98,14 +98,14 @@ class Profile {
 const List<Profile> kProfiles = <Profile>[
   Profile(id: 'p01', nickname: 'Vale', initials: 'VA', intention: Intention.networking, gender: Gender.female, verified: true, online: true, distanceM: 240, bearingDeg: 32, photoId: 'ph01', instagramHandle: 'vale.works', statusKey: 'status.p01', bioKey: 'bio.p01'),
   Profile(id: 'p02', nickname: 'Nico', initials: 'NI', intention: Intention.friendship, gender: Gender.male, verified: false, online: true, distanceM: 480, bearingDeg: 118, photoId: 'ph02', instagramHandle: 'nico.andando', statusKey: 'status.p02', bioKey: 'bio.p02'),
-  Profile(id: 'p03', nickname: 'Sofi', initials: 'SO', intention: Intention.dating, gender: Gender.female, verified: true, online: false, distanceM: 760, bearingDeg: 205, photoId: 'ph03', instagramHandle: 'sofi.ciudad', statusKey: 'status.p03', bioKey: 'bio.p03'),
+  Profile(id: 'p03', nickname: 'Sofi', initials: 'SO', intention: Intention.friendship, gender: Gender.female, verified: true, online: false, distanceM: 760, bearingDeg: 205, photoId: 'ph03', instagramHandle: 'sofi.ciudad', statusKey: 'status.p03', bioKey: 'bio.p03'),
   Profile(id: 'p04', nickname: 'Tomi', initials: 'TO', intention: Intention.activities, gender: Gender.nonbinary, verified: false, online: true, distanceM: 1150, bearingDeg: 292, photoId: 'ph04', instagramHandle: 'tomi.recorre', statusKey: 'status.p04', bioKey: 'bio.p04'),
   Profile(id: 'p05', nickname: 'Juli', initials: 'JU', intention: Intention.networking, gender: Gender.female, verified: true, online: true, distanceM: 1480, bearingDeg: 12, photoId: 'ph05', instagramHandle: 'juli.encuentros', statusKey: 'status.p05', bioKey: 'bio.p05'),
-  Profile(id: 'p06', nickname: 'Fran', initials: 'FR', intention: Intention.dating, gender: Gender.male, verified: false, online: false, distanceM: 1950, bearingDeg: 88, photoId: 'ph06', instagramHandle: 'fran.vecino', statusKey: 'status.p06', bioKey: 'bio.p06'),
+  Profile(id: 'p06', nickname: 'Fran', initials: 'FR', intention: Intention.activities, gender: Gender.male, verified: false, online: false, distanceM: 1950, bearingDeg: 88, photoId: 'ph06', instagramHandle: 'fran.vecino', statusKey: 'status.p06', bioKey: 'bio.p06'),
   Profile(id: 'p07', nickname: 'Cami', initials: 'CA', intention: Intention.friendship, gender: Gender.nonbinary, verified: true, online: true, distanceM: 2600, bearingDeg: 165, photoId: 'ph07', instagramHandle: 'cami.paseo', statusKey: 'status.p07', bioKey: 'bio.p07'),
   Profile(id: 'p08', nickname: 'Lean', initials: 'LE', intention: Intention.activities, gender: Gender.male, verified: false, online: false, distanceM: 3200, bearingDeg: 240, photoId: 'ph08', instagramHandle: 'lean.afuera', statusKey: 'status.p08', bioKey: 'bio.p08'),
   Profile(id: 'p09', nickname: 'Mica', initials: 'MI', intention: Intention.networking, gender: Gender.female, verified: true, online: true, distanceM: 3900, bearingDeg: 310, photoId: 'ph09', instagramHandle: 'mica.ronda', statusKey: 'status.p09', bioKey: 'bio.p09'),
-  Profile(id: 'p10', nickname: 'Delf', initials: 'DE', intention: Intention.dating, gender: Gender.nonbinary, verified: false, online: true, distanceM: 4800, bearingDeg: 45, photoId: 'ph10', instagramHandle: 'delf.esquina', statusKey: 'status.p10', bioKey: 'bio.p10'),
+  Profile(id: 'p10', nickname: 'Delf', initials: 'DE', intention: Intention.networking, gender: Gender.nonbinary, verified: false, online: true, distanceM: 4800, bearingDeg: 45, photoId: 'ph10', instagramHandle: 'delf.esquina', statusKey: 'status.p10', bioKey: 'bio.p10'),
 ];
 
 class DemoScript {
@@ -151,7 +151,7 @@ class DemoFilters {
 const DemoFilters kFilters = DemoFilters(
   radiiM: <int>[500, 1000, 2000, 5000],
   defaultRadiusM: 5000,
-  intentions: <Intention>[Intention.networking, Intention.friendship, Intention.dating, Intention.activities],
+  intentions: <Intention>[Intention.networking, Intention.friendship, Intention.activities],
   genders: <Gender>[Gender.female, Gender.male, Gender.nonbinary],
 );
 

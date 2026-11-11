@@ -8,6 +8,7 @@ import 'dart:ui' show Color;
 /// Tokens de diseño del contrato compartido.
 abstract final class Tokens {
   static const Color colorAccent = Color(0xFFFFD600);
+  static const Color colorAccentWarm = Color(0xFFE8B27A);
   static const Color colorBg = Color(0xFF09090B);
   static const Color colorBorder = Color(0xFF2A2A33);
   static const Color colorDanger = Color(0xFFEF4444);

@@ -26,7 +26,7 @@ donde `canonical` ordena claves, no deja espacios y normaliza números. **No** e
 campo editable: sale del contenido. Se muestra en la landing, en "Acerca de" de ambas
 apps y lo imprime `node scripts/validate-fixtures.mjs`.
 
-`schemaVersion` (hoy `1`) se muestra junto al datasetId. Tres valores iguales en la
+`schemaVersion` (hoy `2`) se muestra junto al datasetId. Tres valores iguales en la
 landing y en las dos apps son la prueba de que se está comparando el mismo dataset.
 
 Reglas duras del dataset (validadas por script):
@@ -37,6 +37,12 @@ Reglas duras del dataset (validadas por script):
 - Prohibidos patrones de secreto (claves de API, claves privadas, config Firebase).
 - IDs únicos; `photoId` existente; todo `*Key` resuelve en `copy.json`;
   intenciones y géneros dentro del catálogo; timers exactos.
+- Exactamente **3 intenciones** en `filters.intentions`; cada una la usan al menos dos
+  perfiles. El orden del array es el orden del catálogo y el que serializa la proyección
+  golden: cambiarlo mueve los digests de paridad.
+- `self` y cada perfil tienen un catálogo cerrado de claves. Un campo `interests`,
+  `hobbies`, `tags` o cualquier otro desconocido es un error: los gustos son copy libre
+  dentro de `status.*` y `bio.*`, no datos.
 
 ## 2. Copy
 
@@ -50,6 +56,10 @@ Reglas duras del dataset (validadas por script):
   `fmt(key, params)` generado en ambos lenguajes.
 - Los 8 ítems de "Qué es simulado" son las claves `common.simItems.1` … `common.simItems.8`
   (numeradas para preservar el orden; no se agregan ni se quitan sin actualizar esta tabla).
+- Posicionamiento: `landing.eyebrow` y `about.club` contienen el mismo texto
+  ("Cowork Social Club Café") y `about.positioning` la frase que lo explica. Es estilo y
+  posicionamiento: **no** cambia el nombre del producto, el título del documento, el
+  icono, el bundle id, el repo ni las URLs, y no agrega pantallas ni acciones de club.
 - `privacy.noHistory` contiene verbatim "sin historial de rutas" y se muestra en la
   pantalla de privacidad de ambas apps.
 - `ig.simDisclaimer` ("Simulado: no es verificación real de Instagram") está siempre
@@ -57,13 +67,18 @@ Reglas duras del dataset (validadas por script):
 
 ## 3. Design tokens
 
-`design-tokens.json` define: 13 colores, familia/sizes/weights/lineHeights, escala de
+`design-tokens.json` define: 14 colores, familia/sizes/weights/lineHeights, escala de
 espaciado, radios, sombra de hoja y breakpoints (`min` 320, `frameMax` 480, `wide` 600).
 Los tokens se generan; nunca se escriben colores literales en pantallas.
 
 Paleta: fondo `#09090B`, superficie `#121216`, texto `#F4F4F5`, muted `#A1A1AA`, borde
-`#2A2A33`, gradiente `#FF0069 → #7638FA → #3858FA`, acento `#FFD600`, online `#22C55E`,
-verificado `#3B82F6`, peligro `#EF4444`.
+`#2A2A33`, gradiente `#FF0069 → #7638FA → #3858FA`, acento `#FFD600`, acento cálido
+`#E8B27A`, online `#22C55E`, verificado `#3B82F6`, peligro `#EF4444`.
+
+El acento cálido (`color.accentWarm`) es el único trazo del estilo café/cowork: se usa en
+el eyebrow del hero de la landing y en las frases de "Acerca de" de ambas apps. No cambia
+el tema oscuro, no introduce un tema claro y no reemplaza al acento de marca (`accent`),
+que sigue marcando pestaña activa, chip DEMO y badges.
 
 ## 4. Assets y avatares
 
@@ -120,6 +135,10 @@ install.
 
 - Estado en memoria (`view` + `overlay`). Sin router, sin deep links, sin URLs con
   estado. La URL nunca cambia; refrescar sirve el `index.html` del subdirectorio.
+- La **lista es la vista inicial** en ambas apps: al cargar, el tab activo es `Lista` y
+  los 10 perfiles aparecen ordenados por distancia ascendente. La barra inferior tiene
+  cinco tabs en este orden: **Lista → Radar → Mapa → Pings → Perfil**. Radar y mapa
+  siguen siendo de primera clase, con sus 10 puntos y su leyenda "mapa simulado".
 - "Reiniciar demo" (`RESET`) vuelve al estado inicial completo — vistas, filtros, pings,
   match, chat, notificaciones, revelaciones, bloqueos, fantasma, verificación — y
   cancela todos los timers.
@@ -144,8 +163,8 @@ install.
 
 | # | Punto | Evidencia esperada (idéntica en ambas apps) |
 |---|---|---|
-| 1 | Perfil + 4 intenciones | Elegir "Actividades" se refleja en el perfil y en el filtro por defecto |
-| 2 | Radar / mapa / lista | 10 puntos, mismas distancias, orden asc, leyenda "mapa simulado", reduced-motion estático |
+| 1 | Perfil + 3 intenciones | Elegir "Actividades" se refleja en el perfil y en el filtro por defecto |
+| 2 | Radar / mapa / lista | La lista abre por defecto; 10 puntos, mismas distancias, orden asc, leyenda "mapa simulado", reduced-motion estático |
 | 3 | Radio + 4 filtros | 500 m deja solo ≤ 500 m; combinación imposible → vacío + "Limpiar filtros" |
 | 4 | Ping | "Enviado" e inhabilitado al segundo intento; el enviado aparece en la bandeja con estado pendiente; entrante a 3.0 s; badge sube |
 | 5 | Match + chat | Aceptar → match a 2.5 s → chat; typing 1.2 s; respuesta guionada; rechazar borra el ping |
@@ -155,7 +174,7 @@ install.
 | 9 | Blur + revelación | Reveal propio → el par a 1.5 s; sin reveal propio el otro sigue blurred |
 | 10 | Bloqueo + reporte | Desaparece de las 3 vistas, chat cerrado, lista de bloqueados + desbloquear |
 | 11 | Sin historial | Sin tab/pantalla/campos de historial; `privacy.noHistory` verbatim |
-| 12 | Reset + refresh | Tras flujo completo → estado inicial; refresh idéntico; sin timers vivos |
+| 12 | Reset + refresh | Tras flujo completo → estado inicial (vista `lista`); refresh idéntico; sin timers vivos |
 | 13 | Responsive + a11y | 320/360/480/768/1440 px sin overflow; labels con nombre y distancia; foco visible; ≥ 44 px |
 | 14 | Sin red | DevTools Network sin dominios externos (ni gstatic, ni Google Fonts) |
 | 15 | Divulgación | Chip DEMO persistente + hoja "Qué es simulado" con 8 ítems |
@@ -261,7 +280,7 @@ un navegador real y queda pendiente hasta la revisión con DevTools + lector de 
 
 | # | Automatizado | Visual |
 |---|---|---|
-| 1 | golden (`SET_SELF_INTENTION`), 4 intenciones válidas en `validate-fixtures` | cambio reflejado en perfil y filtro |
+| 1 | golden (`SET_SELF_INTENTION`), 3 intenciones válidas en `validate-fixtures` | cambio reflejado en perfil y filtro |
 | 2 | Flutter: radar con 10 puntos accesibles y reduced-motion estático | mismo orden/distancias en las 3 vistas de Expo |
 | 3 | `selectors.test.ts` / `selectors_test.dart`: radio 500 m, filtros y vacío | CTA “Limpiar filtros” en ambas |
 | 4 | golden timers + widget test de ping enviado/deshabilitado + bandeja con el enviado y su estado | ping entrante a 3.0 s en Expo |

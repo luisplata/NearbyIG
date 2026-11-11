@@ -54,7 +54,7 @@ test('la landing consume el datasetId del contrato vigente', () => {
   const generated = landingFile('generated/dataset.js');
   assert.ok(generated.includes(`datasetId: "${expected}"`), `dataset.js no contiene ${expected}`);
   assert.match(generated, /window\.NEARBYIG_DATASET = Object\.freeze\(/);
-  assert.ok(generated.includes('schemaVersion: 1'));
+  assert.ok(generated.includes('schemaVersion: 2'));
 });
 
 test('la landing sólo usa variables generadas desde design-tokens.json', () => {

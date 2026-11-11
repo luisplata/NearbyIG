@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "digestLength": 12,
   "projectionVersion": 1,
   "description": "Secuencia canónica de acciones para paridad ejecutable entre los reducers de Flutter y Expo. Cubre las 27 acciones de demo/shared/state-machine.md, incluidos los TIMER_FIRED explícitos, los guards que deben ser no-op y un RESET final.",
   "steps": [
-    { "n": 1, "action": { "type": "SET_VIEW", "view": "map" }, "note": "arranca en radar; pasa a mapa" },
+    { "n": 1, "action": { "type": "SET_VIEW", "view": "map" }, "note": "arranca en lista; pasa a mapa" },
     { "n": 2, "action": { "type": "SET_VIEW", "view": "list" }, "note": "lista ordenada por distancia" },
     { "n": 3, "action": { "type": "SET_VIEW", "view": "radar" }, "note": "vuelve al radar" },
     { "n": 4, "action": { "type": "SET_SELF_INTENTION", "intention": "activities" }, "note": "intención propia pasa a actividades y limpia el filtro de intención" },
