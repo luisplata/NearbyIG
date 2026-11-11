@@ -31,3 +31,15 @@ Thumbs.db
 
 # Prototype snapshot (contains signing material; never commit)
 nearbyig-app-complete.zip
+
+# Demo builds and assembled Pages artifact
+site/
+demo/flutter-demo/build/
+demo/flutter-demo/.dart_tool/
+demo/flutter-demo/.flutter-plugins
+demo/flutter-demo/.flutter-plugins-dependencies
+demo/expo-demo/dist/
+demo/expo-demo/node_modules/
+demo/expo-demo/.expo/
+demo/expo-demo/node_modules/.cache/
+
