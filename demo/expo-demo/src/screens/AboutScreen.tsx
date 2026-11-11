@@ -2,7 +2,7 @@ import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
 import { datasetId, demoVersion, schemaVersion } from '../generated/dataset';
-import { colors, fontFamily, space, text } from '../theme/theme';
+import { colors, fontFamily, fontSize, space, text } from '../theme/theme';
 
 import { Button } from '../components/Button';
 
@@ -21,6 +21,9 @@ export function AboutScreen({ onOpenSim }: { onOpenSim: () => void }) {
         />
         <Text style={[text.title, styles.brand]}>{fmt('about.brand')}</Text>
       </View>
+
+      <Text style={styles.club}>{fmt('about.club')}</Text>
+      <Text style={[text.body, { color: colors.muted }]}>{fmt('about.positioning')}</Text>
 
       <Text style={[text.body, { color: colors.muted }]}>{fmt('about.disclaimer')}</Text>
 
@@ -62,6 +65,12 @@ const styles = StyleSheet.create({
   },
   brand: {
     flex: 1,
+  },
+  club: {
+    fontFamily: fontFamily.semibold,
+    fontSize: fontSize[1],
+    letterSpacing: 0.6,
+    color: colors.accentWarm,
   },
   divider: {
     height: 1,

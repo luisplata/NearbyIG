@@ -10,6 +10,23 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('estado inicial', () => {
+  it('arranca en la lista ordenada por distancia', () => {
+    const state = initialState();
+    expect(state.view).toBe('list');
+    expect(state.filters.gender).toBeNull();
+  });
+
+  it('RESET vuelve a la lista aunque la vista sea radar', () => {
+    const store = createDemoStore(initialState());
+    store.dispatch({ type: 'SET_VIEW', view: 'radar' });
+    expect(store.getState().view).toBe('radar');
+
+    store.dispatch({ type: 'RESET' });
+    expect(store.getState().view).toBe('list');
+  });
+});
+
 describe('store: ciclo de vida de los timers', () => {
   it('RESET cancela los timers pendientes y no deja trabajo agendado', () => {
     vi.useFakeTimers();

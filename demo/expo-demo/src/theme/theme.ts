@@ -16,6 +16,7 @@ export const colors = {
   gradientMid: tokens.color.gradientMid,
   gradientEnd: tokens.color.gradientEnd,
   accent: tokens.color.accent,
+  accentWarm: tokens.color.accentWarm,
   online: tokens.color.online,
   verified: tokens.color.verified,
   danger: tokens.color.danger,

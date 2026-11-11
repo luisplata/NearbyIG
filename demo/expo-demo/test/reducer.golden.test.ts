@@ -49,7 +49,7 @@ function applySteps(): { state: DemoState; byNumber: Map<number, string> } {
 describe('golden de paridad', () => {
   it('expected.json pertenece al dataset sincronizado', () => {
     expect(expected.datasetId).toBe(datasetId);
-    expect(schemaVersion).toBe(1);
+    expect(schemaVersion).toBe(2);
     expect(expected.digestLength).toBe(DIGEST_LENGTH);
   });
 

@@ -59,7 +59,7 @@ export function cloneState(state: DemoState): DemoState {
 /** Estado inicial derivado del dataset: refresh, RESET y primer arranque. */
 export function initialState(): DemoState {
   return {
-    view: 'radar',
+    view: 'list',
     overlay: null,
     profileId: null,
     chatId: null,

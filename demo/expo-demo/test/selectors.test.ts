@@ -76,8 +76,16 @@ describe('visibleProfiles', () => {
   });
 
   it('el filtro de intención acota el conjunto', () => {
-    expect(ids(state({ intentions: ['activities'] }))).toEqual(['p04', 'p08']);
-    expect(ids(state({ intentions: ['dating'] }))).toEqual(['p03', 'p06', 'p10']);
+    expect(ids(state({ intentions: ['activities'] }))).toEqual(['p04', 'p06', 'p08']);
+    expect(ids(state({ intentions: ['friendship'] }))).toEqual(['p02', 'p03', 'p07']);
+    expect(ids(state({ intentions: ['networking'] }))).toEqual(['p01', 'p05', 'p09', 'p10']);
+  });
+
+  it('las tres intenciones del catálogo están en uso', () => {
+    expect(fixtures.filters.intentions).toHaveLength(3);
+    for (const intention of fixtures.filters.intentions) {
+      expect(ids(state({ intentions: [intention] })).length).toBeGreaterThanOrEqual(2);
+    }
   });
 
   it('elegir la intención propia la aplica como filtro por defecto', () => {
@@ -87,7 +95,7 @@ describe('visibleProfiles', () => {
     }).state;
     expect(selected.selfIntention).toBe('activities');
     expect(selected.filters.intentions).toEqual(['activities']);
-    expect(ids(selected)).toEqual(['p04', 'p08']);
+    expect(ids(selected)).toEqual(['p04', 'p06', 'p08']);
 
     const cleared = reduce(selected, { type: 'CLEAR_FILTERS' }).state;
     expect(cleared.filters.intentions).toBeNull();
@@ -110,7 +118,7 @@ describe('visibleProfiles', () => {
 
   it('un bloqueado desaparece y una combinación imposible queda vacía', () => {
     expect(ids(state({ blocked: ['p01'] }))[0]).toBe('p02');
-    expect(ids(state({ intentions: ['dating'], radiusM: 500 }))).toEqual([]);
+    expect(ids(state({ gender: 'nonbinary', radiusM: 500 }))).toEqual([]);
   });
 });
 

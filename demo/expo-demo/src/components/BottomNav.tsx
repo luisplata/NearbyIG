@@ -31,9 +31,9 @@ export function BottomNav({
   onSelect: (target: NavTarget) => void;
 }) {
   const items: Item[] = [
+    { target: 'list', icon: 'list', label: fmt('nav.list') },
     { target: 'radar', icon: 'radar', label: fmt('nav.radar') },
     { target: 'map', icon: 'map', label: fmt('nav.map') },
-    { target: 'list', icon: 'list', label: fmt('nav.list') },
     { target: 'pings', icon: 'ping', label: fmt('nav.pings'), badge: pingsCount },
     { target: 'profile', icon: 'person', label: fmt('nav.profile') },
   ];
