@@ -10,6 +10,7 @@ Repositorio raíz del producto. Acá conviven frontend, backend y documentación
 |---------|-----------|--------|
 | `frontend/` | App web / PWA y wrapper nativo (Capacitor) | Pendiente de análisis técnico |
 | `backend/` | API y servicios del producto | Pendiente de análisis técnico |
+| `demo/` | Dos demos mock (Flutter web + Expo web) y landing con contrato compartido | Funcional, publicable en Pages |
 | `docs/` | Documentación + sitio web publicado con GitHub Actions | Pendiente de análisis técnico |
 | `nearbyig-app-complete.zip` | Snapshot del prototipo generado en AI Studio (backup) | Congelado |
 
@@ -25,6 +26,26 @@ modifica hasta que exista una decisión técnica documentada.
 
 Análisis técnico de opciones (frontend, backend, documentación y despliegue) antes de
 escribir código de producto.
+
+## Demos
+
+Dos implementaciones mock del mismo flujo —Flutter web y Expo web— alimentadas por un
+único contrato (`demo/shared/`) y publicadas como un solo sitio de GitHub Pages:
+
+| Ruta del sitio | Contenido |
+|---|---|
+| `/` | landing con `datasetId`, `noindex` y enlaces a ambas demos |
+| `/flutter/` | demo Flutter web |
+| `/expo/` | demo Expo web |
+
+Todo es simulado: sin backend, auth, push, geolocalización real, tiles reales, OAuth ni
+persistencia. Runbook en [`demo/README.md`](demo/README.md); contrato vinculante (10
+pantallas y checklist de paridad de 15 puntos) en [`demo/CONTRACT.md`](demo/CONTRACT.md).
+
+El workflow `.github/workflows/pages.yml` valida el contrato, construye ambas apps,
+audita el artefacto y lo publica. **GitHub Pages todavía no está habilitado**: los pasos
+manuales (Settings → Pages → Source: GitHub Actions), la verificación y el rollback
+están en [`docs/pages-handoff.md`](docs/pages-handoff.md).
 
 ## Repositorio
 

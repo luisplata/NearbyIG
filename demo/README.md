@@ -106,7 +106,64 @@ npx serve@14 site -l 4173                       # preview: http://localhost:4173
 `--check-only` sin `--strict` devuelve 0 cuando el único problema es un target que
 todavía no se construyó (lo lista como `pending`), y devuelve 1 si encuentra archivos
 de la denylist (ZIP, keystore, `.env`, config Firebase, `node_modules`, `*.map`),
-hosts prohibidos o secretos.
+hosts prohibidos o secretos. `--strict` además exige las tres `index.html`, la landing
+con `noindex`, enlaces relativos y el `datasetId` del contrato.
+
+## Landing
+
+`demo/landing/` no tiene texto visible ni colores escritos a mano:
+
+| Archivo | Rol |
+|---|---|
+| `index.html` | estructura y claves `data-copy` / `data-copy-alt` |
+| `styles.css` | layout; sólo consume variables de `generated/tokens.css` |
+| `main.js` | hidrata copy, `datasetId`, `schemaVersion` y `<title>` |
+| `generated/dataset.js` | `datasetId`, `schemaVersion` y catálogo de copy (sync) |
+| `generated/tokens.css` | paleta y escalas desde `design-tokens.json` (sync) |
+| `assets/brand`, `assets/fonts` | marca y fuentes locales (sync) |
+
+Enlaces siempre relativos (`./flutter/`, `./expo/`), así la landing funciona en `/` y en
+`/NearbyIG/` sin conocer el base path. `scripts/lib/landing.test.mjs` verifica que todas
+las claves existan, que no haya hosts externos y que el `datasetId` generado coincida
+con el del contrato.
+
+## Publicación en GitHub Pages
+
+Un único workflow (`.github/workflows/pages.yml`) publica un único artefacto:
+
+| Ruta del sitio | Origen |
+|---|---|
+| `/` | `demo/landing/` |
+| `/flutter/` | `demo/flutter-demo/build/web/` |
+| `/expo/` | `demo/expo-demo/dist/` |
+
+- Dispara en `push` a `main`, en `pull_request` y con `workflow_dispatch`. Los PR sólo
+  corren `checks`: nunca publican.
+- `actions/configure-pages@v5` corre **antes** de los builds y aporta el base path real
+  (vacío en sitio de usuario, `/NearbyIG` en sitio de proyecto).
+- Gate previo al upload: `validate-fixtures`, `sync --check`, tests de tooling,
+  typecheck/tests de Expo, analyze/tests de Flutter, export, build y
+  `assemble-site.mjs --strict site` (3 `index.html` + denylist + hosts + datasetId).
+- `pages:write` e `id-token:write` viven **sólo** en el job `deploy`; environment
+  `github-pages`; `timeout-minutes: 25`.
+- **No habilita Pages.** Si todavía no está habilitado, el workflow falla antes de
+  construir. Los pasos manuales están en [`docs/pages-handoff.md`](../docs/pages-handoff.md).
+
+Comandos equivalentes a mano:
+
+```bash
+npm ci && npm --prefix demo/expo-demo ci
+node scripts/validate-fixtures.mjs
+node scripts/sync-demo-assets.mjs --check
+npm run test:scripts
+npm --prefix demo/expo-demo run typecheck && npm --prefix demo/expo-demo run test
+export PATH="/c/Users/luis_/flutter/bin:$PATH"
+(cd demo/flutter-demo && flutter pub get && flutter analyze && flutter test)
+(cd demo/expo-demo && MSYS_NO_PATHCONV=1 EXPO_BASE_URL=/expo npx expo export --platform web --output-dir dist --clear)
+(cd demo/flutter-demo && MSYS_NO_PATHCONV=1 flutter build web --release --pwa-strategy=none --base-href=/flutter/)
+PAGES_BASE_PATH="" node scripts/assemble-site.mjs --strict site
+python -m http.server 4190 --directory site
+```
 
 ## Base path
 
@@ -123,6 +180,8 @@ Flutter declara el `<base href>` esperado:
 
 ```bash
 PAGES_BASE_PATH="" node scripts/assemble-site.mjs
+# Sitio de proyecto (Git Bash/MSYS convierte /NearbyIG en ruta de Windows):
+MSYS_NO_PATHCONV=1 PAGES_BASE_PATH=/NearbyIG node scripts/assemble-site.mjs --strict site
 ```
 
 ## Reglas que no se negocian

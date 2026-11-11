@@ -22,6 +22,16 @@ El sitio de documentación debe construirse y publicarse desde un workflow de Gi
 Actions en `.github/workflows/`. La elección del generador (por ejemplo VitePress,
 Docusaurus, Astro, o HTML plano) queda para el análisis técnico.
 
+## Sitio actual: hub de demos
+
+El primer sitio publicado (`.github/workflows/pages.yml`) es el hub de demos mock:
+landing en `/`, demo Flutter en `/flutter/` y demo Expo en `/expo/`. No publica esta
+carpeta `docs/`: cuando exista un generador, la documentación irá en `/docs/` sin
+romper `/`, `/flutter/` ni `/expo/`.
+
+Pages todavía no está habilitado. Habilitación, publicación, verificación y rollback:
+[`pages-handoff.md`](pages-handoff.md).
+
 ## Contenido esperado
 
 - Visión y alcance del producto

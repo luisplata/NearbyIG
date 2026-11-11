@@ -45,7 +45,7 @@ Reglas duras del dataset (validadas por script):
 - Claves en `dot.case`, agrupadas por pantalla/prefijo: `common.`, `nav.`, `discovery.`,
   `filters.`, `profile.`, `ping.`, `match.`, `chat.`, `notif.`, `settings.`, `ig.`,
   `privacy.`, `about.`, `safety.`, `a11y.`, `intention.`, `gender.`, `status.`, `bio.`,
-  `map.label.`.
+  `map.label.`, `landing.`.
 - Interpolación con llaves: `{name}`, `{distance}`, `{count}`, `{radius}`. Helper
   `fmt(key, params)` generado en ambos lenguajes.
 - Los 8 ítems de "Qué es simulado" son las claves `common.simItems.1` … `common.simItems.8`
@@ -171,9 +171,9 @@ la misma secuencia de acciones. La secuencia canónica está en
 | photoMap | `lib/generated/photo_map.dart` | `src/generated/photoMap.ts` |
 | dataset | `lib/generated/dataset.dart` | `src/generated/dataset.ts` |
 
-Más `landing/generated/dataset.js`, las copias de `assets/brand`, `assets/fonts` y
-`test/golden/`. Todos los generados son byte-estables (LF, claves ordenadas, sin
-timestamps) y se verifican así:
+Más `landing/generated/dataset.js`, `landing/generated/tokens.css`, las copias de
+`assets/brand`, `assets/fonts` y `test/golden/`. Todos los generados son byte-estables
+(LF, claves ordenadas, sin timestamps) y se verifican así:
 
 ```bash
 node scripts/validate-fixtures.mjs
@@ -207,6 +207,11 @@ artefacto. Cubierto por `scripts/lib/denylist.test.mjs`.
 Patrones de secreto prohibidos: claves `AIza…`, `BEGIN … PRIVATE KEY`, `private_key`,
 `client_secret`, `apiKey` con valor.
 
+Además del escaneo de archivos, `assemble-site.mjs --strict` falla si falta alguna de
+las tres `index.html`, si la landing perdió `noindex` o los enlaces relativos, o si su
+`generated/dataset.js` no coincide con el `datasetId` recalculado del contrato. Es el
+mismo comando que corre el workflow antes de subir el artefacto.
+
 ## 12. Base path y rutas
 
 | Contexto | Flutter `--base-href` | `EXPO_BASE_URL` | Landing |
@@ -217,3 +222,51 @@ Patrones de secreto prohibidos: claves `AIza…`, `BEGIN … PRIVATE KEY`, `priv
 Flutter exige barra inicial y final; Expo exige barra inicial y prohíbe la final. Ni las
 apps ni la landing hardcodean el host. `/`, `/flutter/` y `/expo/` son directorios con
 `index.html`: no dependen de rewrites ni de rutas profundas.
+
+## 13. Publicación
+
+Un único workflow (`.github/workflows/pages.yml`) publica un único artefacto de Pages:
+landing en `/`, Flutter en `/flutter/`, Expo en `/expo/`. `configure-pages` resuelve el
+base path antes de los builds; validación, drift, tests, builds y auditoría del
+artefacto bloquean el upload (nunca hay deploy parcial). `pages:write` e
+`id-token:write` viven sólo en el job de deploy y el workflow **no habilita Pages**.
+
+Sin `Pages → Source: GitHub Actions` el job `build` falla en `configure-pages`, a
+propósito. Pasos manuales, verificación y rollback: [`../docs/pages-handoff.md`](../docs/pages-handoff.md).
+
+## 14. Evidencia de verificación (paridad 15 puntos)
+
+Los puntos se verifican con la golden compartida (mismos digests en Dart y TS), los
+tests de cada app y la auditoría del artefacto. La columna “Visual” marca lo que exige
+un navegador real y queda pendiente hasta la revisión con DevTools + lector de pantalla.
+
+| # | Automatizado | Visual |
+|---|---|---|
+| 1 | golden (`SET_SELF_INTENTION`), 4 intenciones válidas en `validate-fixtures` | cambio reflejado en perfil y filtro |
+| 2 | Flutter: radar con 10 puntos accesibles y reduced-motion estático | mismo orden/distancias en las 3 vistas de Expo |
+| 3 | `selectors.test.ts` / `selectors_test.dart`: radio 500 m, filtros y vacío | CTA “Limpiar filtros” en ambas |
+| 4 | golden timers + widget test de ping enviado/deshabilitado | ping entrante a 3.0 s en Expo |
+| 5 | golden (`ACCEPT_PING`, `SEND_MESSAGE`, `REJECT_PING`) | overlay de match a 2.5 s |
+| 6 | golden de notificaciones + `unreadCount` | badge y toast de 4.0 s |
+| 7 | `SET_VERIFICATION` en golden; disclaimer obligatorio en `validate-fixtures` | 3 estados ciclables |
+| 8 | `pingBlockedReason('paused')`; golden `TOGGLE_GHOST` | banner persistente |
+| 9 | `avatarState` / `isRevealed`; golden `REVEAL_PHOTO` | reveal del par a 1.5 s |
+| 10 | golden `BLOCK_PROFILE` / `UNBLOCK_PROFILE`; `visibleProfiles` excluye bloqueados | desaparición en mapa/radar/lista |
+| 11 | sin pantalla/modelo de historial; `privacy.noHistory` obligatorio | copy visible en privacidad |
+| 12 | widget test de reset; `store.test.ts` cancela timers | refresh en el navegador |
+| 13 | 360×640 sin overflow; labels con nombre + distancia + badges | 320/480/768/1440 y foco con teclado |
+| 14 | denylist de hosts en el artefacto; cero storage/fetch en el código | Network con dominios externos |
+| 15 | widget test del chip DEMO y los 8 ítems | chip persistente en todas las pantallas |
+
+Automatizado y reproducible:
+
+```bash
+node scripts/validate-fixtures.mjs
+node scripts/sync-demo-assets.mjs --check
+npm run test:scripts
+npm --prefix demo/expo-demo run typecheck && npm --prefix demo/expo-demo run test
+(cd demo/flutter-demo && flutter analyze && flutter test)
+PAGES_BASE_PATH="" node scripts/assemble-site.mjs --strict site
+```
+
+
