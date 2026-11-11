@@ -15,6 +15,7 @@ La carpeta ya tiene documentos de trabajo. El sitio publicado todavía no tiene 
 | [`costos-operacion.md`](costos-operacion.md) | Costos de infraestructura, escenarios de carga y justificación por componente. |
 | [`checklist-piloto.md`](checklist-piloto.md) | Qué comprar, qué crear gratis y qué datos entregar para arrancar el piloto. |
 | [`plan-sprints-mvp.md`](plan-sprints-mvp.md) | Features, dependencias, orden de ejecución y demo esperada por sprint. |
+| [`plan-sprints-backend-demo.md`](plan-sprints-backend-demo.md) | Entregables del backend, gates de validación y demo esperada por sprint. |
 
 ## Requisito
 
