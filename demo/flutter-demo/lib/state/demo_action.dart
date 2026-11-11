@@ -2,7 +2,7 @@ import '../generated/fixtures.dart';
 import 'demo_effect.dart';
 import 'demo_state.dart';
 
-/// Las 26 acciones del contrato (state-machine.md §2).
+/// Las 27 acciones del contrato (state-machine.md §2).
 enum DemoActionType {
   setView,
   setSelfIntention,
@@ -27,6 +27,7 @@ enum DemoActionType {
   reportProfile,
   markRead,
   markAllRead,
+  markNotificationsRead,
   dismissToast,
   timerFired,
   reset,
@@ -56,6 +57,7 @@ const Map<String, DemoActionType> _typesByName = <String, DemoActionType>{
   'REPORT_PROFILE': DemoActionType.reportProfile,
   'MARK_READ': DemoActionType.markRead,
   'MARK_ALL_READ': DemoActionType.markAllRead,
+  'MARK_NOTIFICATIONS_READ': DemoActionType.markNotificationsRead,
   'DISMISS_TOAST': DemoActionType.dismissToast,
   'TIMER_FIRED': DemoActionType.timerFired,
   'RESET': DemoActionType.reset,
@@ -156,6 +158,9 @@ class DemoAction {
 
   const DemoAction.markAllRead() : this._(DemoActionType.markAllRead);
 
+  const DemoAction.markNotificationsRead()
+    : this._(DemoActionType.markNotificationsRead);
+
   const DemoAction.dismissToast() : this._(DemoActionType.dismissToast);
 
   const DemoAction.timerFired(DemoEffectKind kind, String id)
@@ -244,6 +249,8 @@ class DemoAction {
         );
       case DemoActionType.markAllRead:
         return const DemoAction.markAllRead();
+      case DemoActionType.markNotificationsRead:
+        return const DemoAction.markNotificationsRead();
       case DemoActionType.dismissToast:
         return const DemoAction.dismissToast();
       case DemoActionType.timerFired:

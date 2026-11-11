@@ -5,7 +5,10 @@ import 'package:nearbyig_demo/generated/copy.dart';
 import 'package:nearbyig_demo/generated/dataset.dart';
 import 'package:nearbyig_demo/generated/fixtures.dart';
 import 'package:nearbyig_demo/state/demo_action.dart';
+import 'package:nearbyig_demo/state/demo_effect.dart';
 import 'package:nearbyig_demo/state/demo_store.dart';
+import 'package:nearbyig_demo/state/demo_state.dart';
+import 'package:nearbyig_demo/state/selectors.dart';
 import 'package:nearbyig_demo/widgets/radar_view.dart';
 
 Future<DemoStore> _pumpApp(WidgetTester tester) async {
@@ -128,21 +131,19 @@ void main() {
     expect(find.text(kDemoVersion), findsOneWidget);
   });
 
-  testWidgets('la tarjeta anuncia verificado y en línea con copy del catálogo', (
-    tester,
-  ) async {
-    final handle = tester.ensureSemantics();
-    await _pumpApp(tester);
-    await tester.tap(find.byIcon(Icons.view_list_outlined));
-    await tester.pump();
+  testWidgets(
+    'la tarjeta anuncia verificado y en línea con copy del catálogo',
+    (tester) async {
+      final handle = tester.ensureSemantics();
+      await _pumpApp(tester);
+      await tester.tap(find.byIcon(Icons.view_list_outlined));
+      await tester.pump();
 
-    expect(
-      find.bySemanticsLabel(RegExp(fmt('a11y.verified'))),
-      findsWidgets,
-    );
-    expect(find.bySemanticsLabel(RegExp(fmt('a11y.online'))), findsWidgets);
-    handle.dispose();
-  });
+      expect(find.bySemanticsLabel(RegExp(fmt('a11y.verified'))), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp(fmt('a11y.online'))), findsWidgets);
+      handle.dispose();
+    },
+  );
 
   testWidgets('con movimiento reducido el radar no anima', (tester) async {
     await tester.pumpWidget(
@@ -160,5 +161,60 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(RadarView), findsOneWidget);
+  });
+
+  testWidgets('la bandeja lista el ping enviado con estado pendiente', (
+    tester,
+  ) async {
+    final store = await _pumpApp(tester);
+    await tester.tap(find.byIcon(Icons.view_list_outlined));
+    await tester.pump();
+    await tester.tap(find.text('Vale'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, fmt('profile.ping')));
+    await tester.pump();
+
+    // El toast del envío tapa la barra inferior: se descarta antes de navegar.
+    store.dispatch(const DemoAction.dismissToast());
+    await tester.pump();
+    // Cierra el perfil y abre la bandeja desde la barra inferior.
+    await tester.tap(find.byTooltip(fmt('common.close')));
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.wifi_tethering));
+    await tester.pump();
+
+    expect(store.state.pingsSent, <String>['p01']);
+    expect(find.text(fmt('ping.sentTitle')), findsOneWidget);
+    expect(find.text(fmt('ping.sentStatus')), findsOneWidget);
+    expect(find.text(fmt('ping.inboxEmpty')), findsNothing);
+    // Un ping ya enviado no ofrece una segunda acción de envío.
+    expect(find.widgetWithText(FilledButton, fmt('ping.accept')), findsNothing);
+
+    store.dispatch(const DemoAction.reset());
+    await tester.pump();
+  });
+
+  testWidgets('abrir el centro de notificaciones limpia el badge', (
+    tester,
+  ) async {
+    final store = await _pumpApp(tester);
+    store.dispatch(
+      const DemoAction.timerFired(DemoEffectKind.incomingPing, 'p07'),
+    );
+    await tester.pump();
+
+    expect(store.state.notifications, isNotEmpty);
+    expect(store.state.notifications.every((n) => n.read), isFalse);
+    expect(store.state.overlay, isNull);
+
+    await tester.tap(find.byIcon(Icons.notifications_none));
+    await tester.pump();
+
+    expect(store.state.overlay, DemoOverlay.notifications);
+    expect(store.state.notifications.every((n) => n.read), isTrue);
+    expect(unreadCount(store.state), 0);
+
+    store.dispatch(const DemoAction.reset());
+    await tester.pump();
   });
 }

@@ -142,6 +142,8 @@ const Map<String, String> kCopy = <String, String>{
   'ping.inboxTitle': 'Pings recibidos',
   'ping.reject': 'Rechazar',
   'ping.sent': 'Ping enviado',
+  'ping.sentStatus': 'Enviado / esperando respuesta',
+  'ping.sentTitle': 'Pings enviados',
   'privacy.dataNote': 'No hay backend ni persistencia: al recargar, todo vuelve a empezar.',
   'privacy.demoNote': 'Datos ficticios con fines de demostración.',
   'privacy.noHistory': 'Sin historial de rutas: la demo no registra recorridos, encuentros ni visitas.',

@@ -3,7 +3,7 @@
 // Regenerate with: node scripts/sync-demo-assets.mjs
 
 window.NEARBYIG_DATASET = Object.freeze({
-  datasetId: "ds-23bd753f",
+  datasetId: "ds-0f68eee4",
   schemaVersion: 1,
   copy: Object.freeze({
   "a11y.map": "Mapa simulado de perfiles cercanos",
@@ -144,6 +144,8 @@ window.NEARBYIG_DATASET = Object.freeze({
   "ping.inboxTitle": "Pings recibidos",
   "ping.reject": "Rechazar",
   "ping.sent": "Ping enviado",
+  "ping.sentStatus": "Enviado / esperando respuesta",
+  "ping.sentTitle": "Pings enviados",
   "privacy.dataNote": "No hay backend ni persistencia: al recargar, todo vuelve a empezar.",
   "privacy.demoNote": "Datos ficticios con fines de demostración.",
   "privacy.noHistory": "Sin historial de rutas: la demo no registra recorridos, encuentros ni visitas.",

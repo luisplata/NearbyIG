@@ -4,7 +4,7 @@ import type { Gender, Intention } from '../generated/fixtures';
 import type { DemoEffectKind, DemoView, DemoOverlay } from './types';
 
 /**
- * Las 26 acciones del contrato (state-machine.md §2). Mismo union que
+ * Las 27 acciones del contrato (state-machine.md §2). Mismo union que
  * `DemoActionType` de la app Flutter; `actionFromJson` replica su `fromJson`
  * para que el golden de paridad use exactamente el mismo mapeo.
  */
@@ -32,6 +32,7 @@ export type DemoAction =
   | { type: 'REPORT_PROFILE'; profileId: string; reason: string }
   | { type: 'MARK_READ'; notificationId: string }
   | { type: 'MARK_ALL_READ' }
+  | { type: 'MARK_NOTIFICATIONS_READ' }
   | { type: 'DISMISS_TOAST' }
   | { type: 'TIMER_FIRED'; kind: DemoEffectKind; id: string }
   | { type: 'RESET' };
@@ -85,6 +86,7 @@ const ACTION_TYPES: readonly DemoActionType[] = [
   'REPORT_PROFILE',
   'MARK_READ',
   'MARK_ALL_READ',
+  'MARK_NOTIFICATIONS_READ',
   'DISMISS_TOAST',
   'TIMER_FIRED',
   'RESET',
@@ -158,6 +160,7 @@ export function actionFromJson(json: Record<string, unknown>): DemoAction {
     case 'TOGGLE_GHOST':
     case 'SET_VERIFICATION':
     case 'MARK_ALL_READ':
+    case 'MARK_NOTIFICATIONS_READ':
     case 'DISMISS_TOAST':
     case 'RESET':
       return { type };

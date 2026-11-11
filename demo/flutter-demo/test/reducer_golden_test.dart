@@ -8,6 +8,7 @@ import 'package:nearbyig_demo/state/demo_effect.dart';
 import 'package:nearbyig_demo/state/demo_reducer.dart';
 import 'package:nearbyig_demo/state/demo_state.dart';
 import 'package:nearbyig_demo/state/projection.dart';
+import 'package:nearbyig_demo/state/selectors.dart';
 
 Map<String, Object?> _readJson(String path) =>
     jsonDecode(File(path).readAsStringSync()) as Map<String, Object?>;
@@ -45,7 +46,7 @@ void main() {
       expect(expected['digestLength'], kDigestLength);
     });
 
-    test('la secuencia ejercita las 26 acciones y los 5 timers', () {
+    test('la secuencia ejercita las 27 acciones y los 5 timers', () {
       final steps = _steps(_readJson('test/golden/steps.json'));
       final actionTypes = <DemoActionType>{
         for (final step in steps)
@@ -119,17 +120,17 @@ void main() {
           );
           expect(stepByNumber(17)['action'], isNotNull);
         }
-        if (step['n'] == 28) {
+        if (step['n'] == 29) {
           expect(
             digestOf(state),
-            expectedByNumber(27)['digest'],
+            expectedByNumber(28)['digest'],
             reason: 'un mensaje con typing activo debe ser no-op',
           );
         }
-        if (step['n'] == 38) {
+        if (step['n'] == 39) {
           expect(
             digestOf(state),
-            expectedByNumber(37)['digest'],
+            expectedByNumber(38)['digest'],
             reason: 'ping en modo fantasma debe ser no-op',
           );
         }
@@ -140,6 +141,34 @@ void main() {
       final result = reduce(initialState(), const DemoAction.reset());
       expect(result.effects, isEmpty);
       expect(projectState(result.state), projectState(initialState()));
+    });
+
+    test('MARK_NOTIFICATIONS_READ marca todo leído y es idempotente', () {
+      var state = reduce(
+        initialState(),
+        const DemoAction.timerFired(DemoEffectKind.incomingPing, 'p07'),
+      ).state;
+      state = reduce(
+        state,
+        const DemoAction.openOverlay(DemoOverlay.notifications),
+      ).state;
+      expect(
+        state.notifications.every((notification) => !notification.read),
+        isTrue,
+        reason: 'abrir el overlay no marca nada por sí solo: lo hace la acción',
+      );
+
+      state = reduce(state, const DemoAction.markNotificationsRead()).state;
+      expect(state.notifications, isNotEmpty);
+      expect(
+        state.notifications.every((notification) => notification.read),
+        isTrue,
+      );
+      expect(unreadCount(state), 0);
+
+      final again = reduce(state, const DemoAction.markNotificationsRead());
+      expect(again.effects, isEmpty);
+      expect(projectState(again.state), projectState(state));
     });
   });
 }

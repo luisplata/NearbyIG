@@ -65,6 +65,8 @@ ReduceResult reduce(DemoState state, DemoAction action) {
       return _markRead(state, action);
     case DemoActionType.markAllRead:
       return _markAllRead(state);
+    case DemoActionType.markNotificationsRead:
+      return _markAllRead(state);
     case DemoActionType.dismissToast:
       return _dismissToast(state);
     case DemoActionType.timerFired:

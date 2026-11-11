@@ -17,8 +17,8 @@ agenda el store, que es el único que conoce timers.
 ```text
 DemoState {
   view: 'radar' | 'map' | 'list'
-  overlay: null | 'profile' | 'chat' | 'notifications' | 'filters' | 'settings'
-                | 'about' | 'safety' | 'blocked' | 'privacy'
+  overlay: null | 'profile' | 'chat' | 'pings' | 'notifications' | 'filters'
+                | 'settings' | 'about' | 'safety' | 'blocked' | 'privacy'
   profileId: string | null          // perfil enfocado por overlay profile/safety
   chatId: string | null
   selfIntention: Intention
@@ -58,14 +58,14 @@ radiusM:fixtures.filters.defaultRadiusM}`, listas vacías, `verification='unveri
 `'n' + (notifSeq + 1)` y un toast nuevo usa `'t' + (toastSeq + 1)`; ambos contadores se
 incrementan al crear el objeto. Nunca se reutiliza un id.
 
-## 2. Acciones (26)
+## 2. Acciones (27)
 
 `SET_VIEW`, `SET_SELF_INTENTION`, `OPEN_OVERLAY`, `CLOSE_OVERLAY`, `SET_RADIUS`,
 `TOGGLE_FILTER_INTENTION`, `SET_GENDER_FILTER`, `TOGGLE_VERIFIED_ONLY`,
 `TOGGLE_ONLINE_ONLY`, `CLEAR_FILTERS`, `SEND_PING`, `ACCEPT_PING`, `REJECT_PING`,
 `OPEN_CHAT`, `SEND_MESSAGE`, `REVEAL_PHOTO`, `TOGGLE_GHOST`, `SET_VERIFICATION`,
 `BLOCK_PROFILE`, `UNBLOCK_PROFILE`, `REPORT_PROFILE`, `MARK_READ`, `MARK_ALL_READ`,
-`DISMISS_TOAST`, `TIMER_FIRED`, `RESET`.
+`MARK_NOTIFICATIONS_READ`, `DISMISS_TOAST`, `TIMER_FIRED`, `RESET`.
 
 Payloads canónicos (mismos nombres en ambos lenguajes):
 
@@ -90,7 +90,7 @@ Payloads canónicos (mismos nombres en ambos lenguajes):
 | `BLOCK_PROFILE` / `UNBLOCK_PROFILE` | `profileId` |
 | `REPORT_PROFILE` | `profileId`, `reason` |
 | `MARK_READ` | `notificationId` |
-| `MARK_ALL_READ` / `DISMISS_TOAST` / `RESET` | — |
+| `MARK_ALL_READ` / `MARK_NOTIFICATIONS_READ` / `DISMISS_TOAST` / `RESET` | — |
 | `TIMER_FIRED` | `kind`, `id` |
 
 ## 3. Guards y cambios
@@ -110,7 +110,7 @@ nunca confía en la UI.
 | `SET_GENDER_FILTER` | `'all'` o género válido | `filters.gender` |
 | `TOGGLE_VERIFIED_ONLY` / `TOGGLE_ONLINE_ONLY` | — | invierte el booleano |
 | `CLEAR_FILTERS` | — | filtros al default (`intentions=null`, `gender='all'`, ambos false) |
-| `SEND_PING` | `!ghost`, perfil visible, no bloqueado, no en `pingsSent`, no en `matches` | `pingsSent+=id`; si `pingsSent` estaba vacío → effect `{incomingPing, incomingPingFromId, incomingPingMs}`; toast `ping.sent` |
+| `SEND_PING` | `!ghost`, perfil visible, no bloqueado, no en `pingsSent`, no en `matches` | `pingsSent+=id`; si `pingsSent` estaba vacío → effect `{incomingPing, incomingPingFromId, incomingPingMs}`; toast `ping.sent`; la bandeja lo lista como enviado (sin acción de envío) |
 | `ACCEPT_PING` | `!ghost`, `id` en `incomingPings`, no bloqueado | saca de `incomingPings`, `matches+=id`, `messages[id]=[]`, effect `{match, id, matchMs}` |
 | `REJECT_PING` | `id` en `incomingPings` | saca de `incomingPings`; sin match ni chat |
 | `TIMER_FIRED` | según `kind` (abajo) | según `kind` (abajo) |
@@ -124,6 +124,7 @@ nunca confía en la UI.
 | `REPORT_PROFILE` | `id` no bloqueado, `reason` en `fixtures.reportReasons` | no altera el dataset ni bloquea; toast `safety.reportDone` |
 | `MARK_READ` | notificación existente | `read=true` |
 | `MARK_ALL_READ` | — | todas `read=true` |
+| `MARK_NOTIFICATIONS_READ` | — | todas `read=true`; lo despacha la UI al abrir el centro de notificaciones (F-6), después de `OPEN_OVERLAY('notifications')` |
 | `DISMISS_TOAST` | hay toast | `toast=null` |
 | `RESET` | — | `initialState()`; el store cancela todos los timers |
 

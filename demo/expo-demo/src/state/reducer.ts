@@ -431,7 +431,10 @@ export function reduce(state: DemoState, action: DemoAction): ReduceResult {
       return done(next);
     }
 
-    case 'MARK_ALL_READ': {
+    // `MARK_NOTIFICATIONS_READ` es la regla de apertura del centro (F-6):
+    // markAllRead lo despacha la UI después de `OPEN_OVERLAY('notifications')`.
+    case 'MARK_ALL_READ':
+    case 'MARK_NOTIFICATIONS_READ': {
       const next = cloneState(state);
       next.notifications = next.notifications.map((notification) => ({
         ...notification,

@@ -53,11 +53,11 @@ describe('golden de paridad', () => {
     expect(expected.digestLength).toBe(DIGEST_LENGTH);
   });
 
-  it('la secuencia ejercita las 26 acciones y los 4 timers del guion', () => {
+  it('la secuencia ejercita las 27 acciones y los 4 timers del guion', () => {
     const actions = steps.map((step) => actionFromJson(step.action));
     const types = new Set<DemoActionType>(actions.map((action) => action.type));
     expect([...types].sort()).toEqual([...ACTION_TYPES].sort());
-    expect(types.size).toBe(26);
+    expect(types.size).toBe(27);
 
     const timerKinds = new Set<DemoEffectKind>(
       actions.flatMap((action) => (action.type === 'TIMER_FIRED' ? [action.kind] : [])),
@@ -78,11 +78,26 @@ describe('golden de paridad', () => {
 
   it('los guards del guion son no-op (mismo digest que el paso anterior)', () => {
     const { byNumber } = applySteps();
-    // 17: segundo ping al mismo perfil; 28: mensaje con typing activo;
-    // 38: ping en modo fantasma.
+    // 17: segundo ping al mismo perfil; 29: mensaje con typing activo;
+    // 39: ping en modo fantasma.
     expect(byNumber.get(17)).toBe(byNumber.get(16));
-    expect(byNumber.get(28)).toBe(byNumber.get(27));
-    expect(byNumber.get(38)).toBe(byNumber.get(37));
+    expect(byNumber.get(29)).toBe(byNumber.get(28));
+    expect(byNumber.get(39)).toBe(byNumber.get(38));
+  });
+
+  it('abrir el centro marca todo leído y es idempotente', () => {
+    let state = initialState();
+    state = reduce(state, { type: 'TIMER_FIRED', kind: 'incomingPing', id: 'p07' }).state;
+    state = reduce(state, { type: 'OPEN_OVERLAY', overlay: 'notifications' }).state;
+    expect(state.notifications.every((notification) => !notification.read)).toBe(true);
+
+    state = reduce(state, { type: 'MARK_NOTIFICATIONS_READ' }).state;
+    expect(state.notifications.length).toBeGreaterThan(0);
+    expect(state.notifications.every((notification) => notification.read)).toBe(true);
+
+    const again = reduce(state, { type: 'MARK_NOTIFICATIONS_READ' });
+    expect(again.effects).toEqual([]);
+    expect(projectState(again.state)).toBe(projectState(state));
   });
 
   it('RESET vuelve al estado inicial sin efectos pendientes', () => {

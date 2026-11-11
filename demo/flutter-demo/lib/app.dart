@@ -93,9 +93,7 @@ class _DemoShellState extends State<DemoShell> {
               children: <Widget>[
                 _GlobalHeader(
                   unread: unreadCount(state),
-                  onNotifications: () => store.dispatch(
-                    const DemoAction.openOverlay(DemoOverlay.notifications),
-                  ),
+                  onNotifications: () => _openNotifications(store),
                   onSim: () => setState(() => _simOpen = true),
                 ),
                 if (state.ghost)
@@ -157,6 +155,14 @@ class _DemoShellState extends State<DemoShell> {
         ),
       ),
     );
+  }
+
+  /// Abrir el centro de notificaciones limpia el badge (F-6): primero navega y
+  /// después marca todo leído con una acción explícita, para que el reducer y el
+  /// golden cubran la regla (state-machine.md §3).
+  void _openNotifications(DemoStore store) {
+    store.dispatch(const DemoAction.openOverlay(DemoOverlay.notifications));
+    store.dispatch(const DemoAction.markNotificationsRead());
   }
 
   void _onBack(DemoStore store, DemoState state) {

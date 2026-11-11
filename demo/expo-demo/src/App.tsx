@@ -31,6 +31,8 @@ import { colors, space, text } from './theme/theme';
 /**
  * Raíz de la demo Expo. Carga Inter local con `expo-font` (sin CDN) y no
  * renderiza hasta tener la fuente: evita FOUT y diferencias de captura (E-6).
+ * El idioma del documento (`lang="es"`) sale del build, no de un override en
+ * runtime: `web.lang` + `public/index.html` (E-5 / F-13).
  */
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -78,6 +80,15 @@ function DemoShell() {
     dispatch({ type: 'CLOSE_OVERLAY' });
   };
 
+  /**
+   * Abrir el centro de notificaciones limpia el badge (F-6): navega y después
+   * marca todo leído con la acción explícita que también reproduce el golden.
+   */
+  const openNotifications = (): void => {
+    dispatch({ type: 'OPEN_OVERLAY', overlay: 'notifications' });
+    dispatch({ type: 'MARK_NOTIFICATIONS_READ' });
+  };
+
   return (
     <View style={styles.root}>
       <DemoFrame>
@@ -100,7 +111,7 @@ function DemoShell() {
                     ? fmt('a11y.notificationsBadge', { count: `${unreadCount(state)}` })
                     : fmt('nav.notifications')
                 }
-                onPress={() => dispatch({ type: 'OPEN_OVERLAY', overlay: 'notifications' })}
+                onPress={() => openNotifications()}
               />
               <CountBadge
                 count={unreadCount(state)}
