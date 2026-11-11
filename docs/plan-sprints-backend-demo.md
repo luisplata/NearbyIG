@@ -258,7 +258,59 @@ Una entrega se considera cerrada cuando:
 
 ---
 
-## 11. Riesgos del plan
+## 11. Docker local/develop
+
+**Principio:** el backend se levanta con Docker desde el Sprint 1. No se espera al deploy para dockerizar.
+
+### Servicios
+
+| Servicio | Imagen / build | Función |
+|---|---|---|
+| `db` | `postgis/postgis:16-3.4` | PostgreSQL + PostGIS, volumen persistente y healthcheck |
+| `migrate` | build del backend, one-shot | Migraciones y seeds de referencia; corre después de `db` healthy |
+| `api` | build multi-stage del backend | NestJS, puerto 3000, healthcheck `/health/ready` |
+| `web` (opcional) | nginx sirviendo `site/` | Preview local del artefacto estático de las demos |
+
+### Dev vs. producción
+
+- `compose.yml`: imagen de producción, usuario no-root, sin bind mounts.
+- `compose.dev.yml`: bind mount del código, `npm run start:dev`, puerto de debug 9229, migraciones al arrancar.
+- `.env.example` versionado; `.env` ignorado. Sin secretos en la imagen.
+- `depends_on` con `condition: service_healthy`; la API no arranca si PostGIS no está listo.
+- `docker compose down -v` borra el volumen y deja la demo limpia.
+- `POST /demo/reset` limpia datos de demo sin borrar el volumen.
+
+### Comandos esperados
+
+```bash
+cp .env.example .env
+docker compose -f compose.yml -f compose.dev.yml up --build
+curl http://localhost:3000/health/ready
+
+# frontend web en host
+EXPO_PUBLIC_API_URL=http://localhost:3000 npm --prefix demo/expo-demo run web
+```
+
+### Validación local
+
+- [ ] `docker compose up` funciona desde un clone limpio, sin Node ni Postgres instalados en el host.
+- [ ] Migraciones y seeds son idempotentes; correrlos dos veces no duplica.
+- [ ] `/health` y `/health/ready` responden correctamente.
+- [ ] Dos navegadores entran, se ven y chatean contra `localhost`.
+- [ ] SSE y polling funcionan a través del puerto publicado.
+- [ ] `docker compose down -v` + `up` deja la demo reproducible.
+- [ ] Los tests de integración corren dentro del contenedor.
+- [ ] No hay secretos en la imagen ni en el compose versionado.
+
+### GPS en local
+
+`http://localhost` es contexto seguro y permite geolocalización. Para probar desde un teléfono en la LAN, `http://192.168.x.x` **no** es contexto seguro: usar un túnel HTTPS (Cloudflare Tunnel) o certificados locales. Si no hay HTTPS, la demo debe caer al fallback de zona demo.
+
+**Dependencia:** Docker Desktop debe estar corriendo en la máquina de desarrollo.
+
+---
+
+## 12. Riesgos del plan
 
 | Riesgo | Sprint | Mitigación |
 |---|---|---|
@@ -273,7 +325,7 @@ Una entrega se considera cerrada cuando:
 
 ---
 
-## 12. Recomendación de arranque
+## 13. Recomendación de arranque
 
 Empezaría por **Sprint 0 + Sprint 1**. Son los que desbloquean todo y no dependen de hosting ni de decisiones de producto. Después, **Sprint 2 y 3** son la primera demo que impresiona: movimiento real y radar vivo. **Sprint 4** cierra el flujo de valor. **Sprint 5** es obligatorio antes de mostrarlo como producto. **Sprint 6** lo pone en una URL pública.
 
