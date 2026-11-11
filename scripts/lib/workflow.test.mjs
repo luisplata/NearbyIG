@@ -63,6 +63,9 @@ test('configure-pages resuelve el base path antes de cualquier build', () => {
   for (const marker of ['Expo export', 'Flutter build', 'assemble-site.mjs']) {
     assert.ok(configureAt < build.indexOf(marker), `configure-pages debe preceder a "${marker}"`);
   }
+
+  // `checks` no construye nada: no necesita leer el sitio de Pages.
+  assert.ok(!job('checks').includes('configure-pages'), 'checks no debe resolver el base path');
 });
 
 test('los builds consumen el base path resuelto, sin hardcodear /NearbyIG', () => {
@@ -100,4 +103,12 @@ test('publica con permisos de Pages sólo en el job de deploy', () => {
     assert.ok(!/pages: write/.test(block), `${name} no debe tener pages: write`);
     assert.ok(!/id-token: write/.test(block), `${name} no debe tener id-token: write`);
   }
+});
+
+test('el nivel workflow concede pages: read para configure-pages', () => {
+  const permissions = source.slice(source.indexOf('\npermissions:'), source.indexOf('\nconcurrency:'));
+  assert.match(permissions, /contents: read/);
+  assert.match(permissions, /pages: read/);
+  assert.ok(!/pages: write/.test(permissions), 'pages: write no debe estar a nivel workflow');
+  assert.equal((source.match(/^\s+pages: read$/gm) ?? []).length, 1, 'pages: read se declara una sola vez');
 });

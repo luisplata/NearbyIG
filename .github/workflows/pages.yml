@@ -8,6 +8,10 @@ name: pages
 # El sitio tiene que existir en Settings → Pages → Source: GitHub Actions.
 # Este workflow NO habilita Pages: si todavía no está habilitado, `configure-pages`
 # falla antes de cualquier build y no se publica nada (ver docs/pages-handoff.md).
+#
+# `pages: read` a nivel workflow permite que `actions/configure-pages` lea el sitio
+# (GET /repos/{owner}/{repo}/pages) en los jobs que lo necesitan. Publicar sigue
+# exigiendo `pages: write` + `id-token: write`, declarados sólo en el job de deploy.
 
 on:
   push:
@@ -17,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  pages: read
 
 concurrency:
   group: pages
@@ -32,12 +37,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # Primero que los builds: el base path real ("" en sitio de usuario,
-      # /repo en sitio de proyecto). Nunca se hardcodea.
-      - name: Resolve Pages base path
-        id: pages
-        uses: actions/configure-pages@v5
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -99,6 +98,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Primero que los builds: el base path real ("" en sitio de usuario,
+      # /repo en sitio de proyecto). Nunca se hardcodea. Lee el sitio con el
+      # `pages: read` del nivel workflow.
       - name: Resolve Pages base path
         id: pages
         uses: actions/configure-pages@v5
