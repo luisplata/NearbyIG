@@ -1,0 +1,196 @@
+name: pages
+
+# Un solo workflow publica un único artefacto de Pages:
+#   /            landing
+#   /flutter/    demo Flutter web
+#   /expo/       demo Expo web
+#
+# El sitio tiene que existir en Settings → Pages → Source: GitHub Actions.
+# Este workflow NO habilita Pages: si todavía no está habilitado, `configure-pages`
+# falla antes de cualquier build y no se publica nada (ver docs/pages-handoff.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  # Validación del contrato y de las dos apps. Corre siempre, también en PR.
+  # Nada se construye si esto falla.
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Primero que los builds: el base path real ("" en sitio de usuario,
+      # /repo en sitio de proyecto). Nunca se hardcodea.
+      - name: Resolve Pages base path
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            demo/expo-demo/package-lock.json
+
+      - name: Setup Flutter 3.41.2
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.41.2
+          cache: true
+
+      - name: Install tooling
+        run: npm ci
+
+      - name: Validate fixtures
+        run: node scripts/validate-fixtures.mjs
+
+      - name: Check generated contract (anti-drift)
+        run: node scripts/sync-demo-assets.mjs --check
+
+      - name: Test tooling
+        run: npm run test:scripts
+
+      - name: Install Expo dependencies
+        run: npm --prefix demo/expo-demo ci
+
+      - name: Expo typecheck
+        run: npm --prefix demo/expo-demo run typecheck
+
+      - name: Expo tests (golden parity)
+        run: npm --prefix demo/expo-demo run test
+
+      - name: Flutter dependencies
+        working-directory: demo/flutter-demo
+        run: flutter pub get
+
+      - name: Flutter analyze
+        working-directory: demo/flutter-demo
+        run: flutter analyze
+
+      - name: Flutter tests
+        working-directory: demo/flutter-demo
+        run: flutter test
+
+  # Build + ensamblado + auditoría. Sólo en main (push o dispatch), nunca en PR.
+  build:
+    name: build
+    needs: checks
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Pages base path
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            demo/expo-demo/package-lock.json
+
+      - name: Setup Flutter 3.41.2
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.41.2
+          cache: true
+
+      # Evita dobles barras y barras finales antes de pasarlo a los builds.
+      - name: Check base path
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          set -euo pipefail
+          case "$BASE_PATH" in
+            "")
+              echo "base_path vacío: sitio de usuario (/, /flutter/, /expo/)"
+              ;;
+            /*)
+              if [ "${BASE_PATH%/}" != "$BASE_PATH" ]; then
+                echo "base_path con barra final: $BASE_PATH"
+                exit 1
+              fi
+              echo "base_path de proyecto: $BASE_PATH"
+              ;;
+            *)
+              echo "base_path inválido: $BASE_PATH"
+              exit 1
+              ;;
+          esac
+
+      - name: Install tooling
+        run: npm ci
+
+      - name: Install Expo dependencies
+        run: npm --prefix demo/expo-demo ci
+
+      - name: Expo export
+        working-directory: demo/expo-demo
+        env:
+          # Expo exige barra inicial y prohíbe la final.
+          EXPO_BASE_URL: ${{ steps.pages.outputs.base_path }}/expo
+        run: npx expo export --platform web --output-dir dist --clear
+
+      - name: Flutter build
+        working-directory: demo/flutter-demo
+        env:
+          # Flutter exige barra inicial y final.
+          FLUTTER_BASE_HREF: ${{ steps.pages.outputs.base_path }}/flutter/
+        run: |
+          flutter pub get
+          flutter build web --release --pwa-strategy=none --base-href "$FLUTTER_BASE_HREF"
+
+      # Ensambla site/ y audita: 3 index.html, denylist, hosts, datasetId.
+      # Falla antes del upload si algo no cierra: nunca hay deploy parcial.
+      - name: Assemble and audit site
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: node scripts/assemble-site.mjs --strict site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+          include-hidden-files: true
+
+  # Publicación con permisos mínimos: pages/id-token sólo acá.
+  deploy:
+    name: deploy
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

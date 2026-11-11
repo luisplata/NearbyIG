@@ -25,6 +25,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { deniedReason, isTextFile, scanText } from './lib/denylist.mjs';
+import { datasetIdOf } from './lib/canonical.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -171,6 +172,52 @@ function checkIndexes(dir) {
   return missing;
 }
 
+/** datasetId del contrato vigente: se recalcula, nunca se hardcodea. */
+function contractDatasetId() {
+  const readShared = (name) => JSON.parse(readFileSync(join(ROOT, 'demo', 'shared', name), 'utf8'));
+  return datasetIdOf({
+    fixtures: readShared('fixtures.json'),
+    copy: readShared('copy.json'),
+    designTokens: readShared('design-tokens.json'),
+    photos: readShared('photos.json'),
+  });
+}
+
+/**
+ * La landing es estática y siempre está disponible: si falta o quedó fuera de
+ * contrato, es un defecto, no un target `pending`. Verifica D-6 (noindex,
+ * enlaces relativos, datasetId visible) y SC-8 (mismo datasetId que las apps).
+ */
+function checkLanding(dir, expectedDatasetId) {
+  const indexPath = join(dir, 'index.html');
+  if (!existsSync(indexPath)) {
+    problem('falta la landing en site/index.html');
+    return;
+  }
+
+  const html = readFileSync(indexPath, 'utf8');
+  if (!/<meta\s+name="robots"\s+content="[^"]*noindex/i.test(html)) {
+    problem('landing/index.html no declara <meta name="robots" content="noindex">');
+  }
+  for (const href of ['./flutter/', './expo/']) {
+    if (!html.includes(`href="${href}"`)) {
+      problem(`landing/index.html no enlaza la demo con ruta relativa href="${href}"`);
+    }
+  }
+  if (!html.includes('data-dataset-id')) {
+    problem('landing/index.html no expone el datasetId (falta data-dataset-id)');
+  }
+
+  const generated = join(dir, 'generated', 'dataset.js');
+  if (!existsSync(generated)) {
+    problem('falta generated/dataset.js en la landing (corré el sync del contrato)');
+    return;
+  }
+  if (!readFileSync(generated, 'utf8').includes(expectedDatasetId)) {
+    problem(`generated/dataset.js de la landing no contiene el datasetId esperado (${expectedDatasetId})`);
+  }
+}
+
 function checkBaseHref(dir) {
   const flutterIndex = join(dir, 'flutter', 'index.html');
   if (!existsSync(flutterIndex)) return;
@@ -200,8 +247,12 @@ function report(dir) {
   for (const entry of offenders) problem(`archivo prohibido: ${entry}`);
   for (const entry of findings) problem(`contenido prohibido: ${entry}`);
 
+  const expectedDatasetId = contractDatasetId();
+  checkLanding(dir, expectedDatasetId);
+
   const missing = checkIndexes(dir);
   for (const label of missing) {
+    if (label === 'landing') continue; // reported by checkLanding as a real problem
     const source = SOURCES.find((entry) => entry.key === label);
     pending.push(`${label} (falta ${source ? displayPath(source.source) : 'build'})`);
   }
@@ -209,6 +260,7 @@ function report(dir) {
   checkBaseHref(dir);
 
   console.log(`\n  artefacto ${displayPath(dir)}: ${files} archivo(s), ${humanSize(bytes)}`);
+  console.log(`  dataset   ${expectedDatasetId}`);
   if (missing.length === 0) {
     console.log('  index.html  landing, flutter y expo OK');
   }
