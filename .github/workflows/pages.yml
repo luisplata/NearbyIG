@@ -177,7 +177,6 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
-          include-hidden-files: true
 
   # Publicación con permisos mínimos: pages/id-token sólo acá.
   deploy:
