@@ -130,6 +130,10 @@ install.
 | Scroll nativo (overscroll, barra) | Sí | Plataforma |
 | Anuncio de semántica en Flutter web | Sí | CanvasKit expone el árbol semántico cuando el usuario lo pide |
 | Animación de radar (canvas vs SVG) | Sí, misma geometría y período 6 s | Misma proyección, distinto motor |
+| Glifos: fuente MaterialIcons (Flutter) vs SVG embebido (Expo) | Sí | Mismos íconos Material, distinto empaquetado; sin fuentes de íconos remotas |
+| Carga de fuente: Inter bundleada al compilar (Flutter) vs `expo-font` con gate de render (Expo) | Sí | Expo no renderiza hasta tener la fuente para evitar FOUT |
+| Switch de ajustes/filtros | Sí | Material 3 vs control nativo de RNW |
+| Foco visible: highlight de Material vs borde `accent` explícito | Sí | Mismo criterio (foco visible), distinto mecanismo |
 | Cualquier diferencia funcional (timers, copy, orden, estado, datasetId) | **No** | Es un defecto del contrato |
 
 ## 9. Checklist de paridad (15 puntos, vinculante)

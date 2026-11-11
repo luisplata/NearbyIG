@@ -75,9 +75,24 @@ node scripts/sync-demo-assets.mjs                          # copia el expected.j
 # Expo web
 npm --prefix demo/expo-demo ci
 npm --prefix demo/expo-demo run typecheck
-npm --prefix demo/expo-demo run test
+npm --prefix demo/expo-demo run test          # golden de paridad (Vitest) + selectores + formato
 (cd demo/expo-demo && EXPO_BASE_URL="" npx expo export --platform web --output-dir dist --clear)
 ```
+
+Tests del tooling Node (denylist del artefacto, allowlist acotada del loader de Flutter):
+
+```bash
+npm run test:scripts
+```
+
+> **Git Bash / MSYS**: `EXPO_BASE_URL=/expo` y `--base-href "/flutter/"` se reescriben a
+> rutas de Windows. Prefijá el comando con `MSYS_NO_PATHCONV=1` (o usá PowerShell/cmd).
+> El export imprime `Using (experimental) base path: ...`; verificá que diga `/expo` y no
+> una ruta `C:/Program Files/...`.
+
+El export de Expo es determinista: el mismo commit produce el mismo hash de bundle. La
+demo navega por estado (sin `expo-router`): la URL nunca cambia y refrescar siempre sirve
+`/expo/index.html`.
 
 ## Sitio local (raíz + /flutter/ + /expo/)
 
