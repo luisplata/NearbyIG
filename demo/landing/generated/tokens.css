@@ -1,0 +1,43 @@
+/* GENERATED FILE - do not edit by hand. */
+/* Source: demo/shared/design-tokens.json */
+/* Regenerate with: node scripts/sync-demo-assets.mjs */
+
+:root {
+  --color-accent: #FFD600;
+  --color-bg: #09090B;
+  --color-border: #2A2A33;
+  --color-danger: #EF4444;
+  --color-gradient-end: #3858FA;
+  --color-gradient-mid: #7638FA;
+  --color-gradient-start: #FF0069;
+  --color-muted: #A1A1AA;
+  --color-online: #22C55E;
+  --color-surface: #121216;
+  --color-surface-alt: #1B1B21;
+  --color-text: #F4F4F5;
+  --color-verified: #3B82F6;
+  --font-family: 'Inter', system-ui, sans-serif;
+  --font-size-1: 11px;
+  --font-size-2: 13px;
+  --font-size-3: 15px;
+  --font-size-4: 17px;
+  --font-size-5: 22px;
+  --font-size-6: 28px;
+  --line-height-1: 1.2;
+  --line-height-2: 1.35;
+  --line-height-3: 1.5;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-1: 8px;
+  --radius-2: 12px;
+  --radius-3: 20px;
+  --radius-4: 28px;
+  --radius-5: 999px;
+  --frame-max: 480px;
+  --breakpoint-wide: 600px;
+  --breakpoint-min: 320px;
+}

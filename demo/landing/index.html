@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark" />
+    <title>NearbyIG Demo</title>
+    <link rel="icon" type="image/png" href="assets/brand/icon-192.png" />
+    <link rel="apple-touch-icon" href="assets/brand/icon-192.png" />
+    <link rel="stylesheet" href="generated/tokens.css" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body id="top">
+    <header class="site-header">
+      <img
+        class="brand-icon"
+        src="assets/brand/icon.svg"
+        width="32"
+        height="32"
+        alt=""
+        data-copy-alt="about.brand"
+      />
+      <p class="brand-name" data-copy="about.brand"></p>
+      <span class="chip" data-copy="common.demoChip"></span>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <h1 id="hero-title" data-copy="landing.title"></h1>
+        <p class="lede" data-copy="landing.subtitle"></p>
+        <p class="dataset">
+          <span data-copy="common.datasetId"></span>
+          <code data-dataset-id></code>
+        </p>
+        <p class="dataset">
+          <span data-copy="common.schemaVersion"></span>
+          <code data-schema-version></code>
+        </p>
+        <p class="note" data-copy="landing.datasetNote"></p>
+      </section>
+
+      <section class="demos" aria-labelledby="demos-title">
+        <h2 id="demos-title" data-copy="landing.demosTitle"></h2>
+        <div class="cards">
+          <article class="card">
+            <div class="card-top">
+              <h3 data-copy="landing.flutter.title"></h3>
+              <span class="tag" data-copy="landing.flutter.tag"></span>
+            </div>
+            <p data-copy="landing.flutter.description"></p>
+            <a class="cta" href="./flutter/" data-copy="landing.openFlutter"></a>
+          </article>
+          <article class="card">
+            <div class="card-top">
+              <h3 data-copy="landing.expo.title"></h3>
+              <span class="tag" data-copy="landing.expo.tag"></span>
+            </div>
+            <p data-copy="landing.expo.description"></p>
+            <a class="cta" href="./expo/" data-copy="landing.openExpo"></a>
+          </article>
+        </div>
+      </section>
+
+      <section class="shared" aria-labelledby="shared-title">
+        <h2 id="shared-title" data-copy="landing.compareTitle"></h2>
+        <ul class="checks">
+          <li data-copy="landing.compare.dataset"></li>
+          <li data-copy="landing.compare.screens"></li>
+          <li data-copy="landing.compare.timers"></li>
+          <li data-copy="landing.compare.offline"></li>
+          <li data-copy="landing.compare.reset"></li>
+        </ul>
+        <p class="note" data-copy="landing.compare.diff"></p>
+      </section>
+
+      <section class="sim" aria-labelledby="sim-title">
+        <h2 id="sim-title" data-copy="common.simTitle"></h2>
+        <p class="note" data-copy="landing.simIntro"></p>
+        <ol class="sim-list">
+          <li data-copy="common.simItems.1"></li>
+          <li data-copy="common.simItems.2"></li>
+          <li data-copy="common.simItems.3"></li>
+          <li data-copy="common.simItems.4"></li>
+          <li data-copy="common.simItems.5"></li>
+          <li data-copy="common.simItems.6"></li>
+          <li data-copy="common.simItems.7"></li>
+          <li data-copy="common.simItems.8"></li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p data-copy="landing.footer"></p>
+      <p><a href="#top" data-copy="landing.backToTop"></a></p>
+    </footer>
+
+    <script src="generated/dataset.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>

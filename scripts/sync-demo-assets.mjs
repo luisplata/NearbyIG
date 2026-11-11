@@ -59,11 +59,11 @@ const FONT_ASSETS = [
   { source: join(SHARED, 'assets/fonts/OFL.txt'), target: 'assets/fonts/OFL.txt' },
 ];
 
-/** La landing sólo necesita el icono (favicon); las apps, icono + fuentes + golden. */
+/** La landing necesita el icono (favicon) y las fuentes para no pedir nada externo. */
 const TARGET_ASSETS = {
   flutter: [...BRAND_ASSETS, ...FONT_ASSETS],
   expo: [...BRAND_ASSETS, ...FONT_ASSETS],
-  landing: BRAND_ASSETS,
+  landing: [...BRAND_ASSETS, ...FONT_ASSETS],
 };
 
 const TARGET_GOLDEN = {

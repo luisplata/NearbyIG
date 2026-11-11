@@ -519,12 +519,55 @@ export function tsDatasetFile(datasetId, schemaVersion) {
   );
 }
 
-export function landingDatasetJs(datasetId, schemaVersion) {
+function kebab(key) {
+  return String(key).replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+}
+
+/**
+ * Variables CSS de la landing. Así la página no duplica la paleta ni las
+ * escalas: el único origen sigue siendo `design-tokens.json`.
+ */
+export function landingTokensCss(tokens) {
+  const lines = [];
+  lines.push('/* GENERATED FILE - do not edit by hand. */');
+  lines.push('/* Source: demo/shared/design-tokens.json */');
+  lines.push('/* Regenerate with: node scripts/sync-demo-assets.mjs */');
+  lines.push('');
+  lines.push(':root {');
+  for (const key of sortedKeys(tokens.color)) {
+    lines.push(`  --color-${kebab(key)}: ${tokens.color[key]};`);
+  }
+  lines.push(`  --font-family: '${tokens.type.family}', system-ui, sans-serif;`);
+  tokens.type.sizes.forEach((size, index) => {
+    lines.push(`  --font-size-${index + 1}: ${size}px;`);
+  });
+  tokens.type.lineHeights.forEach((height, index) => {
+    lines.push(`  --line-height-${index + 1}: ${height};`);
+  });
+  tokens.space.forEach((value, index) => {
+    lines.push(`  --space-${index + 1}: ${value}px;`);
+  });
+  tokens.radius.forEach((value, index) => {
+    lines.push(`  --radius-${index + 1}: ${value}px;`);
+  });
+  lines.push(`  --frame-max: ${tokens.breakpoint.frameMax}px;`);
+  lines.push(`  --breakpoint-wide: ${tokens.breakpoint.wide}px;`);
+  lines.push(`  --breakpoint-min: ${tokens.breakpoint.min}px;`);
+  lines.push('}');
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * La landing consume el datasetId, el schemaVersion y el catálogo de copy desde
+ * el contrato: no hay strings visibles hardcodeados en el HTML.
+ */
+export function landingDatasetJs(datasetId, schemaVersion, copy) {
   return (
     banner('fixtures.json + copy.json + design-tokens.json + photos.json') +
     'window.NEARBYIG_DATASET = Object.freeze({\n' +
     `  datasetId: ${JSON.stringify(datasetId)},\n` +
     `  schemaVersion: ${JSON.stringify(schemaVersion)},\n` +
+    `  copy: Object.freeze(${JSON.stringify(deepSort(copy), null, 2)}),\n` +
     '});\n'
   );
 }
@@ -549,7 +592,8 @@ export function buildGeneratedFiles({ fixtures, copy, tokens, photos, datasetId 
       'src/generated/dataset.ts': tsDatasetFile(datasetId, fixtures.schemaVersion),
     },
     landing: {
-      'generated/dataset.js': landingDatasetJs(datasetId, fixtures.schemaVersion),
+      'generated/dataset.js': landingDatasetJs(datasetId, fixtures.schemaVersion, copy),
+      'generated/tokens.css': landingTokensCss(tokens),
     },
   };
 }
