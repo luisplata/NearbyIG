@@ -149,7 +149,7 @@ function audit(dir) {
     if (size > MAX_SCAN_BYTES) return;
 
     const text = readFileSync(absolute, 'utf8');
-    for (const finding of scanText(text)) {
+    for (const finding of scanText(text, { path: rel })) {
       findings.push(`${rel}: ${finding.kind} prohibido "${finding.label}" (${finding.match})`);
     }
   });

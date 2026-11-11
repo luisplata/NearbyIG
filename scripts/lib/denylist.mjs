@@ -34,6 +34,40 @@ export const TEXT_EXTENSIONS = [
   '.webmanifest',
 ];
 
+/**
+ * Fallbacks del **loader del engine de Flutter**. No son requests de la app: el
+ * build usa CanvasKit local (`canvasKitBaseUrl` en `index.html`), así que estas
+ * cadenas sólo se materializarían si esa configuración se perdiera. Se permiten
+ * únicamente dentro de los archivos de framework que las embeben (ver
+ * `FLUTTER_FRAMEWORK_FILE`); un host prohibido en cualquier otro archivo, o una
+ * URL externa distinta dentro de esos archivos, sigue siendo un ofensor.
+ */
+export const FLUTTER_LOADER_FALLBACKS = [
+  'https://www.gstatic.com/flutter-canvaskit',
+  'https://fonts.gstatic.com/s/',
+];
+
+/** Archivos del engine/loader de Flutter donde viven esos fallbacks. */
+const FLUTTER_FRAMEWORK_FILE =
+  /^(?:main\.dart\.js|flutter(?:\.js|_bootstrap\.js|_service_worker\.js))$/i;
+
+/**
+ * Quita los fallbacks conocidos del loader cuando `relativePath` es un archivo
+ * de framework de Flutter. Devuelve el texto tal cual en cualquier otro caso.
+ */
+export function stripFlutterLoaderFallbacks(relativePath, text) {
+  const posix = toPosix(relativePath);
+  const base = posix.split('/').pop() ?? posix;
+  if (!FLUTTER_FRAMEWORK_FILE.test(base)) {
+    return text;
+  }
+  let out = text;
+  for (const token of FLUTTER_LOADER_FALLBACKS) {
+    out = out.split(token).join('');
+  }
+  return out;
+}
+
 export const FORBIDDEN_HOSTS = [
   { label: 'gstatic.com', pattern: /gstatic\.com/i },
   { label: 'googleapis.com', pattern: /googleapis\.com/i },
@@ -89,12 +123,18 @@ export function isTextFile(fileName) {
   return TEXT_EXTENSIONS.some((extension) => lower.endsWith(extension));
 }
 
-/** Devuelve `{ label, match }` para cada host o secreto encontrado en `text`. */
-export function scanText(text, { hosts = true, secrets = true } = {}) {
+/**
+ * Devuelve `{ kind, label, match }` para cada host o secreto encontrado en
+ * `text`. Los secretos se escanean siempre sobre el texto original; los hosts
+ * ignoran los fallbacks del loader de Flutter cuando se pasa `path` y el archivo
+ * es parte del framework (ver `FLUTTER_LOADER_FALLBACKS`).
+ */
+export function scanText(text, { hosts = true, secrets = true, path = '' } = {}) {
   const findings = [];
   if (hosts) {
+    const hostText = path ? stripFlutterLoaderFallbacks(path, text) : text;
     for (const rule of FORBIDDEN_HOSTS) {
-      const match = rule.pattern.exec(text);
+      const match = rule.pattern.exec(hostText);
       if (match) findings.push({ kind: 'host', label: rule.label, match: match[0].slice(0, 120) });
     }
   }

@@ -192,6 +192,14 @@ del sitio (case-insensitive, por nombre y por extensión):
 Hosts prohibidos en el texto del artefacto: `gstatic.com`, `googleapis.com`,
 `firebase*`, `unsplash.com`, `instagram.com`, `facebook.com`, `cdn.*`.
 
+Excepción acotada: los archivos de framework de Flutter (`flutter.js`,
+`flutter_bootstrap.js`, `flutter_service_worker.js`, `main.dart.js`) embeben los
+fallbacks del loader del engine — `https://www.gstatic.com/flutter-canvaskit` y
+`https://fonts.gstatic.com/s/` — que **no** son requests de la app (CanvasKit se sirve
+local vía `canvasKitBaseUrl`). Sólo se ignoran esas cadenas exactas dentro de esos
+archivos; cualquier otro host o URL externa, y cualquier secreto, sigue bloqueando el
+artefacto. Cubierto por `scripts/lib/denylist.test.mjs`.
+
 Patrones de secreto prohibidos: claves `AIza…`, `BEGIN … PRIVATE KEY`, `private_key`,
 `client_secret`, `apiKey` con valor.
 
