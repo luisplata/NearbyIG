@@ -218,6 +218,30 @@ function checkLanding(dir, expectedDatasetId) {
   }
 }
 
+/**
+ * E-5 / F-13: el documento de Expo es es-AR. `expo export` sustituye
+ * `%LANG_ISO_CODE%` (de `web.lang`) y `%WEB_TITLE%` en `public/index.html`; si
+ * alguno queda en el HTML, el reemplazo no ocurrió y el artefacto sale con el
+ * idioma equivocado. La copia de `<noscript>` también tiene que estar en español.
+ */
+function checkExpoDocument(dir) {
+  const indexPath = join(dir, 'expo', 'index.html');
+  if (!existsSync(indexPath)) return;
+
+  const html = readFileSync(indexPath, 'utf8');
+  if (/%LANG_ISO_CODE%|%WEB_TITLE%/.test(html)) {
+    problem('expo/index.html conserva placeholders sin sustituir (%LANG_ISO_CODE% / %WEB_TITLE%)');
+  }
+  if (!/<html[^>]*\blang="es"/i.test(html)) {
+    problem('expo/index.html no declara <html lang="es">: revisá web.lang en demo/expo-demo/app.config.ts');
+  }
+  if (!/<noscript>[\s\S]*<\/noscript>/i.test(html)) {
+    problem('expo/index.html no incluye <noscript> (sin JS no hay mensaje para el usuario)');
+  } else if (!/Esta demo necesita JavaScript/.test(html)) {
+    problem('expo/index.html no tiene el <noscript> en español (E-5 / F-13)');
+  }
+}
+
 function checkBaseHref(dir) {
   const flutterIndex = join(dir, 'flutter', 'index.html');
   if (!existsSync(flutterIndex)) return;
@@ -258,6 +282,7 @@ function report(dir) {
   }
 
   checkBaseHref(dir);
+  checkExpoDocument(dir);
 
   console.log(`\n  artefacto ${displayPath(dir)}: ${files} archivo(s), ${humanSize(bytes)}`);
   console.log(`  dataset   ${expectedDatasetId}`);

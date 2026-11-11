@@ -20,6 +20,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     bundler: 'metro',
     output: 'single',
     favicon: './assets/brand/icon-192.png',
+    // Idioma del documento (E-5/F-13): `expo export` sustituye %LANG_ISO_CODE% en
+    // `public/index.html`. Sin esto el template de Expo sale con lang="en".
+    lang: 'es',
+    description: 'Demo mock de NearbyIG: datos ficticios, sin backend ni red.',
   },
   experiments: { baseUrl },
   plugins: ['expo-font'],
