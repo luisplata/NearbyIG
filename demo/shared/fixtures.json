@@ -1,0 +1,297 @@
+{
+  "schemaVersion": 1,
+  "timers": {
+    "matchMs": 2500,
+    "typingMs": 1200,
+    "revealMs": 1500,
+    "incomingPingMs": 3000,
+    "toastMs": 4000
+  },
+  "self": {
+    "id": "me",
+    "nickname": "Lucho",
+    "initials": "LU",
+    "intention": "networking",
+    "photoId": "ph00",
+    "instagramHandle": "lucho.demo",
+    "statusKey": "status.self"
+  },
+  "profiles": [
+    {
+      "id": "p01",
+      "nickname": "Vale",
+      "initials": "VA",
+      "intention": "networking",
+      "gender": "female",
+      "verified": true,
+      "online": true,
+      "distanceM": 240,
+      "bearingDeg": 32,
+      "photoId": "ph01",
+      "instagramHandle": "vale.works",
+      "statusKey": "status.p01",
+      "bioKey": "bio.p01"
+    },
+    {
+      "id": "p02",
+      "nickname": "Nico",
+      "initials": "NI",
+      "intention": "friendship",
+      "gender": "male",
+      "verified": false,
+      "online": true,
+      "distanceM": 480,
+      "bearingDeg": 118,
+      "photoId": "ph02",
+      "instagramHandle": "nico.andando",
+      "statusKey": "status.p02",
+      "bioKey": "bio.p02"
+    },
+    {
+      "id": "p03",
+      "nickname": "Sofi",
+      "initials": "SO",
+      "intention": "dating",
+      "gender": "female",
+      "verified": true,
+      "online": false,
+      "distanceM": 760,
+      "bearingDeg": 205,
+      "photoId": "ph03",
+      "instagramHandle": "sofi.ciudad",
+      "statusKey": "status.p03",
+      "bioKey": "bio.p03"
+    },
+    {
+      "id": "p04",
+      "nickname": "Tomi",
+      "initials": "TO",
+      "intention": "activities",
+      "gender": "nonbinary",
+      "verified": false,
+      "online": true,
+      "distanceM": 1150,
+      "bearingDeg": 292,
+      "photoId": "ph04",
+      "instagramHandle": "tomi.recorre",
+      "statusKey": "status.p04",
+      "bioKey": "bio.p04"
+    },
+    {
+      "id": "p05",
+      "nickname": "Juli",
+      "initials": "JU",
+      "intention": "networking",
+      "gender": "female",
+      "verified": true,
+      "online": true,
+      "distanceM": 1480,
+      "bearingDeg": 12,
+      "photoId": "ph05",
+      "instagramHandle": "juli.encuentros",
+      "statusKey": "status.p05",
+      "bioKey": "bio.p05"
+    },
+    {
+      "id": "p06",
+      "nickname": "Fran",
+      "initials": "FR",
+      "intention": "dating",
+      "gender": "male",
+      "verified": false,
+      "online": false,
+      "distanceM": 1950,
+      "bearingDeg": 88,
+      "photoId": "ph06",
+      "instagramHandle": "fran.vecino",
+      "statusKey": "status.p06",
+      "bioKey": "bio.p06"
+    },
+    {
+      "id": "p07",
+      "nickname": "Cami",
+      "initials": "CA",
+      "intention": "friendship",
+      "gender": "nonbinary",
+      "verified": true,
+      "online": true,
+      "distanceM": 2600,
+      "bearingDeg": 165,
+      "photoId": "ph07",
+      "instagramHandle": "cami.paseo",
+      "statusKey": "status.p07",
+      "bioKey": "bio.p07"
+    },
+    {
+      "id": "p08",
+      "nickname": "Lean",
+      "initials": "LE",
+      "intention": "activities",
+      "gender": "male",
+      "verified": false,
+      "online": false,
+      "distanceM": 3200,
+      "bearingDeg": 240,
+      "photoId": "ph08",
+      "instagramHandle": "lean.afuera",
+      "statusKey": "status.p08",
+      "bioKey": "bio.p08"
+    },
+    {
+      "id": "p09",
+      "nickname": "Mica",
+      "initials": "MI",
+      "intention": "networking",
+      "gender": "female",
+      "verified": true,
+      "online": true,
+      "distanceM": 3900,
+      "bearingDeg": 310,
+      "photoId": "ph09",
+      "instagramHandle": "mica.ronda",
+      "statusKey": "status.p09",
+      "bioKey": "bio.p09"
+    },
+    {
+      "id": "p10",
+      "nickname": "Delf",
+      "initials": "DE",
+      "intention": "dating",
+      "gender": "nonbinary",
+      "verified": false,
+      "online": true,
+      "distanceM": 4800,
+      "bearingDeg": 45,
+      "photoId": "ph10",
+      "instagramHandle": "delf.esquina",
+      "statusKey": "status.p10",
+      "bioKey": "bio.p10"
+    }
+  ],
+  "script": {
+    "firstPingTargetId": "p01",
+    "incomingPingFromId": "p07",
+    "matchProfileId": "p07",
+    "chatReplies": {
+      "p07": [
+        "chat.p07.r1",
+        "chat.p07.r2",
+        "chat.p07.r3"
+      ]
+    },
+    "fallbackReplyKey": "chat.fallback"
+  },
+  "filters": {
+    "radiiM": [
+      500,
+      1000,
+      2000,
+      5000
+    ],
+    "defaultRadiusM": 5000,
+    "intentions": [
+      "networking",
+      "friendship",
+      "dating",
+      "activities"
+    ],
+    "genders": [
+      "female",
+      "male",
+      "nonbinary"
+    ]
+  },
+  "reportReasons": [
+    "harassment",
+    "spam",
+    "fake",
+    "inappropriate",
+    "other"
+  ],
+  "mapDecor": {
+    "streets": [
+      {
+        "x1": 0.1,
+        "y1": 0,
+        "x2": 0.1,
+        "y2": 1,
+        "weight": 2
+      },
+      {
+        "x1": 0.62,
+        "y1": 0,
+        "x2": 0.62,
+        "y2": 1,
+        "weight": 1
+      },
+      {
+        "x1": 0,
+        "y1": 0.34,
+        "x2": 1,
+        "y2": 0.34,
+        "weight": 1
+      },
+      {
+        "x1": 0,
+        "y1": 0.72,
+        "x2": 1,
+        "y2": 0.72,
+        "weight": 2
+      },
+      {
+        "x1": 0.1,
+        "y1": 0.72,
+        "x2": 0.62,
+        "y2": 0.34,
+        "weight": 1
+      }
+    ],
+    "blocks": [
+      {
+        "x": 0.15,
+        "y": 0.2,
+        "w": 0.2,
+        "h": 0.12,
+        "radius": 6
+      },
+      {
+        "x": 0.4,
+        "y": 0.4,
+        "w": 0.16,
+        "h": 0.14,
+        "radius": 6
+      },
+      {
+        "x": 0.68,
+        "y": 0.46,
+        "w": 0.2,
+        "h": 0.16,
+        "radius": 6
+      },
+      {
+        "x": 0.2,
+        "y": 0.78,
+        "w": 0.24,
+        "h": 0.1,
+        "radius": 6
+      }
+    ],
+    "labels": [
+      {
+        "x": 0.5,
+        "y": 0.4,
+        "copyKey": "map.label.plaza"
+      },
+      {
+        "x": 0.22,
+        "y": 0.86,
+        "copyKey": "map.label.mercado"
+      },
+      {
+        "x": 0.74,
+        "y": 0.24,
+        "copyKey": "map.label.biblioteca"
+      }
+    ]
+  }
+}

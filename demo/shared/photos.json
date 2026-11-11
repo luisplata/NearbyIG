@@ -1,0 +1,13 @@
+{
+  "ph00": { "initials": "LU", "gradient": ["#FF0069", "#7638FA"], "shape": "squircle", "seed": 7 },
+  "ph01": { "initials": "VA", "gradient": ["#3858FA", "#22C55E"], "shape": "circle", "seed": 12 },
+  "ph02": { "initials": "NI", "gradient": ["#FFD600", "#FF6B00"], "shape": "squircle", "seed": 19 },
+  "ph03": { "initials": "SO", "gradient": ["#D300C5", "#3858FA"], "shape": "circle", "seed": 23 },
+  "ph04": { "initials": "TO", "gradient": ["#22C55E", "#3858FA"], "shape": "squircle", "seed": 31 },
+  "ph05": { "initials": "JU", "gradient": ["#FF0069", "#FFD600"], "shape": "circle", "seed": 37 },
+  "ph06": { "initials": "FR", "gradient": ["#7638FA", "#FF0069"], "shape": "squircle", "seed": 41 },
+  "ph07": { "initials": "CA", "gradient": ["#FF6B00", "#D300C5"], "shape": "circle", "seed": 47 },
+  "ph08": { "initials": "LE", "gradient": ["#3858FA", "#FF0069"], "shape": "squircle", "seed": 53 },
+  "ph09": { "initials": "MI", "gradient": ["#22C55E", "#FFD600"], "shape": "circle", "seed": 59 },
+  "ph10": { "initials": "DE", "gradient": ["#D300C5", "#22C55E"], "shape": "squircle", "seed": 67 }
+}

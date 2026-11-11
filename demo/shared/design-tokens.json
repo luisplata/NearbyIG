@@ -1,0 +1,33 @@
+{
+  "color": {
+    "bg": "#09090B",
+    "surface": "#121216",
+    "surfaceAlt": "#1B1B21",
+    "text": "#F4F4F5",
+    "muted": "#A1A1AA",
+    "border": "#2A2A33",
+    "gradientStart": "#FF0069",
+    "gradientMid": "#7638FA",
+    "gradientEnd": "#3858FA",
+    "accent": "#FFD600",
+    "online": "#22C55E",
+    "verified": "#3B82F6",
+    "danger": "#EF4444"
+  },
+  "type": {
+    "family": "Inter",
+    "sizes": [11, 13, 15, 17, 22, 28],
+    "weights": [400, 600],
+    "lineHeights": [1.2, 1.35, 1.5]
+  },
+  "space": [4, 8, 12, 16, 24, 32],
+  "radius": [8, 12, 20, 28, 999],
+  "shadow": {
+    "sheet": "0 -8 24 rgba(0,0,0,0.45)"
+  },
+  "breakpoint": {
+    "min": 320,
+    "frameMax": 480,
+    "wide": 600
+  }
+}
