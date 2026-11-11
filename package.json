@@ -12,7 +12,7 @@
     "sync": "node scripts/sync-demo-assets.mjs",
     "sync:check": "node scripts/sync-demo-assets.mjs --check",
     "assemble": "node scripts/assemble-site.mjs",
-    "test:scripts": "node --test scripts/lib/",
+    "test:scripts": "node --test \"scripts/lib/*.test.mjs\"",
     "check": "node scripts/validate-fixtures.mjs && node scripts/sync-demo-assets.mjs && git diff --exit-code"
   },
   "devDependencies": {
