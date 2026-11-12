@@ -17,6 +17,8 @@ agenda el store, que es el único que conoce timers.
 ```text
 DemoState {
   view: 'list' | 'radar' | 'map'       // 'list' es la vista inicial (norma)
+                                       // 'map' es interno/reservado: Expo no lo
+                                       // expone y renderiza la composición radar
   overlay: null | 'profile' | 'chat' | 'pings' | 'notifications' | 'filters'
                 | 'settings' | 'about' | 'safety' | 'blocked' | 'privacy'
   profileId: string | null          // perfil enfocado por overlay profile/safety
@@ -185,8 +187,10 @@ se usa.
 
 - `RESET` devuelve exactamente `initialState()` y el store cancela timers.
 - La vista inicial es la **lista** (`view='list'`): primer arranque, `RESET` y refresh
-  aterrizan en la lista ordenada por distancia. La barra inferior mantiene el orden
-  Lista → Radar → Mapa → Pings → Perfil; radar y mapa siguen siendo alcanzables.
+  aterrizan en la lista ordenada por distancia. En **Expo** la barra inferior tiene
+  cuatro tabs —Lista → Radar → Pings → Perfil— y no expone `map`; si el estado se setea
+  a `map`, se renderiza la misma composición radar-sobre-mapa. **Flutter** conserva su
+  barra de cinco tabs (Lista → Radar → Mapa → Pings → Perfil) como referencia.
 - Refrescar la página produce el mismo estado inicial: no hay storage, cookies,
   `localStorage`, `sessionStorage` ni URL con estado.
 - Los timers se derivan de acciones, no del reloj de pared: el reducer no llama a

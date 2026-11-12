@@ -49,6 +49,32 @@ node scripts/sync-demo-assets.mjs --target landing    # solo landing
 node scripts/sync-demo-assets.mjs --no-raster         # reusa los PNG de marca ya commiteados
 ```
 
+## Checklist visual de la demo Expo
+
+Vitest corre en Node y no renderiza: estos puntos se verifican a mano en el navegador
+sobre `site/expo/` (o `expo export` + `assemble-site --strict`). Sin servidores que queden
+vivos al terminar la revisión.
+
+1. **Cuadrado**: a 320, 360, 480, 768 y 1440 px de ancho, el radar es cuadrado
+   (`side = floor(min(w, h))`): anillos circulares, sin elipses ni puntos fuera de su anillo.
+2. **Composición**: un solo radar con mapa estilizado de fondo, anillos + cruz, barrido de
+   6 s y exactamente una capa de 10 puntos; leyenda "mapa simulado" y caption visibles.
+3. **Mapa reservado**: no hay tab Mapa; `DemoView.map` no es alcanzable desde la UI.
+4. **Reduced motion**: con `prefers-reduced-motion: reduce`, el barrido queda estático y
+   los 10 puntos siguen visibles y tappables.
+5. **Interacción**: cada punto abre el overlay del perfil; el radio y los filtros
+   reposicionan los puntos sin cambiar de vista.
+6. **Nav**: Lista → Radar → Pings → Perfil; Lista seleccionada en carga, RESET y refresh;
+   Pings abre la bandeja y Perfil abre Ajustes sin cambiar la vista; badge sólo con pings.
+7. **Header**: "Nearby Social Club" + "Cowork Café" sin truncar a 320 px; sin chip DEMO;
+   switch de visibilidad de 44 px; label DEMO visible en Acerca de.
+8. **Overlay safety**: con perfil o chat abierto, el switch del header no responde y el
+   overlay sigue abierto; Ajustes y header muestran el mismo estado.
+9. **Foco**: tabular por la barra y el header deja foco visible en cada control; los
+   targets son ≥ 44 px y los labels accesibles incluyen nombre y distancia.
+10. **Red**: DevTools Network no registra dominios externos (sin tiles, map SDK ni fuentes
+    remotas).
+
 ## Golden de paridad
 
 `demo/shared/golden/expected.json` tiene un único productor: el dumper de Dart.

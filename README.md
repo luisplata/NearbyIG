@@ -56,10 +56,12 @@ Sitio vivo:
 
 Dataset publicado: `ds-ddca69e0` (schema 2). Las tres páginas comparten el mismo contrato.
 
-Las demos arrancan en la **lista** (Lista → Radar → Mapa → Pings → Perfil), usan tres
-intenciones —amistad, actividades y networking— y toman su posicionamiento "Cowork Social
-Club Café" del catálogo de copy (`landing.eyebrow`, `about.club`, `about.positioning`).
-Es estilo y tono: el nombre, el icono, el bundle id y las URLs no cambian.
+Las demos arrancan en la **lista**. Expo es la demo activa con cuatro tabs (Lista → Radar
+→ Pings → Perfil) y un radar compuesto sobre mapa simulado; Flutter queda como referencia
+congelada con su barra de cinco tabs. Ambas usan tres intenciones —amistad, actividades y
+networking— y toman su posicionamiento "Cowork Café" del catálogo de copy
+(`landing.eyebrow`, `about.club`, `about.positioning`). Es estilo y tono: el repo, el
+icono, el bundle id y las URLs no cambian.
 
 Publicación, verificación y rollback: [`docs/pages-handoff.md`](docs/pages-handoff.md).
 

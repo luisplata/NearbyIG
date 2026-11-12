@@ -4,7 +4,12 @@ Documento **vinculante**. Si una demo no cumple este contrato completo, no es
 entregable, aunque compile y se vea bien. La fuente única de datos es `demo/shared/`;
 las apps consumen lo generado y no duplican strings, colores, distancias ni guiones.
 
-- Marca: **NearbyIG**. Chip **DEMO** persistente en todas las pantallas de ambas apps.
+- Marca visible: **Nearby Social Club**, con slogan **Cowork Café**. El repo, las URLs
+  (`/NearbyIG`, `/expo/`, `/flutter/`), el bundle id `com.nearbyig.app`, el slug y los
+  identificadores técnicos no cambian.
+- Label **DEMO**: chip estático en "Acerca de" de Expo, en el header y el footer de la
+  landing y en el header de Flutter (referencia). El header de Expo no lleva chip: lleva
+  el switch de visibilidad (fantasma).
 - Idioma: español (es-AR), tono del prototipo.
 - Alcance: demo no funcional. Sin backend, auth, push, geolocalización real, tiles
   reales, OAuth, persistencia, premium ni referidos.
@@ -56,10 +61,11 @@ Reglas duras del dataset (validadas por script):
   `fmt(key, params)` generado en ambos lenguajes.
 - Los 8 ítems de "Qué es simulado" son las claves `common.simItems.1` … `common.simItems.8`
   (numeradas para preservar el orden; no se agregan ni se quitan sin actualizar esta tabla).
-- Posicionamiento: `landing.eyebrow` y `about.club` contienen el mismo texto
-  ("Cowork Social Club Café") y `about.positioning` la frase que lo explica. Es estilo y
-  posicionamiento: **no** cambia el nombre del producto, el título del documento, el
-  icono, el bundle id, el repo ni las URLs, y no agrega pantallas ni acciones de club.
+- Posicionamiento: `about.brand` es el nombre visible (**Nearby Social Club**) y
+  `landing.eyebrow` y `about.club` contienen el mismo slogan (**Cowork Café**).
+  `about.positioning` explica el club. Es estilo y posicionamiento: **no** cambia el
+  nombre del repo, las URLs, el bundle id, el slug, el icono ni `schemaVersion`, y no
+  agrega pantallas ni acciones de club.
 - `privacy.noHistory` contiene verbatim "sin historial de rutas" y se muestra en la
   pantalla de privacidad de ambas apps.
 - `ig.simDisclaimer` ("Simulado: no es verificación real de Instagram") está siempre
@@ -113,7 +119,7 @@ Los timers se derivan de acciones, no del reloj de pared. No hay timers al carga
 
 | # | Pantalla | Requisito | Contenido mínimo |
 |---|---|---|---|
-| 1 | Descubrimiento | F-2, F-3 | radar / mapa / lista, radio 500 m–5 km, 4 filtros, contador, leyenda "mapa simulado" |
+| 1 | Descubrimiento | F-2, F-3 | lista cercana o radar sobre mapa estilizado, radio 500 m–5 km, 4 filtros, contador, leyenda "mapa simulado" |
 | 2 | Perfil de otro | F-1, F-4 | foto (blur/clear), intención, distancia, verificado/online, ping, seguridad, bloqueo |
 | 3 | Chat | F-5, F-9 | mensajes guionados, typing 1.2 s, revelar foto, bloqueo |
 | 4 | Pings | F-4, F-5 | bandeja con recibidos (aceptar / rechazar) y enviados con estado “Enviado / esperando respuesta”, sin segunda acción de envío, estado vacío |
@@ -127,6 +133,10 @@ Los timers se derivan de acciones, no del reloj de pared. No hay timers al carga
 Overlays (sobre la pantalla actual, `Stack` absoluto, sin router): `profile`, `chat`,
 `notifications`, `filters`, `settings`, `about`, `safety`, `blocked`, `privacy`.
 
+En **Expo** la vista `map` es interna/reservada: no se expone en la navegación y, si el
+estado la setea programáticamente, renderiza la misma composición radar-sobre-mapa. La
+pantalla 1 de Expo es esa composición única más la lista.
+
 **No existe** pantalla, tab, modelo, campo ni analítica de historial de rutas,
 encuentros o visitas. Tampoco hay onboarding de 7 pasos, premium, referidos ni PWA
 install.
@@ -136,9 +146,16 @@ install.
 - Estado en memoria (`view` + `overlay`). Sin router, sin deep links, sin URLs con
   estado. La URL nunca cambia; refrescar sirve el `index.html` del subdirectorio.
 - La **lista es la vista inicial** en ambas apps: al cargar, el tab activo es `Lista` y
-  los 10 perfiles aparecen ordenados por distancia ascendente. La barra inferior tiene
-  cinco tabs en este orden: **Lista → Radar → Mapa → Pings → Perfil**. Radar y mapa
-  siguen siendo de primera clase, con sus 10 puntos y su leyenda "mapa simulado".
+  los 10 perfiles aparecen ordenados por distancia ascendente.
+- **Expo** tiene cuatro tabs en este orden: **Lista → Radar → Pings → Perfil**. No hay
+  tab Mapa: Radar es una única composición con mapa estilizado de fondo, anillos,
+  barrido de 6 s y una capa de puntos. Pings y Perfil abren overlays sin cambiar la
+  vista. El valor `map` sigue reservado en la máquina de estados: si se setea, Expo
+  renderiza la misma composición radar-sobre-mapa, nunca un cuerpo sólo-mapa.
+- **Flutter** se mantiene como referencia congelada y conserva su barra de cinco tabs
+  (Lista → Radar → Mapa → Pings → Perfil). Esa diferencia de presentación es la
+  permitida en §8.
+- La barra inferior no tiene tabs de historial, encuentros ni visitas.
 - "Reiniciar demo" (`RESET`) vuelve al estado inicial completo — vistas, filtros, pings,
   match, chat, notificaciones, revelaciones, bloqueos, fantasma, verificación — y
   cancela todos los timers.
@@ -157,14 +174,15 @@ install.
 | Carga de fuente: Inter bundleada al compilar (Flutter) vs `expo-font` con gate de render (Expo) | Sí | Expo no renderiza hasta tener la fuente para evitar FOUT |
 | Switch de ajustes/filtros | Sí | Material 3 vs control nativo de RNW |
 | Foco visible: highlight de Material vs borde `accent` explícito | Sí | Mismo criterio (foco visible), distinto mecanismo |
-| Cualquier diferencia funcional (timers, copy, orden, estado, datasetId) | **No** | Es un defecto del contrato |
+| Navegación y descubrimiento: Expo con 4 tabs y radar sobre mapa; Flutter (referencia) con 5 tabs y radar/mapa separados | Sí | Presentación Expo-first descripta en §7; estado, timers, copy y datasetId siguen compartidos |
+| Cualquier diferencia funcional no listada (timers, copy compartido, orden de datos, estado, datasetId) | **No** | Es un defecto del contrato |
 
 ## 9. Checklist de paridad (15 puntos, vinculante)
 
 | # | Punto | Evidencia esperada (idéntica en ambas apps) |
 |---|---|---|
 | 1 | Perfil + 3 intenciones | Elegir "Actividades" se refleja en el perfil y en el filtro por defecto |
-| 2 | Radar / mapa / lista | La lista abre por defecto; 10 puntos, mismas distancias, orden asc, leyenda "mapa simulado", reduced-motion estático |
+| 2 | Radar sobre mapa / lista | La lista abre por defecto; Radar compone mapa estilizado, anillos, barrido de 6 s y 10 puntos con las mismas distancias, orden asc, leyenda "mapa simulado" y reduced-motion estático; no hay tab Mapa |
 | 3 | Radio + 4 filtros | 500 m deja solo ≤ 500 m; combinación imposible → vacío + "Limpiar filtros" |
 | 4 | Ping | "Enviado" e inhabilitado al segundo intento; el enviado aparece en la bandeja con estado pendiente; entrante a 3.0 s; badge sube |
 | 5 | Match + chat | Aceptar → match a 2.5 s → chat; typing 1.2 s; respuesta guionada; rechazar borra el ping |
@@ -177,7 +195,7 @@ install.
 | 12 | Reset + refresh | Tras flujo completo → estado inicial (vista `lista`); refresh idéntico; sin timers vivos |
 | 13 | Responsive + a11y | 320/360/480/768/1440 px sin overflow; labels con nombre y distancia; foco visible; ≥ 44 px |
 | 14 | Sin red | DevTools Network sin dominios externos (ni gstatic, ni Google Fonts) |
-| 15 | Divulgación | Chip DEMO persistente + hoja "Qué es simulado" con 8 ítems |
+| 15 | Divulgación | Label DEMO en About de Expo (visible sin abrir la hoja), header y footer de la landing, y header de Flutter; hoja "Qué es simulado" con 8 ítems |
 
 **Procedimiento lado a lado**: abrir landing + `/flutter/` + `/expo/` en tres pestañas,
 confirmar el mismo `schemaVersion` + `datasetId`, y recorrer 1 → 15 en ambas demos con
@@ -281,20 +299,20 @@ un navegador real y queda pendiente hasta la revisión con DevTools + lector de 
 | # | Automatizado | Visual |
 |---|---|---|
 | 1 | golden (`SET_SELF_INTENTION`), 3 intenciones válidas en `validate-fixtures` | cambio reflejado en perfil y filtro |
-| 2 | Flutter: radar con 10 puntos accesibles y reduced-motion estático | mismo orden/distancias en las 3 vistas de Expo |
+| 2 | Flutter: radar con 10 puntos accesibles y reduced-motion estático; Expo: `discoveryBody.test.ts` mapea `radar` y `map` a la misma composición | mismo orden/distancias en lista y radar de Expo |
 | 3 | `selectors.test.ts` / `selectors_test.dart`: radio 500 m, filtros y vacío | CTA “Limpiar filtros” en ambas |
 | 4 | golden timers + widget test de ping enviado/deshabilitado + bandeja con el enviado y su estado | ping entrante a 3.0 s en Expo |
 | 5 | golden (`ACCEPT_PING`, `SEND_MESSAGE`, `REJECT_PING`) | overlay de match a 2.5 s |
 | 6 | golden `MARK_NOTIFICATIONS_READ` + widget test “abrir el centro limpia el badge” | badge y toast de 4.0 s |
 | 7 | `SET_VERIFICATION` en golden; disclaimer obligatorio en `validate-fixtures` | 3 estados ciclables |
-| 8 | `pingBlockedReason('paused')`; golden `TOGGLE_GHOST` | banner persistente |
+| 8 | `pingBlockedReason('paused')`; golden `TOGGLE_GHOST`; `visibility.test.ts` deshabilita el switch con overlay profile/chat | switch del header y banner persistentes |
 | 9 | `avatarState` / `isRevealed`; golden `REVEAL_PHOTO` | reveal del par a 1.5 s |
-| 10 | golden `BLOCK_PROFILE` / `UNBLOCK_PROFILE`; `visibleProfiles` excluye bloqueados | desaparición en mapa/radar/lista |
+| 10 | golden `BLOCK_PROFILE` / `UNBLOCK_PROFILE`; `visibleProfiles` excluye bloqueados | desaparición en lista y radar |
 | 11 | sin pantalla/modelo de historial; `privacy.noHistory` obligatorio | copy visible en privacidad |
 | 12 | widget test de reset; `store.test.ts` cancela timers | refresh en el navegador |
 | 13 | 360×640 sin overflow; labels con nombre + distancia + badges | 320/480/768/1440 y foco con teclado |
 | 14 | denylist de hosts en el artefacto (gstatic/`eascdn` con allowlist acotada); cero storage/fetch en el código; `lang="es"` en los tres documentos | Network con dominios externos |
-| 15 | widget test del chip DEMO y los 8 ítems | chip persistente en todas las pantallas |
+| 15 | `brand.test.mjs` (marca, slogan, DEMO en landing) + `copy.test.ts`; About con label DEMO y 8 ítems | label DEMO en About, landing header/footer y header Flutter |
 
 Automatizado y reproducible:
 
