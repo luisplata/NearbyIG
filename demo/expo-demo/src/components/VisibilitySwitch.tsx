@@ -28,6 +28,8 @@ export function VisibilitySwitch({
       accessibilityRole="switch"
       accessibilityLabel={fmt('settings.ghost')}
       accessibilityState={{ checked, disabled }}
+      aria-checked={checked}
+      aria-disabled={disabled}
       disabled={disabled}
       onPress={onToggle}
       onFocus={() => setFocused(true)}

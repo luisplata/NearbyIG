@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ComponentRef } from 'react';
 import { Animated, Easing, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
@@ -29,6 +30,7 @@ export function RadarMapView({
 }) {
   const reduced = useReducedMotion();
   const spin = useRef(new Animated.Value(0)).current;
+  const wrapRef = useRef<ComponentRef<typeof View>>(null);
   const [side, setSide] = useState(0);
 
   const onLayout = (event: LayoutChangeEvent): void => {
@@ -36,6 +38,20 @@ export function RadarMapView({
     const next = Math.max(0, Math.floor(Math.min(width, height)));
     setSide((current) => (current === next ? current : next));
   };
+
+  useEffect(() => {
+    const element = wrapRef.current as unknown as HTMLElement | null;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const update = (): void => {
+      const rect = element.getBoundingClientRect();
+      const next = Math.max(0, Math.floor(Math.min(rect.width, rect.height)));
+      setSide((current) => (current === next ? current : next));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (reduced) {
@@ -62,6 +78,7 @@ export function RadarMapView({
 
   return (
     <View
+      ref={wrapRef}
       style={styles.wrap}
       onLayout={onLayout}
       accessibilityRole="region"

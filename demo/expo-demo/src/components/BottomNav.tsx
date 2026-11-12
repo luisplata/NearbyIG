@@ -57,6 +57,7 @@ function NavItemView({
       accessibilityRole="tab"
       accessibilityLabel={label}
       accessibilityState={{ selected }}
+      aria-selected={selected}
       onPress={() => onSelect(item)}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}

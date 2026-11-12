@@ -162,7 +162,7 @@ install.
 - Refresh = estado inicial: sin `localStorage`, `sessionStorage`, cookies ni IndexedDB.
 - La semántica completa vive en `shared/state-machine.md`; es la norma, no una guía.
 
-## 8. Diferencias permitidas entre apps (solo renderizado)
+## 8. Diferencias permitidas entre apps (Expo-first)
 
 | Diferencia | Permitida | Por qué |
 |---|---|---|
@@ -177,12 +177,12 @@ install.
 | Navegación y descubrimiento: Expo con 4 tabs y radar sobre mapa; Flutter (referencia) con 5 tabs y radar/mapa separados | Sí | Presentación Expo-first descripta en §7; estado, timers, copy y datasetId siguen compartidos |
 | Cualquier diferencia funcional no listada (timers, copy compartido, orden de datos, estado, datasetId) | **No** | Es un defecto del contrato |
 
-## 9. Checklist de paridad (15 puntos, vinculante)
+## 9. Checklist de comportamiento (15 puntos; Expo-first)
 
-| # | Punto | Evidencia esperada (idéntica en ambas apps) |
+| # | Punto | Evidencia esperada (idéntica salvo diferencias de §8) |
 |---|---|---|
 | 1 | Perfil + 3 intenciones | Elegir "Actividades" se refleja en el perfil y en el filtro por defecto |
-| 2 | Radar sobre mapa / lista | La lista abre por defecto; Radar compone mapa estilizado, anillos, barrido de 6 s y 10 puntos con las mismas distancias, orden asc, leyenda "mapa simulado" y reduced-motion estático; no hay tab Mapa |
+| 2 | Radar sobre mapa / lista | La lista abre por defecto; en Expo, Radar compone mapa estilizado, anillos, barrido de 6 s y 10 puntos con las mismas distancias, orden asc, leyenda "mapa simulado" y reduced-motion estático; no hay tab Mapa. Flutter (referencia) conserva radar y mapa separados |
 | 3 | Radio + 4 filtros | 500 m deja solo ≤ 500 m; combinación imposible → vacío + "Limpiar filtros" |
 | 4 | Ping | "Enviado" e inhabilitado al segundo intento; el enviado aparece en la bandeja con estado pendiente; entrante a 3.0 s; badge sube |
 | 5 | Match + chat | Aceptar → match a 2.5 s → chat; typing 1.2 s; respuesta guionada; rechazar borra el ping |
