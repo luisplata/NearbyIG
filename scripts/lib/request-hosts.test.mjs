@@ -5,6 +5,7 @@ import {
   ALLOWED_REQUEST_HOSTS,
   BENIGN_TEXT_HOSTS,
   REQUEST_POSITION,
+  compareHostSets,
   scanRequestHosts,
 } from './request-hosts.mjs';
 
@@ -100,14 +101,50 @@ test('cada entrada benigna documenta su razón', () => {
   }
 });
 
-test('el host pedible todavía no está en la allowlist (slice 1)', () => {
-  assert.deepEqual(ALLOWED_REQUEST_HOSTS, []);
-  // Sin allowlist, el host del basemap es un desconocido: en posición pedible
-  // falla. La slice 2 lo habilita y actualiza este caso.
-  const { findings, occurrences } = scanRequestHosts('style:"https://tiles.openfreemap.org/planet"');
-  assert.deepEqual(
-    findings.map((finding) => finding.label),
-    ['tiles.openfreemap.org'],
-  );
+test('el host del basemap está permitido y se cuenta como ocurrencia', () => {
+  assert.deepEqual(ALLOWED_REQUEST_HOSTS, ['tiles.openfreemap.org']);
+
+  const style = scanRequestHosts('style:"https://tiles.openfreemap.org/styles/liberty"');
+  assert.deepEqual(style.findings, []);
+  assert.deepEqual(style.occurrences, ['tiles.openfreemap.org']);
+
+  const tileJson = scanRequestHosts('{type:"vector",url:"https://tiles.openfreemap.org/planet"}');
+  assert.deepEqual(tileJson.findings, []);
+  assert.deepEqual(tileJson.occurrences, ['tiles.openfreemap.org']);
+
+  const glyphs = scanRequestHosts('glyphs:"https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf"');
+  assert.deepEqual(glyphs.findings, []);
+  assert.deepEqual(glyphs.occurrences, ['tiles.openfreemap.org']);
+});
+
+test('el host permitido en texto plano no cuenta como pedido', () => {
+  const { findings, occurrences } = scanRequestHosts('// tiles.openfreemap.org es el basemap');
+  assert.deepEqual(findings, []);
   assert.deepEqual(occurrences, []);
+});
+
+test('un segundo host pedible sigue fallando con la allowlist activa', () => {
+  assert.deepEqual(labels('fetch("https://tile.openstreetmap.org/{z}/{x}/{y}.png")'), [
+    'tile.openstreetmap.org',
+  ]);
+  assert.deepEqual(labels('url:"https://demotiles.maplibre.org/style.json"'), [
+    'demotiles.maplibre.org',
+  ]);
+  // El namespace sigue sin ser request, así que no lo permite la allowlist: lo
+  // tolera la lista benigna sólo fuera de posición pedible.
+  assert.deepEqual(labels('xmlns="https://www.w3.org/2000/svg"'), []);
+  assert.deepEqual(labels('href="https://www.w3.org/2000/svg"'), ['www.w3.org']);
+});
+
+test('--strict exige el host presente y único', () => {
+  assert.deepEqual(compareHostSets([]), {
+    missing: ['tiles.openfreemap.org'],
+    extra: [],
+  });
+  assert.deepEqual(compareHostSets(['tiles.openfreemap.org']), { missing: [], extra: [] });
+  assert.deepEqual(compareHostSets(['tiles.openfreemap.org', 'demotiles.maplibre.org']), {
+    missing: [],
+    extra: ['demotiles.maplibre.org'],
+  });
+  assert.deepEqual(compareHostSets([]), compareHostSets([], ALLOWED_REQUEST_HOSTS));
 });

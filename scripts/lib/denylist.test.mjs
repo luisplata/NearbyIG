@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   EXPO_GO_DEAD_CODE,
   FLUTTER_LOADER_FALLBACK_PATTERNS,
+  MAPLIBRE_DEAD_CODE,
   auditText,
   deniedReason,
   scanText,
@@ -188,6 +189,47 @@ test('el strip de Flutter corre antes de la regla posicional', () => {
   assert.deepEqual(
     outside.map((finding) => finding.kind),
     ['host'],
+  );
+});
+
+test('los links de atribución/logo de MapLibre se recortan sólo en su chunk', () => {
+  const attribution =
+    'const qz={compact:!0,customAttribution:"<a href=\\"https://maplibre.org/\\" target=\\"_blank\\">MapLibre</a>"};';
+  const logo =
+    'return t.target="_blank",t.rel="noopener nofollow",t.href="https://maplibre.org/",t.setAttribute("aria-label",x)';
+  const chunk = 'site/expo/_expo/static/js/web/maplibre-gl-3bd86c6e7479129125a210f527cfd951.js';
+
+  assert.ok(MAPLIBRE_DEAD_CODE.path.test(chunk));
+  assert.deepEqual(scanText(`${attribution}\n${logo}`, { path: chunk }), []);
+
+  // Fuera del chunk de MapLibre el mismo href es un pedido y bloquea.
+  const outside = scanText('<a href="https://maplibre.org/">MapLibre</a>', {
+    path: 'site/index.html',
+  });
+  assert.deepEqual(
+    outside.map((finding) => [finding.kind, finding.label]),
+    [['request-host', 'maplibre.org']],
+  );
+
+  // Y el recorte no tolera otro path de `maplibre.org` dentro del chunk.
+  const otherPath = scanText('fetch("https://maplibre.org/api/x.json")', { path: chunk });
+  assert.deepEqual(
+    otherPath.map((finding) => finding.label),
+    ['maplibre.org'],
+  );
+});
+
+test('los hosts benignos de MapLibre se toleran sólo en texto', () => {
+  const chunk = 'site/expo/_expo/static/js/web/maplibre-gl-abc.js';
+  const message =
+    'Read more on https://wiki.openstreetmap.org/wiki/This_map_requires_WebGL";}' +
+    ' const base = new URL(t, "https://maplibre.invalid/");';
+  assert.deepEqual(scanText(message, { path: chunk }), []);
+
+  const baseAsFetch = scanText('fetch("https://maplibre.invalid/x")', { path: chunk });
+  assert.deepEqual(
+    baseAsFetch.map((finding) => finding.label),
+    ['maplibre.invalid'],
   );
 });
 
