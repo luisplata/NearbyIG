@@ -1,0 +1,4 @@
+node_modules
+.expo
+dist
+public/maplibre-gl-worker.js

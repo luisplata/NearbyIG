@@ -5,6 +5,7 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
+    "postinstall": "node ./scripts/copy-maplibre-worker.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "export:web": "expo export --platform web --output-dir dist --clear"

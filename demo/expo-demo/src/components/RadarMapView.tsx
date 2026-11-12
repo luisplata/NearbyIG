@@ -122,11 +122,7 @@ export function RadarMapView({
 
         {realTiles ? (
           <View style={styles.attribution} pointerEvents="none">
-            <View
-              accessible
-              accessibilityLabel={fmt('discovery.mapAttribution')}
-              style={styles.attributionChip}
-            >
+            <View accessibilityRole="text" style={styles.attributionChip}>
               <Text style={styles.attributionText}>{fmt('discovery.mapAttribution')}</Text>
             </View>
           </View>

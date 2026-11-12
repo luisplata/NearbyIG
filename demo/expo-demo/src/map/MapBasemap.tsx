@@ -46,6 +46,10 @@ export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
   const mapRef = useRef<MapLibreMap | null>(null);
   const phaseRef = useRef<MapPhase>('idle');
   const startedRef = useRef(false);
+  // Valores vigentes para el handler de `load`: el efecto de montaje corre una
+  // sola vez, así que el closure vería el radio/lado iniciales si llega tarde.
+  const latestRef = useRef({ radiusM, side });
+  latestRef.current = { radiusM, side };
   const [phase, setPhase] = useState<MapPhase>('idle');
   const armed = side > 0;
 
@@ -80,11 +84,16 @@ export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
       inner.remove();
     };
 
-    const fail = (): void => {
+    let warned = false;
+    const fail = (reason?: unknown): void => {
       if (disposed) return;
       disposed = true;
       if (timer !== undefined) clearTimeout(timer);
       release();
+      if (!warned) {
+        warned = true;
+        console.warn('[map] basemap no disponible: se mantiene el mapa ilustrado.', reason);
+      }
       dispatch('FAIL');
     };
 
@@ -101,8 +110,11 @@ export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
     timer = setTimeout(fail, MAP_TIMEOUT_MS);
 
     void import('maplibre-gl')
-      .then(({ Map }) => {
+      .then(({ Map, setWorkerUrl }) => {
         if (disposed) return;
+        // Metro no emite el worker de MapLibre en el export: se copia a `public/`
+        // (script `copy-maplibre-worker.mjs`) y se resuelve contra el base path.
+        setWorkerUrl(new URL('maplibre-gl-worker.js', document.baseURI).href);
         const map = new Map({
           container: inner,
           style: mapStyle(),
@@ -123,13 +135,19 @@ export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
         canvas.style.left = '0';
         canvas.style.top = '0';
 
+        map.on('error', (event) => fail(event?.error ?? 'map error'));
+
         map.once('load', () => {
           if (disposed) return;
           if (timer !== undefined) clearTimeout(timer);
           map.resize();
+          // El radio o el lado pudieron cambiar durante la carga: re-aplicamos el
+          // zoom vigente para que el mapa no quede a la escala vieja.
+          const current = latestRef.current;
+          map.jumpTo({ center: centerLngLat(), zoom: zoomForRadius(current.radiusM, current.side) });
           dispatch('READY');
         });
-        map.on('error', () => fail());
+
         map.on('webglcontextlost', () => fail());
       })
       .catch(() => fail());
