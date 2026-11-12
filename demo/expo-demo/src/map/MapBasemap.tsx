@@ -98,16 +98,15 @@ export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
     };
 
     if (!supportsWebGL()) {
-      // Único warning permitido: sin WebGL no se intenta y no se rompe nada.
-      console.warn('[map] WebGL no disponible: se mantiene el mapa ilustrado.');
-      fail();
+      // `fail` emite el único warning del montaje, con la causa.
+      fail('WebGL no disponible');
       return () => {
         disposed = true;
       };
     }
 
     dispatch('LOAD');
-    timer = setTimeout(fail, MAP_TIMEOUT_MS);
+    timer = setTimeout(() => fail('timeout de 8 s'), MAP_TIMEOUT_MS);
 
     void import('maplibre-gl')
       .then(({ Map, setWorkerUrl }) => {
@@ -150,7 +149,7 @@ export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
 
         map.on('webglcontextlost', () => fail());
       })
-      .catch(() => fail());
+      .catch((error) => fail(error));
 
     return () => {
       disposed = true;
