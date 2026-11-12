@@ -2,7 +2,7 @@
 // Source: demo/shared/fixtures.json + copy.json + design-tokens.json + photos.json
 // Regenerate with: node scripts/sync-demo-assets.mjs
 
-export const datasetId = "ds-ddca69e0";
+export const datasetId = "ds-acb36baf";
 export const schemaVersion = 2;
 
 /** Versión del repo (package.json); se muestra en "Acerca de". */

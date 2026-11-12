@@ -8,7 +8,7 @@ const baseUrl = (process.env.EXPO_BASE_URL ?? '/expo').replace(/\/+$/, '');
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'NearbyIG Demo',
+  name: 'Nearby Social Club',
   slug: 'nearbyig-demo',
   version: '0.1.0',
   orientation: 'portrait',
@@ -23,7 +23,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Idioma del documento (E-5/F-13): `expo export` sustituye %LANG_ISO_CODE% en
     // `public/index.html`. Sin esto el template de Expo sale con lang="en".
     lang: 'es',
-    description: 'Demo mock de NearbyIG: datos ficticios, sin backend ni red.',
+    description: 'Demo no funcional de Nearby Social Club: datos ficticios, sin backend ni red.',
   },
   experiments: { baseUrl },
   plugins: ['expo-font'],
