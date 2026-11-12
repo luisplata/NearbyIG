@@ -89,7 +89,7 @@
   "landing.backToTop": "Volver arriba",
   "landing.compare.dataset": "Un único dataset versionado, generado desde demo/shared y verificado por CI.",
   "landing.compare.diff": "Las diferencias de navegación, de composición de descubrimiento y de basemap son deliberadas: Expo es la demo activa y Flutter una referencia congelada. Timers, copy, estado y datasetId siguen siendo compartidos; cualquier diferencia ahí es un defecto.",
-  "landing.compare.offline": "Un solo host externo, el basemap del radar; CanvasKit, fuentes e imágenes se sirven desde el mismo sitio.",
+  "landing.compare.offline": "Un solo host externo, tiles.openfreemap.org, que sirve los tiles del basemap: el proveedor ve la IP y la zona fija de la demo, nunca tu ubicación. CanvasKit, fuentes e imágenes se sirven desde el mismo sitio.",
   "landing.compare.reset": "Refrescar o reiniciar la demo vuelve siempre al estado inicial, sin persistencia.",
   "landing.compare.screens": "Navegación por estado en memoria: sin router, sin deep links y sin persistencia.",
   "landing.compare.timers": "Los mismos timers: match 2.5 s, typing 1.2 s, reveal 1.5 s, ping 3.0 s y toast 4.0 s.",
