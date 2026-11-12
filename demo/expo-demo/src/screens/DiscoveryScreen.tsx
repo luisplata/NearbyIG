@@ -8,17 +8,20 @@ import { formatRadius } from '../state/format';
 import { visibleProfiles } from '../state/selectors';
 import { colors, fontSize, space, text } from '../theme/theme';
 
-import { BottomNav, type NavTarget } from '../components/BottomNav';
+import { BottomNav } from '../components/BottomNav';
 import { EmptyState } from '../components/EmptyState';
 import { IconButton } from '../components/IconButton';
-import { MapView } from '../components/MapView';
 import { ProfileList } from '../components/ProfileList';
-import { RadarCaption, RadarView } from '../components/RadarView';
+import { RadarCaption, RadarMapView } from '../components/RadarMapView';
 import { RadiusControl } from '../components/RadiusControl';
+import type { NavItem } from '../navigation/navItems';
+
+import { bodyFor } from './discoveryBody';
 
 /**
- * Pantalla base: descubrimiento en radar, mapa o lista, con radio y filtros
- * compartidos (F-2, F-3).
+ * Pantalla base: descubrimiento en lista o en la composición radar-sobre-mapa,
+ * con radio y filtros compartidos (F-2, F-3). La vista reservada `map` renderiza
+ * la misma composición que `radar`.
  */
 export function DiscoveryScreen() {
   const { state, dispatch } = useDemo();
@@ -33,18 +36,15 @@ export function DiscoveryScreen() {
     dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: profile.id });
   };
 
-  const onNav = (target: NavTarget): void => {
-    switch (target) {
-      case 'profile':
-        dispatch({ type: 'OPEN_OVERLAY', overlay: 'settings' });
-        return;
-      case 'pings':
-        dispatch({ type: 'OPEN_OVERLAY', overlay: 'pings' });
-        return;
-      default:
-        dispatch({ type: 'SET_VIEW', view: target });
+  const onNav = (item: NavItem): void => {
+    if (item.kind === 'overlay') {
+      dispatch({ type: 'OPEN_OVERLAY', overlay: item.overlay });
+      return;
     }
+    dispatch({ type: 'SET_VIEW', view: item.view });
   };
+
+  const body = bodyFor(state.view);
 
   return (
     <View style={styles.root}>
@@ -87,15 +87,11 @@ export function DiscoveryScreen() {
             actionLabel={fmt('empty.filtersCta')}
             onAction={() => dispatch({ type: 'CLEAR_FILTERS' })}
           />
-        ) : state.view === 'radar' ? (
+        ) : body === 'radarMap' ? (
           <>
-            <RadarView profiles={profiles} radiusM={state.filters.radiusM} onOpen={onOpen} />
+            <RadarMapView profiles={profiles} radiusM={state.filters.radiusM} onOpen={onOpen} />
             <RadarCaption />
           </>
-        ) : state.view === 'map' ? (
-          <View style={styles.mapWrap}>
-            <MapView profiles={profiles} radiusM={state.filters.radiusM} onOpen={onOpen} />
-          </View>
         ) : (
           <>
             <Text style={[text.small, styles.listHeading]}>{fmt('discovery.listHeading')}</Text>
@@ -152,10 +148,6 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     paddingHorizontal: space[3],
-  },
-  mapWrap: {
-    flex: 1,
-    paddingBottom: space[2],
   },
   listHeading: {
     fontSize: fontSize[0],

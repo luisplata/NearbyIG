@@ -2,24 +2,16 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
+import { badgeCount, isSelectedTab, NAV_ITEMS, type NavItem } from '../navigation/navItems';
 import type { DemoView } from '../state/types';
 import { colors, fontFamily, fontSize, space } from '../theme/theme';
 
-import { Icon, type IconName } from './Icon';
-
-export type NavTarget = DemoView | 'pings' | 'profile';
-
-type Item = {
-  target: NavTarget;
-  icon: IconName;
-  label: string;
-  badge?: number;
-};
+import { Icon } from './Icon';
 
 /**
- * Barra inferior: las tres vistas de descubrimiento, la bandeja de pings y el
- * perfil propio. No hay tabs de historial (F-11). 44 px mínimo y etiqueta
- * semántica por ítem.
+ * Barra inferior con cuatro tabs: Lista → Radar → Pings → Perfil. Sin tab Mapa
+ * y sin historial (F-11). Cada ítem mantiene 44 px mínimos, etiqueta semántica,
+ * estado seleccionado y foco visible.
  */
 export function BottomNav({
   view,
@@ -28,23 +20,16 @@ export function BottomNav({
 }: {
   view: DemoView;
   pingsCount: number;
-  onSelect: (target: NavTarget) => void;
+  onSelect: (item: NavItem) => void;
 }) {
-  const items: Item[] = [
-    { target: 'list', icon: 'list', label: fmt('nav.list') },
-    { target: 'radar', icon: 'radar', label: fmt('nav.radar') },
-    { target: 'map', icon: 'map', label: fmt('nav.map') },
-    { target: 'pings', icon: 'ping', label: fmt('nav.pings'), badge: pingsCount },
-    { target: 'profile', icon: 'person', label: fmt('nav.profile') },
-  ];
-
   return (
     <View style={styles.bar} accessibilityRole="tablist">
-      {items.map((item) => (
-        <NavItem
-          key={item.target}
+      {NAV_ITEMS.map((item) => (
+        <NavItemView
+          key={item.id}
           item={item}
-          selected={item.target === view}
+          selected={isSelectedTab(item, view)}
+          badge={badgeCount(item, pingsCount)}
           onSelect={onSelect}
         />
       ))}
@@ -52,38 +37,41 @@ export function BottomNav({
   );
 }
 
-function NavItem({
+function NavItemView({
   item,
   selected,
+  badge,
   onSelect,
 }: {
-  item: Item;
+  item: NavItem;
   selected: boolean;
-  onSelect: (target: NavTarget) => void;
+  badge: number | undefined;
+  onSelect: (item: NavItem) => void;
 }) {
   const [focused, setFocused] = useState(false);
   const color = selected ? colors.accent : colors.muted;
+  const label = fmt(item.labelKey);
 
   return (
     <Pressable
       accessibilityRole="tab"
-      accessibilityLabel={item.label}
+      accessibilityLabel={label}
       accessibilityState={{ selected }}
-      onPress={() => onSelect(item.target)}
+      onPress={() => onSelect(item)}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
       style={({ pressed }) => [styles.item, focused && styles.focused, pressed && styles.pressed]}
     >
       <View style={styles.iconWrap}>
         <Icon name={item.icon} size={20} color={color} />
-        {item.badge !== undefined && item.badge > 0 ? (
+        {badge === undefined ? null : (
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>{item.badge}</Text>
+            <Text style={styles.badgeText}>{badge}</Text>
           </View>
-        ) : null}
+        )}
       </View>
       <Text numberOfLines={1} style={[styles.label, { color }]}>
-        {item.label}
+        {label}
       </Text>
     </Pressable>
   );

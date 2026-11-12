@@ -7,14 +7,18 @@ import type { Profile } from '../generated/fixtures';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { colors, fontSize } from '../theme/theme';
 
+import { Chip } from './Chip';
+import { MapCanvas } from './MapCanvas';
 import { ProfileDotLayer } from './ProfileDotLayer';
 import { RadarSvg, sweepWedgePath } from './RadarSvg';
 
 /**
- * Radar: anillos + barrido de 6 s. Con `prefers-reduced-motion` el barrido queda
- * estático y los puntos siguen visibles (F-2 / E-5).
+ * Composición única de descubrimiento: mapa estilizado de fondo + anillos,
+ * cruz y barrido + una sola capa de puntos. El contenedor es cuadrado
+ * (`side = floor(min(w, h))`) para que los anillos sean círculos y los puntos
+ * conserven la proyección compartida. Sin tiles, SDK ni red.
  */
-export function RadarView({
+export function RadarMapView({
   profiles,
   radiusM,
   onOpen,
@@ -51,30 +55,46 @@ export function RadarView({
   }, [reduced, spin]);
 
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const decorative = {
+    accessibilityElementsHidden: true,
+    importantForAccessibility: 'no-hide-descendants' as const,
+  };
 
   return (
-    <View style={styles.wrap} accessibilityLabel={fmt('a11y.radar')} onLayout={onLayout}>
+    <View
+      style={styles.wrap}
+      onLayout={onLayout}
+      accessibilityRole="region"
+      accessibilityLabel={fmt('a11y.radar')}
+    >
       <View style={side > 0 ? { width: side, height: side } : styles.hidden}>
-        <View style={StyleSheet.absoluteFill}>
+        <MapCanvas />
+
+        <View style={[StyleSheet.absoluteFill]} pointerEvents="none" {...decorative}>
           <RadarSvg />
         </View>
-        {reduced ? null : (
-          <Animated.View
-            pointerEvents="none"
-            style={[StyleSheet.absoluteFill, { transform: [{ rotate }] }]}
-          >
-            <Svg width="100%" height="100%" viewBox="0 0 100 100">
-              <Path d={sweepWedgePath} fill={colors.accent} fillOpacity={0.18} />
-            </Svg>
-          </Animated.View>
-        )}
+
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { transform: [{ rotate }] }]}
+          {...decorative}
+        >
+          <Svg width="100%" height="100%" viewBox="0 0 100 100">
+            <Path d={sweepWedgePath} fill={colors.accent} fillOpacity={0.18} />
+          </Svg>
+        </Animated.View>
+
         <ProfileDotLayer profiles={profiles} radiusM={radiusM} onOpen={onOpen} />
+
+        <View style={styles.legend} pointerEvents="none" {...decorative}>
+          <Chip label={fmt('discovery.mapLegend')} />
+        </View>
       </View>
     </View>
   );
 }
 
-/** Caption del radar (misma clave de copy que Flutter). */
+/** Caption del radar, hermana de la composición para no recortar el cuadrado. */
 export function RadarCaption() {
   return <Text style={styles.caption}>{fmt('discovery.radarCaption')}</Text>;
 }
@@ -88,6 +108,11 @@ const styles = StyleSheet.create({
   hidden: {
     width: 0,
     height: 0,
+  },
+  legend: {
+    position: 'absolute',
+    left: 8,
+    bottom: 8,
   },
   caption: {
     textAlign: 'center',
