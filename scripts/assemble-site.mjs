@@ -24,7 +24,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { deniedReason, isTextFile, scanText } from './lib/denylist.mjs';
+import { auditText, deniedReason, isTextFile } from './lib/denylist.mjs';
+import { ALLOWED_REQUEST_HOSTS } from './lib/request-hosts.mjs';
 import { datasetIdOf } from './lib/canonical.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -131,6 +132,7 @@ function copyTree(sourceRoot, destRoot, { label }) {
 function audit(dir) {
   const offenders = [];
   const findings = [];
+  const hosts = new Map();
   let files = 0;
   let bytes = 0;
 
@@ -150,12 +152,16 @@ function audit(dir) {
     if (size > MAX_SCAN_BYTES) return;
 
     const text = readFileSync(absolute, 'utf8');
-    for (const finding of scanText(text, { path: rel })) {
+    const result = auditText(text, { path: rel });
+    for (const finding of result.findings) {
       findings.push(`${rel}: ${finding.kind} prohibido "${finding.label}" (${finding.match})`);
+    }
+    for (const host of result.occurrences) {
+      hosts.set(host, (hosts.get(host) ?? 0) + 1);
     }
   });
 
-  return { offenders, findings, files, bytes };
+  return { offenders, findings, hosts, files, bytes };
 }
 
 function checkIndexes(dir) {
@@ -267,7 +273,7 @@ function checkBaseHref(dir) {
 }
 
 function report(dir) {
-  const { offenders, findings, files, bytes } = audit(dir);
+  const { offenders, findings, hosts, files, bytes } = audit(dir);
   for (const entry of offenders) problem(`archivo prohibido: ${entry}`);
   for (const entry of findings) problem(`contenido prohibido: ${entry}`);
 
@@ -284,8 +290,25 @@ function report(dir) {
   checkBaseHref(dir);
   checkExpoDocument(dir);
 
+  const observed = [...hosts.keys()].sort();
+  const detail = ALLOWED_REQUEST_HOSTS.map((host) => `${host} (${hosts.get(host) ?? 0})`).join(', ');
   console.log(`\n  artefacto ${displayPath(dir)}: ${files} archivo(s), ${humanSize(bytes)}`);
   console.log(`  dataset   ${expectedDatasetId}`);
+  console.log(`  host pedible: ${observed.length === 0 ? 'ninguno' : observed.join(', ')}`);
+  if (detail.length > 0) console.log(`  allowlist   ${detail}`);
+
+  // La allowlist es el conjunto exacto: ni falta el host del basemap ni sobra otro.
+  if (strict && pending.length === 0) {
+    const absent = ALLOWED_REQUEST_HOSTS.filter((host) => !hosts.has(host));
+    if (absent.length > 0) {
+      problem(`--strict exige que el artefacto pida el host permitido: falta ${absent.join(', ')}`);
+    }
+    const extra = observed.filter((host) => !ALLOWED_REQUEST_HOSTS.includes(host));
+    if (extra.length > 0) {
+      problem(`--strict: el artefacto pide hosts fuera de la allowlist: ${extra.join(', ')}`);
+    }
+  }
+
   if (missing.length === 0) {
     console.log('  index.html  landing, flutter y expo OK');
   }

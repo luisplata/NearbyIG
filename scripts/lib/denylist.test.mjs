@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   EXPO_GO_DEAD_CODE,
   FLUTTER_LOADER_FALLBACK_PATTERNS,
+  auditText,
   deniedReason,
   scanText,
   stripKnownDeadCode,
@@ -136,6 +137,58 @@ test('el código muerto de Expo Go se permite sólo en el bundle web de Expo', (
 
   assert.ok(EXPO_GO_DEAD_CODE.path.test(EXPO_BUNDLE));
   assert.ok(!EXPO_GO_DEAD_CODE.path.test('site/expo/index.html'));
+});
+
+test('un host desconocido en posición pedible es un finding request-host', () => {
+  const findings = scanText('const t=await fetch("https://example.org/tiles.json")', {
+    path: 'site/expo/_expo/static/js/web/index-abc.js',
+  });
+  assert.deepEqual(
+    findings.map((finding) => [finding.kind, finding.label]),
+    [['request-host', 'example.org']],
+  );
+});
+
+test('request-host convive con los prohibidos sin duplicar la etiqueta', () => {
+  const findings = scanText(
+    'fetch("https://example.org/a");fetch("https://maps.googleapis.com/maps/api/js");' +
+      `var k="AIza${'a'.repeat(35)}";`,
+    { path: 'site/expo/_expo/static/js/web/index-abc.js' },
+  );
+  assert.deepEqual(
+    findings.map((finding) => [finding.kind, finding.label]),
+    [
+      ['host', 'googleapis.com'],
+      ['request-host', 'example.org'],
+      ['secret', 'Google API key'],
+    ],
+  );
+});
+
+test('un host benigno no produce findings ni ocurrencias', () => {
+  const result = auditText('<svg xmlns="http://www.w3.org/2000/svg"></svg>', {
+    path: 'site/expo/index.html',
+  });
+  assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.occurrences, []);
+});
+
+test('el strip de Flutter corre antes de la regla posicional', () => {
+  // En el archivo del engine la forma exacta se recorta: no queda ni `host` ni
+  // un `request-host` duplicado.
+  assert.deepEqual(scanText(`<script src="${CANVASKIT_FALLBACK}"></script>`, {
+    path: 'site/flutter/flutter.js',
+  }), []);
+
+  // Fuera del engine la URL es un pedido real: gana la prohibición
+  // incondicional y no se repite como `request-host`.
+  const outside = scanText(`<script src="${CANVASKIT_FALLBACK}"></script>`, {
+    path: 'site/index.html',
+  });
+  assert.deepEqual(
+    outside.map((finding) => finding.kind),
+    ['host'],
+  );
 });
 
 test('la denylist de archivos no se relaja', () => {

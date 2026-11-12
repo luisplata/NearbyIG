@@ -4,6 +4,8 @@
  * las apps) y `assemble-site.mjs` (al ensamblar y auditar `site/`).
  */
 
+import { scanRequestHosts } from './request-hosts.mjs';
+
 export const DENIED_EXTENSIONS = ['.zip', '.keystore', '.jks', '.p12', '.pem', '.map'];
 
 export const DENIED_BASENAMES = [
@@ -155,19 +157,31 @@ export function isTextFile(fileName) {
 }
 
 /**
- * Devuelve `{ kind, label, match }` para cada host o secreto encontrado en
+ * Devuelve `{ findings, occurrences }` para cada host o secreto encontrado en
  * `text`. Los secretos se escanean siempre sobre el texto original; los hosts
  * ignoran las formas exactas de código muerto conocidas cuando se pasa `path`
- * (ver `stripKnownDeadCode`).
+ * (ver `stripKnownDeadCode`) y después aplican la regla posicional de
+ * `request-hosts.mjs`.
+ *
+ * Un host ya prohibido por `FORBIDDEN_HOSTS` no se repite como `request-host`:
+ * la prohibición incondicional gana y el finding queda con su etiqueta propia.
+ * `occurrences` son las apariciones del host permitido en posición pedible.
  */
-export function scanText(text, { hosts = true, secrets = true, path = '' } = {}) {
+export function auditText(text, { hosts = true, secrets = true, path = '' } = {}) {
   const findings = [];
+  let occurrences = [];
   if (hosts) {
     const hostText = path ? stripKnownDeadCode(path, text) : text;
     for (const rule of FORBIDDEN_HOSTS) {
       const match = rule.pattern.exec(hostText);
       if (match) findings.push({ kind: 'host', label: rule.label, match: match[0].slice(0, 120) });
     }
+    const positional = scanRequestHosts(hostText);
+    for (const finding of positional.findings) {
+      if (FORBIDDEN_HOSTS.some((rule) => rule.pattern.test(finding.label))) continue;
+      findings.push(finding);
+    }
+    occurrences = positional.occurrences;
   }
   if (secrets) {
     for (const rule of SECRET_PATTERNS) {
@@ -175,5 +189,10 @@ export function scanText(text, { hosts = true, secrets = true, path = '' } = {})
       if (match) findings.push({ kind: 'secret', label: rule.label, match: match[0].slice(0, 120) });
     }
   }
-  return findings;
+  return { findings, occurrences };
+}
+
+/** Compatibilidad: sólo los findings, en el orden de siempre. */
+export function scanText(text, options = {}) {
+  return auditText(text, options).findings;
 }
