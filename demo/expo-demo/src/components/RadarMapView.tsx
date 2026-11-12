@@ -6,7 +6,9 @@ import Svg, { Path } from 'react-native-svg';
 import { fmt } from '../generated/copy';
 import type { Profile } from '../generated/fixtures';
 import { useReducedMotion } from '../hooks/useReducedMotion';
-import { colors, fontSize } from '../theme/theme';
+import { MapBasemap } from '../map/MapBasemap';
+import { showsRealTiles, type MapPhase } from '../map/mapStatus';
+import { colors, fontSize, fontFamily, lineHeight, mapScrim, radii, space } from '../theme/theme';
 
 import { Chip } from './Chip';
 import { MapCanvas } from './MapCanvas';
@@ -14,10 +16,15 @@ import { ProfileDotLayer } from './ProfileDotLayer';
 import { RadarSvg, sweepWedgePath } from './RadarSvg';
 
 /**
- * Composición única de descubrimiento: mapa estilizado de fondo + anillos,
- * cruz y barrido + una sola capa de puntos. El contenedor es cuadrado
- * (`side = floor(min(w, h))`) para que los anillos sean círculos y los puntos
- * conserven la proyección compartida. Sin tiles, SDK ni red.
+ * Composición única de descubrimiento: mapa estilizado permanente + basemap real
+ * (sólo web, encima y opcional) + anillos, cruz y barrido + una sola capa de
+ * puntos. El contenedor es cuadrado (`side = floor(min(w, h))`) para que los
+ * anillos sean círculos y los puntos conserven la proyección compartida.
+ *
+ * `MapCanvas` nunca se desmonta: es la capa base y el fallback. El basemap real
+ * se monta una vez y avisa su fase; la esquina inferior izquierda muestra
+ * "mapa simulado" mientras manda la ilustración y la atribución del proveedor
+ * (abajo a la derecha) sólo cuando hay tiles de verdad.
  */
 export function RadarMapView({
   profiles,
@@ -32,6 +39,7 @@ export function RadarMapView({
   const spin = useRef(new Animated.Value(0)).current;
   const wrapRef = useRef<ComponentRef<typeof View>>(null);
   const [side, setSide] = useState(0);
+  const [phase, setPhase] = useState<MapPhase>('idle');
 
   const onLayout = (event: LayoutChangeEvent): void => {
     const { width, height } = event.nativeEvent.layout;
@@ -75,6 +83,7 @@ export function RadarMapView({
     accessibilityElementsHidden: true,
     importantForAccessibility: 'no-hide-descendants' as const,
   };
+  const realTiles = showsRealTiles(phase);
 
   return (
     <View
@@ -86,6 +95,8 @@ export function RadarMapView({
     >
       <View style={side > 0 ? { width: side, height: side } : styles.hidden}>
         <MapCanvas />
+
+        <MapBasemap side={side} radiusM={radiusM} onPhaseChange={setPhase} />
 
         <View style={[StyleSheet.absoluteFill]} pointerEvents="none" {...decorative}>
           <RadarSvg />
@@ -103,17 +114,40 @@ export function RadarMapView({
 
         <ProfileDotLayer profiles={profiles} radiusM={radiusM} onOpen={onOpen} />
 
-        <View style={styles.legend} pointerEvents="none" {...decorative}>
-          <Chip label={fmt('discovery.mapLegend')} />
-        </View>
+        {realTiles ? null : (
+          <View style={styles.legend} pointerEvents="none" {...decorative}>
+            <Chip label={fmt('discovery.mapLegend')} />
+          </View>
+        )}
+
+        {realTiles ? (
+          <View style={styles.attribution} pointerEvents="none">
+            <View
+              accessible
+              accessibilityLabel={fmt('discovery.mapAttribution')}
+              style={styles.attributionChip}
+            >
+              <Text style={styles.attributionText}>{fmt('discovery.mapAttribution')}</Text>
+            </View>
+          </View>
+        ) : null}
       </View>
     </View>
   );
 }
 
-/** Caption del radar, hermana de la composición para no recortar el cuadrado. */
+/**
+ * Caption del radar, hermana de la composición para no recortar el cuadrado.
+ * La nota del basemap va acá (fuera del cuadrado) para no competir con la
+ * atribución ni con la leyenda dentro del mapa a 320 px.
+ */
 export function RadarCaption() {
-  return <Text style={styles.caption}>{fmt('discovery.radarCaption')}</Text>;
+  return (
+    <View style={styles.captionWrap}>
+      <Text style={styles.caption}>{fmt('discovery.radarCaption')}</Text>
+      <Text style={styles.note}>{fmt('discovery.mapNote')}</Text>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -131,10 +165,40 @@ const styles = StyleSheet.create({
     left: 8,
     bottom: 8,
   },
+  attribution: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    maxWidth: '72%',
+    alignItems: 'flex-end',
+  },
+  attributionChip: {
+    backgroundColor: mapScrim,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii[4],
+    paddingHorizontal: space[1],
+    paddingVertical: 2,
+  },
+  attributionText: {
+    color: colors.muted,
+    fontFamily: fontFamily.regular,
+    fontSize: fontSize[0],
+    lineHeight: fontSize[0] * lineHeight[2],
+  },
+  captionWrap: {
+    paddingBottom: 4,
+    gap: 2,
+  },
   caption: {
     textAlign: 'center',
     color: colors.muted,
     fontSize: fontSize[0],
-    paddingBottom: 4,
+  },
+  note: {
+    textAlign: 'center',
+    color: colors.muted,
+    fontSize: fontSize[0],
+    opacity: 0.8,
   },
 });

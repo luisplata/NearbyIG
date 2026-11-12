@@ -81,6 +81,23 @@ export const EXPO_GO_DEAD_CODE = {
 };
 
 /**
+ * Links de atribución y logo que MapLibre embebe **en su propio bundle** como
+ * valores por defecto de controles que la demo nunca agrega:
+ * `attributionControl: false` y `maplibreLogo: false`. No son pedidos de red:
+ * son `href` de anchors que jamás se montan. Se recortan sólo esas dos formas
+ * exactas y sólo en el chunk de MapLibre; un `href` a ese host en cualquier otro
+ * archivo (o en el resto del chunk) sigue bloqueando el artefacto.
+ */
+export const MAPLIBRE_DEAD_CODE = {
+  label: 'maplibre attribution/logo links',
+  path: /(?:^|\/)expo\/_expo\/static\/js\/web\/maplibre-gl-[\w.-]+\.js$/i,
+  patterns: [
+    /customAttribution:"<a href=\\"https:\/\/maplibre\.org\/\\" target=\\"_blank\\">MapLibre<\/a>"/g,
+    /\.href="https:\/\/maplibre\.org\/"/g,
+  ],
+};
+
+/**
  * Quita sólo las formas exactas conocidas cuando `relativePath` corresponde al
  * archivo donde el framework las embebe. Devuelve el texto tal cual en cualquier
  * otro caso.
@@ -96,6 +113,11 @@ export function stripKnownDeadCode(relativePath, text) {
   }
   if (EXPO_GO_DEAD_CODE.path.test(posix)) {
     out = out.replace(EXPO_GO_DEAD_CODE.pattern, '');
+  }
+  if (MAPLIBRE_DEAD_CODE.path.test(posix)) {
+    for (const pattern of MAPLIBRE_DEAD_CODE.patterns) {
+      out = out.replace(pattern, '');
+    }
   }
   return out;
 }

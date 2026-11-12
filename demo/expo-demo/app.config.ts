@@ -23,7 +23,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Idioma del documento (E-5/F-13): `expo export` sustituye %LANG_ISO_CODE% en
     // `public/index.html`. Sin esto el template de Expo sale con lang="en".
     lang: 'es',
-    description: 'Demo no funcional de Nearby Social Club: datos ficticios, sin backend ni red.',
+    description: 'Demo no funcional de Nearby Social Club: datos ficticios, sin backend ni cuentas.',
   },
   experiments: { baseUrl },
   plugins: ['expo-font'],

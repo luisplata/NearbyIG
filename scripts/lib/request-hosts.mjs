@@ -19,7 +19,7 @@
  */
 
 /** Hosts que el artefacto puede pedir. Exactamente este conjunto. */
-export const ALLOWED_REQUEST_HOSTS = [];
+export const ALLOWED_REQUEST_HOSTS = ['tiles.openfreemap.org'];
 
 /**
  * Hosts que aparecen en el artefacto real y que **no** son pedidos: namespaces
@@ -38,6 +38,8 @@ export const BENIGN_TEXT_HOSTS = [
   { host: 'flutter.dev', reason: 'enlace a la documentación dentro de un mensaje de assert de Flutter' },
   { host: 'pub.dev', reason: 'enlace a la ficha del paquete dentro de un mensaje de assert de Flutter' },
   { host: 'maplibre.org', reason: 'enlaces de documentación en los mensajes de error de MapLibre' },
+  { host: 'maplibre.invalid', reason: 'base ficticia de MapLibre para normalizar atributos DOM (TLD .invalid)' },
+  { host: 'wiki.openstreetmap.org', reason: 'enlace dentro del mensaje de error de WebGL2 de MapLibre' },
 ];
 
 /**
@@ -101,4 +103,16 @@ export function scanRequestHosts(text) {
   }
 
   return { findings, occurrences };
+}
+
+/**
+ * Compara el conjunto de hosts observados con la allowlist. `--strict` exige
+ * igualdad exacta: ni falta el host del basemap ni sobra un segundo host.
+ */
+export function compareHostSets(observed, allowed = ALLOWED_REQUEST_HOSTS) {
+  const seen = new Set(observed);
+  return {
+    missing: allowed.filter((host) => !seen.has(host)),
+    extra: [...seen].filter((host) => !allowed.includes(host)).sort(),
+  };
 }

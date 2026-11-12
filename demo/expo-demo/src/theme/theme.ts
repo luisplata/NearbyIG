@@ -89,5 +89,11 @@ export const text = {
 /** Fondo translúcido del backdrop de overlays. */
 export const scrim = 'rgba(9,9,11,0.72)';
 
+/**
+ * Fondo de la atribución sobre el basemap real. 0.72 falla AA sobre el mapa más
+ * claro (≈3.4:1); 0.88 da ≈6.1:1 con `colors.muted`, el mínimo legible.
+ */
+export const mapScrim = 'rgba(9,9,11,0.88)';
+
 /** Sombra de hoja tal cual la define el contrato (CSS `box-shadow`). */
 export const sheetBoxShadow = tokens.shadow.sheet;

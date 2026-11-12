@@ -48,7 +48,9 @@ const REQUIRED_COPY_KEYS = [
   'common.datasetId',
   'common.demoChip',
   'common.simTitle',
+  'discovery.mapAttribution',
   'discovery.mapLegend',
+  'discovery.mapNote',
   'empty.filters',
   'empty.filtersCta',
   'ig.simDisclaimer',
@@ -86,6 +88,14 @@ const REQUIRED_TOKEN_COLORS = [
 
 const PROHIBITED_PROPERTY_NAMES = ['lat', 'lng', 'latitude', 'longitude'];
 const ALLOWED_PLACEHOLDERS = new Set(['name', 'distance', 'count', 'radius']);
+
+/**
+ * Afirmaciones de "cero red" que el basemap real desmiente. El pedido a
+ * `tiles.openfreemap.org` es único pero existe: el copy de red tiene que
+ * nombrarlo o hablar sólo de datos del usuario.
+ */
+const ZERO_NETWORK_RE =
+  /cero requests? externos?|ning[úu]n dato sale del navegador|sin tiles reales|sin red(?! de datos)|no habla con un servidor/i;
 
 /** Catálogo cerrado de intenciones vigentes. El orden es el del dataset y la
  * proyección golden lo usa para serializar `filter.intentions`; cambiarlo mueve
@@ -506,6 +516,30 @@ function validateCopy(copy) {
   }
   if (typeof copy['discovery.mapLegend'] === 'string' && !/simulado/i.test(copy['discovery.mapLegend'])) {
     fail(`${name}: discovery.mapLegend debe aclarar que el mapa es simulado`);
+  }
+  // El basemap real es OpenFreeMap + MapLibre: la atribución nombra servicio,
+  // esquema y datos, en texto (sin URL, que ya prohíbe `checkForbiddenContent`).
+  if (typeof copy['discovery.mapAttribution'] === 'string') {
+    for (const brand of ['OpenFreeMap', 'OpenMapTiles', 'OpenStreetMap']) {
+      if (!copy['discovery.mapAttribution'].includes(brand)) {
+        fail(`${name}: discovery.mapAttribution debe nombrar ${brand}`);
+      }
+    }
+  }
+  if (typeof copy['discovery.mapNote'] === 'string') {
+    if (!/centro fijo/i.test(copy['discovery.mapNote'])) {
+      fail(`${name}: discovery.mapNote debe aclarar que el centro es fijo (demo)`);
+    }
+    if (!/guion|simulad/i.test(copy['discovery.mapNote'])) {
+      fail(`${name}: discovery.mapNote debe aclarar que las posiciones son de guion`);
+    }
+  }
+  // El artefacto hace exactamente un pedido externo (los tiles del basemap):
+  // ninguna clave puede volver a prometer cero red.
+  for (const key of Object.keys(copy)) {
+    if (ZERO_NETWORK_RE.test(copy[key])) {
+      fail(`${name}: "${key}" afirma que no hay ningún pedido externo; el basemap pide un host`);
+    }
   }
   return copy;
 }

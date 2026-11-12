@@ -25,7 +25,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { auditText, deniedReason, isTextFile } from './lib/denylist.mjs';
-import { ALLOWED_REQUEST_HOSTS } from './lib/request-hosts.mjs';
+import { ALLOWED_REQUEST_HOSTS, compareHostSets } from './lib/request-hosts.mjs';
 import { datasetIdOf } from './lib/canonical.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -299,11 +299,10 @@ function report(dir) {
 
   // La allowlist es el conjunto exacto: ni falta el host del basemap ni sobra otro.
   if (strict && pending.length === 0) {
-    const absent = ALLOWED_REQUEST_HOSTS.filter((host) => !hosts.has(host));
+    const { missing: absent, extra } = compareHostSets(observed);
     if (absent.length > 0) {
       problem(`--strict exige que el artefacto pida el host permitido: falta ${absent.join(', ')}`);
     }
-    const extra = observed.filter((host) => !ALLOWED_REQUEST_HOSTS.includes(host));
     if (extra.length > 0) {
       problem(`--strict: el artefacto pide hosts fuera de la allowlist: ${extra.join(', ')}`);
     }
