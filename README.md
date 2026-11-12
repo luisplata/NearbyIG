@@ -38,9 +38,12 @@ Dos implementaciones mock del mismo flujo —Flutter web y Expo web— alimentad
 | `/flutter/` | demo Flutter web |
 | `/expo/` | demo Expo web |
 
-Todo es simulado: sin backend, auth, push, geolocalización real, tiles reales, OAuth ni
-persistencia. Runbook en [`demo/README.md`](demo/README.md); contrato vinculante (10
-pantallas y checklist de paridad de 15 puntos) en [`demo/CONTRACT.md`](demo/CONTRACT.md).
+Todo es simulado salvo el fondo del radar de Expo: sin backend, auth, push, geolocalización
+real, OAuth ni persistencia. El único pedido externo es el basemap del radar
+(`tiles.openfreemap.org`, OpenFreeMap con MapLibre, sin API key ni cuenta); Flutter
+mantiene el mapa ilustrado. Runbook en [`demo/README.md`](demo/README.md); contrato
+vinculante (10 pantallas y checklist de paridad de 15 puntos) en
+[`demo/CONTRACT.md`](demo/CONTRACT.md).
 
 El workflow `.github/workflows/pages.yml` valida el contrato, construye ambas apps,
 audita el artefacto y lo publica. **GitHub Pages está habilitado** (Build and deployment →
@@ -57,11 +60,12 @@ Sitio vivo:
 Dataset publicado: `ds-ddca69e0` (schema 2). Las tres páginas comparten el mismo contrato.
 
 Las demos arrancan en la **lista**. Expo es la demo activa con cuatro tabs (Lista → Radar
-→ Pings → Perfil) y un radar compuesto sobre mapa simulado; Flutter queda como referencia
-congelada con su barra de cinco tabs. Ambas usan tres intenciones —amistad, actividades y
-networking— y toman su posicionamiento "Cowork Café" del catálogo de copy
-(`landing.eyebrow`, `about.club`, `about.positioning`). Es estilo y tono: el repo, el
-icono, el bundle id y las URLs no cambian.
+→ Pings → Perfil) y un radar compuesto sobre un basemap real de referencia (OpenFreeMap,
+un solo host, sin key, con la ilustración como fallback); Flutter queda como referencia
+congelada con su barra de cinco tabs y su mapa ilustrado. Ambas usan tres intenciones
+—amistad, actividades y networking— y toman su posicionamiento "Cowork Café" del catálogo
+de copy (`landing.eyebrow`, `about.club`, `about.positioning`). Es estilo y tono: el repo,
+el icono, el bundle id y las URLs no cambian.
 
 Publicación, verificación y rollback: [`docs/pages-handoff.md`](docs/pages-handoff.md).
 

@@ -183,6 +183,11 @@ Formato de distancia (sin `intl`): `distanceM < 1000` → `"N m"`; si no →
 `"X,Y km"` con una decimal y coma decimal (`2600` → `"2,6 km"`). El espacio de miles no
 se usa.
 
+Basemap de Expo: **visual, no alimenta la proyección.** El fondo real (OpenFreeMap +
+MapLibre, centro fijo de demo) es decorativo; los puntos siguen saliendo de
+`projectProfile(distanceM, bearingDeg)` y ninguna acción, estado ni timer depende del
+mapa. Un basemap caído no cambia la proyección ni el guion.
+
 ## 7. Reset y determinismo
 
 - `RESET` devuelve exactamente `initialState()` y el store cancela timers.

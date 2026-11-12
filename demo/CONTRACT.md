@@ -11,8 +11,10 @@ las apps consumen lo generado y no duplican strings, colores, distancias ni guio
   landing y en el header de Flutter (referencia). El header de Expo no lleva chip: lleva
   el switch de visibilidad (fantasma).
 - Idioma: español (es-AR), tono del prototipo.
-- Alcance: demo no funcional. Sin backend, auth, push, geolocalización real, tiles
-  reales, OAuth, persistencia, premium ni referidos.
+- Alcance: demo no funcional. Sin backend, auth, push, geolocalización real, OAuth,
+  persistencia, premium ni referidos. El radar de **Expo** usa un basemap real de **un
+  único host** (`tiles.openfreemap.org`, OpenFreeMap con MapLibre GL JS, sin key ni
+  cuenta); Flutter (referencia congelada) mantiene el mapa ilustrado.
 
 ---
 
@@ -37,7 +39,8 @@ landing y en las dos apps son la prueba de que se está comparando el mismo data
 Reglas duras del dataset (validadas por script):
 
 - Prohibido `lat`, `lng`, `latitude`, `longitude` en cualquier nivel. Las posiciones son
-  `distanceM` (entero, 200–5000) y `bearingDeg` (entero, 0–359).
+  `distanceM` (entero, 200–5000) y `bearingDeg` (entero, 0–359). El centro del basemap de
+  Expo es una constante de código, no un dato del contrato (ver §11).
 - Prohibidas URLs `http(s)` en cualquier string del contrato.
 - Prohibidos patrones de secreto (claves de API, claves privadas, config Firebase).
 - IDs únicos; `photoId` existente; todo `*Key` resuelve en `copy.json`;
@@ -61,6 +64,13 @@ Reglas duras del dataset (validadas por script):
   `fmt(key, params)` generado en ambos lenguajes.
 - Los 8 ítems de "Qué es simulado" son las claves `common.simItems.1` … `common.simItems.8`
   (numeradas para preservar el orden; no se agregan ni se quitan sin actualizar esta tabla).
+  `common.simItems.1` habla sólo de datos del usuario y `common.simItems.5` describe el
+  mapa de referencia: **ningún** ítem puede afirmar que no hay red o que no hay tiles.
+- Basemap: `discovery.mapAttribution` (`© OpenFreeMap · © OpenMapTiles · datos de
+  OpenStreetMap`) es la atribución visible cuando hay tiles reales; es texto plano, sin
+  URL ni control. `discovery.mapNote` aclara el centro fijo y las posiciones de guion.
+  `discovery.mapLegend` ("mapa simulado") queda **sólo** para el fallback ilustrado de
+  Expo y para Flutter: el validador sigue exigiendo `/simulado/i`.
 - Posicionamiento: `about.brand` es el nombre visible (**Nearby Social Club**) y
   `landing.eyebrow` y `about.club` contienen el mismo slogan (**Cowork Café**).
   `about.positioning` explica el club. Es estilo y posicionamiento: **no** cambia el
@@ -119,7 +129,7 @@ Los timers se derivan de acciones, no del reloj de pared. No hay timers al carga
 
 | # | Pantalla | Requisito | Contenido mínimo |
 |---|---|---|---|
-| 1 | Descubrimiento | F-2, F-3 | lista cercana o radar sobre mapa estilizado, radio 500 m–5 km, 4 filtros, contador, leyenda "mapa simulado" |
+| 1 | Descubrimiento | F-2, F-3 | lista cercana o radar sobre basemap real (con la ilustración como fallback), radio 500 m–5 km, 4 filtros, contador, atribución del proveedor cuando hay tiles o leyenda "mapa simulado" cuando manda la ilustración |
 | 2 | Perfil de otro | F-1, F-4 | foto (blur/clear), intención, distancia, verificado/online, ping, seguridad, bloqueo |
 | 3 | Chat | F-5, F-9 | mensajes guionados, typing 1.2 s, revelar foto, bloqueo |
 | 4 | Pings | F-4, F-5 | bandeja con recibidos (aceptar / rechazar) y enviados con estado “Enviado / esperando respuesta”, sin segunda acción de envío, estado vacío |
@@ -137,6 +147,13 @@ En **Expo** la vista `map` es interna/reservada: no se expone en la navegación 
 estado la setea programáticamente, renderiza la misma composición radar-sobre-mapa. La
 pantalla 1 de Expo es esa composición única más la lista.
 
+La composición de Expo, de abajo hacia arriba: mapa ilustrado (`MapCanvas`, **siempre**
+montado), basemap real de OpenFreeMap (sólo web, no interactivo, sin controles) cuando
+cargó, anillos/cruz/barrido de 6 s, **una sola** capa de puntos, y en la esquina inferior
+derecha la atribución `discovery.mapAttribution` (texto, sin URL, no focusable). Si el
+basemap falla —sin WebGL, error, pérdida de contexto o timeout de 8 s— la composición no
+cambia: queda la ilustración y vuelve la leyenda "mapa simulado".
+
 **No existe** pantalla, tab, modelo, campo ni analítica de historial de rutas,
 encuentros o visitas. Tampoco hay onboarding de 7 pasos, premium, referidos ni PWA
 install.
@@ -148,10 +165,11 @@ install.
 - La **lista es la vista inicial** en ambas apps: al cargar, el tab activo es `Lista` y
   los 10 perfiles aparecen ordenados por distancia ascendente.
 - **Expo** tiene cuatro tabs en este orden: **Lista → Radar → Pings → Perfil**. No hay
-  tab Mapa: Radar es una única composición con mapa estilizado de fondo, anillos,
-  barrido de 6 s y una capa de puntos. Pings y Perfil abren overlays sin cambiar la
-  vista. El valor `map` sigue reservado en la máquina de estados: si se setea, Expo
-  renderiza la misma composición radar-sobre-mapa, nunca un cuerpo sólo-mapa.
+  tab Mapa: Radar es una única composición con basemap real de fondo (la ilustración hace
+  de fallback), anillos, barrido de 6 s y una capa de puntos. Pings y Perfil abren
+  overlays sin cambiar la vista. El valor `map` sigue reservado en la máquina de estados:
+  si se setea, Expo renderiza la misma composición radar-sobre-mapa, nunca un cuerpo
+  sólo-mapa.
 - **Flutter** se mantiene como referencia congelada y conserva su barra de cinco tabs
   (Lista → Radar → Mapa → Pings → Perfil). Esa diferencia de presentación es la
   permitida en §8.
@@ -175,6 +193,7 @@ install.
 | Switch de ajustes/filtros | Sí | Material 3 vs control nativo de RNW |
 | Foco visible: highlight de Material vs borde `accent` explícito | Sí | Mismo criterio (foco visible), distinto mecanismo |
 | Navegación y descubrimiento: Expo con 4 tabs y radar sobre mapa; Flutter (referencia) con 5 tabs y radar/mapa separados | Sí | Presentación Expo-first descripta en §7; estado, timers, copy y datasetId siguen compartidos |
+| Mapa de fondo: Expo monta un basemap real (OpenFreeMap + MapLibre, sin key) con la ilustración como fallback; Flutter (referencia) mantiene el mapa ilustrado | Sí | La composición, la proyección de puntos, el barrido de 6 s y el dataset son los mismos; cambia el motor de dibujo del fondo y la atribución del proveedor |
 | Cualquier diferencia funcional no listada (timers, copy compartido, orden de datos, estado, datasetId) | **No** | Es un defecto del contrato |
 
 ## 9. Checklist de comportamiento (15 puntos; Expo-first)
@@ -182,7 +201,7 @@ install.
 | # | Punto | Evidencia esperada (idéntica salvo diferencias de §8) |
 |---|---|---|
 | 1 | Perfil + 3 intenciones | Elegir "Actividades" se refleja en el perfil y en el filtro por defecto |
-| 2 | Radar sobre mapa / lista | La lista abre por defecto; en Expo, Radar compone mapa estilizado, anillos, barrido de 6 s y 10 puntos con las mismas distancias, orden asc, leyenda "mapa simulado" y reduced-motion estático; no hay tab Mapa. Flutter (referencia) conserva radar y mapa separados |
+| 2 | Radar sobre mapa / lista | La lista abre por defecto; en Expo, Radar compone el basemap real (o la ilustración si falla), anillos, barrido de 6 s y 10 puntos con las mismas distancias, orden asc, atribución OpenFreeMap/OpenMapTiles/OSM cuando hay tiles, leyenda "mapa simulado" en el fallback y reduced-motion estático; no hay tab Mapa. Flutter (referencia) conserva radar y mapa ilustrados separados |
 | 3 | Radio + 4 filtros | 500 m deja solo ≤ 500 m; combinación imposible → vacío + "Limpiar filtros" |
 | 4 | Ping | "Enviado" e inhabilitado al segundo intento; el enviado aparece en la bandeja con estado pendiente; entrante a 3.0 s; badge sube |
 | 5 | Match + chat | Aceptar → match a 2.5 s → chat; typing 1.2 s; respuesta guionada; rechazar borra el ping |
@@ -194,7 +213,7 @@ install.
 | 11 | Sin historial | Sin tab/pantalla/campos de historial; `privacy.noHistory` verbatim |
 | 12 | Reset + refresh | Tras flujo completo → estado inicial (vista `lista`); refresh idéntico; sin timers vivos |
 | 13 | Responsive + a11y | 320/360/480/768/1440 px sin overflow; labels con nombre y distancia; foco visible; ≥ 44 px |
-| 14 | Sin red | DevTools Network sin dominios externos (ni gstatic, ni Google Fonts) |
+| 14 | Red contenida | DevTools Network en Radar: **un único** host externo, `tiles.openfreemap.org` (estilo local, TileJSON, tiles, glifos; sin sprite, sin key ni cookie). La Lista y la landing no piden tiles: el primer pedido ocurre al abrir Radar |
 | 15 | Divulgación | Label DEMO en About de Expo (visible sin abrir la hoja), header y footer de la landing, y header de Flutter; hoja "Qué es simulado" con 8 ítems |
 
 **Procedimiento lado a lado**: abrir landing + `/flutter/` + `/expo/` en tres pestañas,
@@ -237,6 +256,30 @@ del sitio (case-insensitive, por nombre y por extensión):
 Hosts prohibidos en el texto del artefacto: `gstatic.com`, `googleapis.com`,
 `eascdn.net`, `firebase*`, `unsplash.com`, `instagram.com`, `facebook.com`, `cdn.*`.
 
+**Regla posicional de hosts.** El artefacto tiene literales de host que no son pedidos
+(namespaces `xmlns`, licencias, enlaces dentro de mensajes de error de las librerías);
+negar todo host que no sea uno solo es inviable. Lo que sí se garantiza es que **un
+único host sea pedible**, y `assemble-site --strict` exige el conjunto exacto:
+
+- Permitido en posición pedible: **sólo** `tiles.openfreemap.org` (case-insensitive, sin
+  subdominios). `node scripts/assemble-site.mjs --strict site` falla si falta —el mapa no
+  llegó al bundle— o si aparece un segundo host pedible.
+- Posiciones pedibles (`scripts/lib/request-hosts.mjs`): `fetch(`/`import(`/`new Worker(`/
+  `new Image(`, `src=`/`href=`/`srcset=`/`poster=`/`xlink:href=`, `url(`, `@import`,
+  `style:`/`tiles:`/`sprite:`/`glyphs:`/`url:`.
+- En posición **no** pedible se toleran sólo los hosts reales del artefacto, cada uno con
+  su razón escrita en `BENIGN_TEXT_HOSTS` y su test: `www.w3.org` (namespace SVG),
+  `github.com` y `scripts.sil.org` (licencia OFL), `necolas.github.io` (comentario del
+  reset de react-native-web), `react.dev`, `expo.dev`, `api.flutter.dev`,
+  `docs.flutter.dev`, `flutter.dev`, `pub.dev` (enlaces dentro de mensajes de error) y
+  `maplibre.org`, `maplibre.invalid`, `wiki.openstreetmap.org` (mensajes de MapLibre; el
+  `.invalid` es una base ficticia que nunca se resuelve). El mismo host en `src=` o
+  `fetch(` falla igual.
+- Cualquier otro host es un finding en cualquier posición: obliga a revisarlo y a
+  documentar la decisión antes de publicar.
+
+La auditoría imprime `host pedible: <host> (n)`; pre-basemap el conjunto era vacío.
+
 Excepciones acotadas (cada una cubierta por `scripts/lib/denylist.test.mjs`):
 
 1. **Fallbacks del loader de Flutter.** `flutter.js`, `flutter_bootstrap.js`,
@@ -254,6 +297,23 @@ Excepciones acotadas (cada una cubierta por `scripts/lib/denylist.test.mjs`):
    nativo de Expo Go: en web la rama nunca se ejecuta, así que no es un request. Se ignora
    únicamente esa forma exacta (prefijo de template literal con `${`) y sólo en
    `expo/_expo/static/js/web/*.js`; cualquier otro uso de `eascdn.net` falla.
+3. **Links de atribución y logo de MapLibre.** El chunk `maplibre-gl-*.js` embebe dos
+   anchors por defecto: `customAttribution` del control de atribución y `href` del
+   control de logo. La demo crea el mapa con `attributionControl: false` y
+   `maplibreLogo: false`, así que ninguno se monta: son `href` de código muerto, no
+   pedidos. Se recortan **esas dos formas exactas** y sólo dentro del chunk de MapLibre
+   (`MAPLIBRE_DEAD_CODE`); el mismo host en otro archivo, o con otro path dentro del
+   chunk, sigue bloqueando el artefacto.
+
+El basemap no pide estilos remotos: el estilo es local (`src/map/style.ts`) y sus dos
+URLs —TileJSON y glifos— apuntan al host permitido. No hay `sprite` ni capas de íconos,
+y no se usa `setRTLTextPlugin`.
+
+**Centro de demo.** `DEMO_CENTER` (`src/map/basemap.ts`) es una constante de código: el
+mismo viewport para todos los visitantes, sin geolocalización, IP, cookies ni
+identificadores. La prohibición de `lat`/`lng`/`latitude`/`longitude` aplica a
+`demo/shared/*.json` (el contrato), **no** a este módulo: no es un dato del dataset y
+no debe moverse a los JSON.
 
 Cualquier otro host o URL externa, en cualquier archivo, sigue bloqueando el artefacto.
 
@@ -299,7 +359,7 @@ un navegador real y queda pendiente hasta la revisión con DevTools + lector de 
 | # | Automatizado | Visual |
 |---|---|---|
 | 1 | golden (`SET_SELF_INTENTION`), 3 intenciones válidas en `validate-fixtures` | cambio reflejado en perfil y filtro |
-| 2 | Flutter: radar con 10 puntos accesibles y reduced-motion estático; Expo: `discoveryBody.test.ts` mapea `radar` y `map` a la misma composición | mismo orden/distancias en lista y radar de Expo |
+| 2 | Flutter: radar con 10 puntos accesibles y reduced-motion estático; Expo: `discoveryBody.test.ts` mapea `radar` y `map` a la misma composición, `mapStatus.test.ts` fija idle→loading→ready|failed y `basemap.test.ts` la derivación de zoom | mismo orden/distancias en lista y radar de Expo; basemap real visible y atribución legible |
 | 3 | `selectors.test.ts` / `selectors_test.dart`: radio 500 m, filtros y vacío | CTA “Limpiar filtros” en ambas |
 | 4 | golden timers + widget test de ping enviado/deshabilitado + bandeja con el enviado y su estado | ping entrante a 3.0 s en Expo |
 | 5 | golden (`ACCEPT_PING`, `SEND_MESSAGE`, `REJECT_PING`) | overlay de match a 2.5 s |
@@ -311,7 +371,7 @@ un navegador real y queda pendiente hasta la revisión con DevTools + lector de 
 | 11 | sin pantalla/modelo de historial; `privacy.noHistory` obligatorio | copy visible en privacidad |
 | 12 | widget test de reset; `store.test.ts` cancela timers | refresh en el navegador |
 | 13 | 360×640 sin overflow; labels con nombre + distancia + badges | 320/480/768/1440 y foco con teclado |
-| 14 | denylist de hosts en el artefacto (gstatic/`eascdn` con allowlist acotada); cero storage/fetch en el código; `lang="es"` en los tres documentos | Network con dominios externos |
+| 14 | denylist de hosts por posición en el artefacto (`request-hosts.test.mjs`: allowlist exacta + benignos; `gstatic`/`eascdn`/MapLibre con sus formas exactas); cero storage/geolocation en el código (`privacy.test.ts`); `lang="es"` en los tres documentos | Network de Radar con un único host externo |
 | 15 | `brand.test.mjs` (marca, slogan, DEMO en landing) + `copy.test.ts`; About con label DEMO y 8 ítems | label DEMO en About, landing header/footer y header Flutter |
 
 Automatizado y reproducible:
