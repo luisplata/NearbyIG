@@ -46,6 +46,9 @@ const TEXT_EXTENSIONS = new Set([
 
 const SELF = fileURLToPath(import.meta.url);
 
+/** Archivos de terceros generados en build-time: no son contrato ni copy propios. */
+const VENDORED_FILES = new Set(['maplibre-gl-worker.js']);
+
 function* walkFiles(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const absolute = join(directory, entry.name);
@@ -54,6 +57,7 @@ function* walkFiles(directory) {
       yield* walkFiles(absolute);
       continue;
     }
+    if (VENDORED_FILES.has(entry.name)) continue;
     if (!entry.isFile()) continue;
     const dot = entry.name.lastIndexOf('.');
     if (dot < 0 || !TEXT_EXTENSIONS.has(entry.name.slice(dot))) continue;

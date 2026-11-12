@@ -248,6 +248,23 @@ function checkExpoDocument(dir) {
   }
 }
 
+/**
+ * El host permitido vive en el entry (el estilo local), no en el chunk: pedir el
+ * host en `--strict` no prueba que MapLibre haya entrado al bundle. Este chequeo
+ * cierra ese hueco: sin chunk lazy `maplibre-gl-*.js`, el mapa no llegó.
+ */
+const BASEMAP_CHUNK = /^maplibre-gl-.*\.js$/;
+
+function hasBasemapChunk(dir) {
+  const jsDir = join(dir, 'expo', '_expo', 'static', 'js', 'web');
+  if (!existsSync(jsDir)) return false;
+  const chunk = readdirSync(jsDir).some((name) => BASEMAP_CHUNK.test(name));
+  // MapLibre pide su worker por URL: si no se copió a `public/`, el mapa nunca
+  // pasa de `loading` y cae al SVG sin avisar en el build.
+  const worker = existsSync(join(dir, 'expo', 'maplibre-gl-worker.js'));
+  return chunk && worker;
+}
+
 function checkBaseHref(dir) {
   const flutterIndex = join(dir, 'flutter', 'index.html');
   if (!existsSync(flutterIndex)) return;
@@ -305,6 +322,9 @@ function report(dir) {
     }
     if (extra.length > 0) {
       problem(`--strict: el artefacto pide hosts fuera de la allowlist: ${extra.join(', ')}`);
+    }
+    if (ALLOWED_REQUEST_HOSTS.length > 0 && !hasBasemapChunk(dir)) {
+      problem('--strict: falta el chunk maplibre-gl-*.js o el worker en expo/ (el mapa no llegó al bundle)');
     }
   }
 
