@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { DemoFrame } from './components/DemoFrame';
-import { Chip } from './components/Chip';
 import { FilterSheet } from './components/FilterSheet';
 import { CountBadge, IconButton } from './components/IconButton';
 import { GhostBanner } from './components/GhostBanner';
@@ -11,6 +10,8 @@ import { MatchOverlay } from './components/MatchOverlay';
 import { Overlay, SheetLayer } from './components/Overlay';
 import { SimSheet } from './components/SimSheet';
 import { ToastHost } from './components/ToastHost';
+import { VisibilitySwitch } from './components/VisibilitySwitch';
+import { ghostSwitch } from './components/visibilityModel';
 import { fmt } from './generated/copy';
 import { AboutScreen } from './screens/AboutScreen';
 import { BlockedScreen } from './screens/BlockedScreen';
@@ -26,7 +27,7 @@ import { DemoStoreProvider, useDemo } from './state/DemoProvider';
 import { profileById, unreadCount } from './state/selectors';
 import { createDemoStore } from './state/store';
 import type { DemoOverlay } from './state/types';
-import { colors, space, text } from './theme/theme';
+import { colors, fontFamily, fontSize, space, text } from './theme/theme';
 
 /**
  * Raíz de la demo Expo. Carga Inter local con `expo-font` (sin CDN) y no
@@ -60,14 +61,16 @@ export default function App() {
 }
 
 /**
- * Chrome de la demo: header persistente con marca, chip DEMO y campana; banner
- * de pausa; y capas absolutas para overlays, match y toasts. Cero router.
+ * Chrome de la demo: header persistente con marca y slogan, switch de
+ * visibilidad y campana; banner de pausa; y capas absolutas para overlays,
+ * match y toasts. Cero router.
  */
 function DemoShell() {
   const { state, dispatch } = useDemo();
   const [simOpen, setSimOpen] = useState(false);
   const overlayProfile = profileById(state.profileId);
   const celebration = profileById(state.matchCelebration);
+  const ghost = ghostSwitch(state);
 
   const closeSheet = (): void => setSimOpen(false);
   const openSheet = (): void => setSimOpen(true);
@@ -99,10 +102,19 @@ function DemoShell() {
               style={styles.brandIcon}
               accessibilityLabel={fmt('about.brand')}
             />
-            <Text numberOfLines={1} style={[text.label, styles.brand]}>
-              {fmt('about.brand')}
-            </Text>
-            <Chip label={fmt('common.demoChip')} emphasis onPress={openSheet} />
+            <View style={styles.brandColumn}>
+              <Text numberOfLines={1} style={[text.label, styles.brandName]}>
+                {fmt('about.brand')}
+              </Text>
+              <Text numberOfLines={1} style={styles.slogan}>
+                {fmt('about.club')}
+              </Text>
+            </View>
+            <VisibilitySwitch
+              checked={ghost.checked}
+              disabled={ghost.disabled}
+              onToggle={() => dispatch({ type: 'TOGGLE_GHOST' })}
+            />
             <View>
               <IconButton
                 icon="bellOutline"
@@ -234,8 +246,18 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
   },
-  brand: {
+  brandColumn: {
     flex: 1,
+    justifyContent: 'center',
+    gap: 1,
+  },
+  brandName: {
+    fontSize: fontSize[0],
+  },
+  slogan: {
+    fontFamily: fontFamily.regular,
+    fontSize: fontSize[0],
+    color: colors.muted,
   },
   stack: {
     flex: 1,

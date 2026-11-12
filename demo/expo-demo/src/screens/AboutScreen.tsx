@@ -5,6 +5,7 @@ import { datasetId, demoVersion, schemaVersion } from '../generated/dataset';
 import { colors, fontFamily, fontSize, space, text } from '../theme/theme';
 
 import { Button } from '../components/Button';
+import { Chip } from '../components/Chip';
 
 /**
  * Acerca de: marca, datasetId + schemaVersion (SC-8) y acceso a la hoja de
@@ -22,7 +23,10 @@ export function AboutScreen({ onOpenSim }: { onOpenSim: () => void }) {
         <Text style={[text.title, styles.brand]}>{fmt('about.brand')}</Text>
       </View>
 
-      <Text style={styles.club}>{fmt('about.club')}</Text>
+      <View style={styles.clubRow}>
+        <Text style={styles.club}>{fmt('about.club')}</Text>
+        <Chip label={fmt('common.demoChip')} emphasis />
+      </View>
       <Text style={[text.body, { color: colors.muted }]}>{fmt('about.positioning')}</Text>
 
       <Text style={[text.body, { color: colors.muted }]}>{fmt('about.disclaimer')}</Text>
@@ -66,7 +70,14 @@ const styles = StyleSheet.create({
   brand: {
     flex: 1,
   },
+  clubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
   club: {
+    flex: 1,
     fontFamily: fontFamily.semibold,
     fontSize: fontSize[1],
     letterSpacing: 0.6,

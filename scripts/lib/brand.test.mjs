@@ -16,6 +16,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const copy = JSON.parse(readFileSync(join(ROOT, 'demo', 'shared', 'copy.json'), 'utf8'));
 const appConfig = readFileSync(join(ROOT, 'demo', 'expo-demo', 'app.config.ts'), 'utf8');
 const landing = readFileSync(join(ROOT, 'demo', 'landing', 'index.html'), 'utf8');
+const expoApp = readFileSync(join(ROOT, 'demo', 'expo-demo', 'src', 'App.tsx'), 'utf8');
+const aboutScreen = readFileSync(
+  join(ROOT, 'demo', 'expo-demo', 'src', 'screens', 'AboutScreen.tsx'),
+  'utf8',
+);
 
 test('la marca y el slogan del producto son los del club', () => {
   assert.equal(copy['about.brand'], 'Nearby Social Club');
@@ -55,4 +60,21 @@ test('la landing no promete paridad total entre las demos', () => {
   assert.match(copy['landing.flutter.tag'], /referencia/i);
   assert.match(copy['landing.subtitle'], /Expo/);
   assert.match(copy['landing.subtitle'], /referencia/i);
+});
+
+test('el header Expo muestra marca y slogan sin el chip DEMO', () => {
+  assert.ok(expoApp.includes("fmt('about.brand')"), 'el header debe mostrar la marca');
+  assert.ok(expoApp.includes("fmt('about.club')"), 'el header debe mostrar el slogan');
+  assert.ok(expoApp.includes('<VisibilitySwitch'), 'el header debe montar el switch de visibilidad');
+  assert.ok(
+    !expoApp.includes("fmt('common.demoChip')"),
+    'el chip DEMO no puede quedar en el header de Expo',
+  );
+});
+
+test('Acerca de muestra la marca, el slogan y el label DEMO', () => {
+  assert.ok(aboutScreen.includes("fmt('about.brand')"));
+  assert.ok(aboutScreen.includes("fmt('about.club')"));
+  assert.ok(aboutScreen.includes("fmt('common.demoChip')"), 'About conserva el label DEMO');
+  assert.ok(aboutScreen.includes("fmt('common.simTitle')"), 'About conserva la hoja de simulación');
 });
