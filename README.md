@@ -57,7 +57,7 @@ Sitio vivo:
 | `https://luisplata.github.io/NearbyIG/flutter/` | demo Flutter web |
 | `https://luisplata.github.io/NearbyIG/expo/` | demo Expo web |
 
-Dataset publicado: `ds-ddca69e0` (schema 2). Las tres páginas comparten el mismo contrato.
+Dataset publicado: `ds-ee4300cf` (schema 2). Las tres páginas comparten el mismo contrato.
 
 Las demos arrancan en la **lista**. Expo es la demo activa con cuatro tabs (Lista → Radar
 → Pings → Perfil) y un radar compuesto sobre un basemap real de referencia (OpenFreeMap,

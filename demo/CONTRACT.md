@@ -309,6 +309,12 @@ El basemap no pide estilos remotos: el estilo es local (`src/map/style.ts`) y su
 URLs —TileJSON y glifos— apuntan al host permitido. No hay `sprite` ni capas de íconos,
 y no se usa `setRTLTextPlugin`.
 
+**Worker de MapLibre.** Metro no emite `maplibre-gl-worker.mjs` en el export, así que
+`npm ci` corre `scripts/copy-maplibre-worker.mjs` (postinstall) y deja
+`public/maplibre-gl-worker.js`; `MapBasemap` lo apunta con `setWorkerUrl` contra
+`document.baseURI`. Sin ese archivo el navegador pide un 404, el mapa queda en `loading`
+y cae al SVG: `assemble-site --strict` falla si falta el chunk o el worker.
+
 **Centro de demo.** `DEMO_CENTER` (`src/map/basemap.ts`) es una constante de código: el
 mismo viewport para todos los visitantes, sin geolocalización, IP, cookies ni
 identificadores. La prohibición de `lat`/`lng`/`latitude`/`longitude` aplica a
