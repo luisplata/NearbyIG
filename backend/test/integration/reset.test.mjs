@@ -134,6 +134,9 @@ describe('reset de la demo', () => {
   });
 
   test('reset global no toca el catálogo ni el registro de migraciones', async () => {
+    // El conteo se compara contra sí mismo: lo que se prueba es que el reset no
+    // re-migra, no cuántas migraciones hay (antes clavaba `1`).
+    const migratedBefore = await countRows('schema_migrations');
     await resetGlobal();
     for (const regionKey of ['mx', 'co']) {
       const session = await openSession({ regionKey, demoSlot: 2 });
@@ -143,6 +146,7 @@ describe('reset de la demo', () => {
       assert.equal(profiles.body.profiles.length, 10, `catálogo de ${regionKey} intacto`);
     }
     assert.equal(await countRows('profiles'), 20);
-    assert.equal(await countRows('schema_migrations'), 1, 'no se vuelve a migrar');
+    assert.ok(migratedBefore > 0, 'la base tiene migraciones aplicadas');
+    assert.equal(await countRows('schema_migrations'), migratedBefore, 'no se vuelve a migrar');
   });
 });

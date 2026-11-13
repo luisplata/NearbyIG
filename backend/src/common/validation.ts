@@ -55,6 +55,30 @@ export function optionalInteger(
 }
 
 /**
+ * Número obligatorio y finito dentro de un rango.
+ *
+ * `typeof value === 'number'` ya descarta strings ("19.43") y `Number.isFinite`
+ * descarta `NaN`/`Infinity`, que en JSON entran como `null` pero en un body
+ * construido a mano pueden llegar igual. El rango es el del schema: un body que
+ * lo viola es `VALIDATION_FAILED`, no un recorte silencioso.
+ */
+export function requiredNumber(
+  record: Record<string, unknown>,
+  field: string,
+  min: number,
+  max: number,
+): number {
+  const value = record[field];
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw validationFailed(`${field} debe ser un número.`);
+  }
+  if (value < min || value > max) {
+    throw validationFailed(`${field} debe estar entre ${min} y ${max}.`);
+  }
+  return value;
+}
+
+/**
  * `regionKey` de query o body. Un valor repetido (`?regionKey=mx&regionKey=co`)
  * llega como array y es inválido, no "el primero".
  */

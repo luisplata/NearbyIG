@@ -3,6 +3,7 @@ import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './db/database.module';
 import { HealthModule } from './health/health.module';
+import { PresenceModule } from './presence/presence.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { ResetModule } from './reset/reset.module';
 
@@ -14,10 +15,19 @@ import { ResetModule } from './reset/reset.module';
  *   DatabaseModule → Pool de `pg` (global)
  *   HealthModule   → /health y /health/ready (fuera del contrato)
  *   AuthModule     → sesión demo, logout, ticket de stream y sus guards
+ *   PresenceModule → PUT y DELETE /presence (región y zona derivadas)
  *   ProfilesModule → GET /demo/profiles
  *   ResetModule    → POST /demo/reset y /demo/reset/self (fuera del contrato)
  */
 @Module({
-  imports: [ConfigModule, DatabaseModule, HealthModule, AuthModule, ProfilesModule, ResetModule],
+  imports: [
+    ConfigModule,
+    DatabaseModule,
+    HealthModule,
+    AuthModule,
+    PresenceModule,
+    ProfilesModule,
+    ResetModule,
+  ],
 })
 export class AppModule {}

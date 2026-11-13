@@ -38,7 +38,12 @@ describe('migraciones y seeds', () => {
     const { rows } = await withDb((client) =>
       client.query('SELECT count(*)::integer AS count FROM schema_migrations'),
     );
-    assert.equal(rows[0].count, 1);
+    // Una fila por archivo de migración: el conteo no se clava, así agregar una
+    // migración nueva no rompe el test (antes decía `1` y 002 lo puso en rojo).
+    const ups = (await readdir('sql')).filter(
+      (name) => name.endsWith('.sql') && !name.endsWith('.down.sql'),
+    );
+    assert.equal(rows[0].count, ups.length, 'una fila por migración aplicada');
   });
 
   test('correr los seeds dos veces no duplica filas', async () => {

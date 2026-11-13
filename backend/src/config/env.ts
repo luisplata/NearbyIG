@@ -28,6 +28,14 @@ export interface AppConfig {
    * operación sino del contrato.
    */
   readonly streamTicketTtlSeconds: number;
+  /**
+   * Vida de una presencia (`PUT /presence`): el plan fija 12 s.
+   *
+   * Igual que el ticket: no se lee de `process.env`. Una presencia que vive más
+   * de lo declarado aparece en el radar de los demás sin que su dueño lo sepa,
+   * así que no es una perilla de operación sino parte del contrato.
+   */
+  readonly presenceTtlSeconds: number;
   /** Región que se usa cuando `POST /auth/demo-session` no recibe body. */
   readonly defaultRegionKey: string;
 }
@@ -79,6 +87,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionTtlSeconds: parseInteger('SESSION_TTL_SECONDS', env.SESSION_TTL_SECONDS, 7200, 60, 86_400),
     slotCount: 10,
     streamTicketTtlSeconds: 30,
+    presenceTtlSeconds: 12,
     defaultRegionKey: (env.DEFAULT_REGION_KEY?.trim() || 'mx').toLowerCase(),
   };
 }
