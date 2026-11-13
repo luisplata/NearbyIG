@@ -6,13 +6,16 @@ import { DemoFrame } from './components/DemoFrame';
 import { FilterSheet } from './components/FilterSheet';
 import { CountBadge, IconButton } from './components/IconButton';
 import { GhostBanner } from './components/GhostBanner';
+import { LiveBar } from './components/LiveBar';
 import { MatchOverlay } from './components/MatchOverlay';
 import { Overlay, SheetLayer } from './components/Overlay';
+import { ProfilePickerSheet } from './components/ProfilePickerSheet';
 import { SimSheet } from './components/SimSheet';
 import { ToastHost } from './components/ToastHost';
 import { VisibilitySwitch } from './components/VisibilitySwitch';
 import { ghostSwitch } from './components/visibilityModel';
 import { fmt } from './generated/copy';
+import { LiveProvider } from './live/LiveProvider';
 import { AboutScreen } from './screens/AboutScreen';
 import { BlockedScreen } from './screens/BlockedScreen';
 import { ChatScreen } from './screens/ChatScreen';
@@ -55,7 +58,9 @@ export default function App() {
 
   return (
     <DemoStoreProvider store={store}>
-      <DemoShell />
+      <LiveProvider store={store}>
+        <DemoShell />
+      </LiveProvider>
     </DemoStoreProvider>
   );
 }
@@ -68,8 +73,9 @@ export default function App() {
 function DemoShell() {
   const { state, dispatch } = useDemo();
   const [simOpen, setSimOpen] = useState(false);
-  const overlayProfile = profileById(state.profileId);
-  const celebration = profileById(state.matchCelebration);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const overlayProfile = profileById(state.profileId, state.catalog);
+  const celebration = profileById(state.matchCelebration, state.catalog);
   const ghost = ghostSwitch(state);
 
   const closeSheet = (): void => setSimOpen(false);
@@ -134,6 +140,8 @@ function DemoShell() {
 
           {state.ghost ? <GhostBanner onDisable={() => dispatch({ type: 'TOGGLE_GHOST' })} /> : null}
 
+          <LiveBar onOpenProfiles={() => setPickerOpen(true)} />
+
           <View style={styles.stack}>
             <DiscoveryScreen />
 
@@ -162,6 +170,12 @@ function DemoShell() {
             {simOpen ? (
               <SheetLayer onClose={closeSheet}>
                 <SimSheet onClose={closeSheet} />
+              </SheetLayer>
+            ) : null}
+
+            {pickerOpen ? (
+              <SheetLayer onClose={() => setPickerOpen(false)}>
+                <ProfilePickerSheet onClose={() => setPickerOpen(false)} />
               </SheetLayer>
             ) : null}
           </View>
