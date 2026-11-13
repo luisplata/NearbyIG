@@ -39,7 +39,7 @@ El workflow tiene tres jobs:
 | Job | Qué hace | Cuándo |
 |---|---|---|
 | `checks` | valida fixtures, drift de generados, tests de tooling, typecheck y tests de Expo, analyze y tests de Flutter | siempre, incluidos PR |
-| `build` | resuelve el base path, construye Expo y Flutter, ensambla y audita `site/`, sube el artefacto | push a `main` y manual |
+| `build` | resuelve el base path, construye los docs del contrato, construye Expo y Flutter, ensambla y audita `site/`, sube el artefacto | push a `main` y manual |
 | `deploy` | publica el artefacto con `pages:write` + `id-token:write` | sólo `main`, después de `build` |
 
 Ningún paso habilita Pages, ni pide secretos, ni hace `git push`.
@@ -57,10 +57,14 @@ URLs vivas (sitio de proyecto):
 | `https://luisplata.github.io/NearbyIG/` | landing con datasetId y enlaces relativos |
 | `https://luisplata.github.io/NearbyIG/flutter/` | demo Flutter web |
 | `https://luisplata.github.io/NearbyIG/expo/` | demo Expo web |
+| `https://luisplata.github.io/NearbyIG/contract/` | doc estático del contrato (Redoc, autocontenido) |
+
+La última llega con el PR de docs del contrato: el mismo push que la publica es el
+primero que la va a tener viva. Se genera con `npm run contract:docs`.
 
 Checklist de aceptación:
 
-1. Las tres URLs responden 200 y refrescan sin 404 (son directorios con `index.html`).
+1. Las URLs de la tabla responden 200 y refrescan sin 404 (son directorios con `index.html`).
 2. La landing muestra `datasetId` y `schemaVersion`; “Acerca de” de ambas apps muestra
    **los mismos** valores.
 3. El chip DEMO sigue visible en las dos demos y la hoja “Qué es simulado” lista 8 ítems.
@@ -85,6 +89,8 @@ node scripts/validate-fixtures.mjs   # imprime el datasetId del contrato
 | El job `checks` falla en “anti-drift” | un generado quedó desactualizado | `npm run sync` y commitear |
 | 404 de assets en `/flutter/` | build con `--base-href` incorrecto | revisar que `configure-pages` corra antes de los builds |
 | 404 de assets en `/expo/` | `EXPO_BASE_URL` mal formado | debe ser `${base_path}/expo`, sin barra final |
+| `falta contract/index.html` en el ensamblado | el doc del contrato no se generó | `npm run contract:docs` (el job `build` lo hace antes del ensamblado) |
+| El doc de `/contract/` publica otro `x-contract-id` | el HTML quedó de una revisión anterior del spec | regenerar con `npm run contract:docs` |
 
 ## 5. Rollback
 

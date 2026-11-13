@@ -4,6 +4,7 @@ name: pages
 #   /            landing
 #   /flutter/    demo Flutter web
 #   /expo/       demo Expo web
+#   /contract/   doc estático del contrato
 #
 # El sitio tiene que existir en Settings → Pages → Source: GitHub Actions.
 # Este workflow NO habilita Pages: si todavía no está habilitado, `configure-pages`
@@ -147,6 +148,12 @@ jobs:
       - name: Install tooling
         run: npm ci
 
+      # Doc estático del contrato: contract/dist/index.html, autocontenido y con
+      # la telemetría de Redoc apagada. Se publica en /contract/ y lo audita el
+      # ensamblado, así que falla antes de los builds si el doc no cierra.
+      - name: Build contract docs
+        run: npm run contract:docs
+
       - name: Install Expo dependencies
         run: npm --prefix demo/expo-demo ci
 
@@ -166,8 +173,9 @@ jobs:
           flutter pub get
           flutter build web --release --pwa-strategy=none --base-href "$FLUTTER_BASE_HREF"
 
-      # Ensambla site/ y audita: 3 index.html, denylist, hosts, datasetId.
-      # Falla antes del upload si algo no cierra: nunca hay deploy parcial.
+      # Ensambla site/ y audita: landing + flutter + expo, /contract/, denylist,
+      # hosts, datasetId. Falla antes del upload si algo no cierra: nunca hay
+      # deploy parcial.
       - name: Assemble and audit site
         env:
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}

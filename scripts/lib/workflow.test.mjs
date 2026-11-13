@@ -139,6 +139,20 @@ test('audita el artefacto antes de subirlo', () => {
   assert.ok(!build.includes('include-hidden-files'), 'no usar inputs no soportados por upload-pages-artifact@v4');
 });
 
+test('los docs del contrato se construyen en build y nunca en checks ni deploy', () => {
+  const build = job('build');
+  const docsAt = build.indexOf('npm run contract:docs');
+  const assembleAt = build.indexOf('node scripts/assemble-site.mjs --strict site');
+  assert.ok(docsAt >= 0, 'build debe generar el doc estático del contrato');
+  assert.ok(docsAt > build.indexOf('npm ci'), 'los docs se generan después de instalar el tooling');
+  assert.ok(docsAt < assembleAt, 'los docs se generan antes del ensamblado (que los audita)');
+
+  // El PR no publica: `checks` valida, `deploy` sólo despliega el artefacto auditado.
+  for (const name of ['checks', 'deploy']) {
+    assert.ok(!job(name).includes('contract:docs'), `${name} no debe construir los docs del contrato`);
+  }
+});
+
 test('publica con permisos de Pages sólo en el job de deploy', () => {
   const deploy = job('deploy');
   assert.match(deploy, /pages: write/);
