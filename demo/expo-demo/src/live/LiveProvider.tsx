@@ -10,6 +10,7 @@ import {
 } from 'react';
 
 import { fixtures } from '../generated/fixtures';
+import { getSoundEngine } from '../sound/engine';
 import { useDemo } from '../state/DemoProvider';
 import type { DemoStore } from '../state/store';
 
@@ -111,6 +112,12 @@ export type LiveBinding = {
   /** Conversación abierta. `null` = la pantalla de chat muestra el guion mock. */
   chat: LiveChatState | null;
   openChat: (matchId: string) => Promise<OpenChatResult>;
+  /**
+   * Abre la conversación con un perfil. Busca el match en la foto vigente y, si
+   * todavía no está (el match acaba de crearse), pide la bandeja una vez. Es el
+   * gesto de "Abrir chat" desde una tarjeta, donde lo único que hay es el peer.
+   */
+  openChatWithPeer: (profileId: string) => Promise<OpenChatResult>;
   closeChat: () => void;
   loadMoreMessages: () => Promise<void>;
   refreshChat: () => Promise<void>;
@@ -190,6 +197,10 @@ export function LiveProvider({
       // Un ping nuevo usa el mismo host de toasts del guion: una sola pila de
       // avisos y el mismo timer de 4 s.
       onNewPings: () => store.pushToast('notif.ping'),
+      // Los eventos del contrato son el único punto donde SSE y polling
+      // convergen: el motor de sonido deduce por id, así que reenviar un frame
+      // no suena dos veces.
+      onEvents: (events, selfId) => getSoundEngine().handleLiveEvents(events, selfId),
     }),
   );
 
@@ -303,6 +314,24 @@ export function LiveProvider({
   const openChat = useCallback(async (matchId: string) => controller.openChat(matchId), [
     controller,
   ]);
+  const openChatWithPeer = useCallback(
+    async (profileId: string) => {
+      const find = (): string | null =>
+        controller
+          .getState()
+          .matches.find((item) => item.peer.profileId === profileId)?.match.id ?? null;
+      let matchId = find();
+      if (matchId === null) {
+        await controller.refreshMatches();
+        matchId = find();
+      }
+      if (matchId === null) {
+        return { ok: false, code: 'MATCH_NOT_FOUND' };
+      }
+      return controller.openChat(matchId);
+    },
+    [controller],
+  );
   const closeChat = useCallback(() => controller.closeChat(), [controller]);
   const loadMoreMessages = useCallback(async () => {
     await controller.loadMoreMessages();
@@ -311,8 +340,15 @@ export function LiveProvider({
     await controller.refreshChat();
   }, [controller]);
   const sendChatMessage = useCallback(
-    async (matchId: string, body: string, clientMessageId?: string) =>
-      controller.sendChatMessage(matchId, body, clientMessageId),
+    async (matchId: string, body: string, clientMessageId?: string) => {
+      const result = await controller.sendChatMessage(matchId, body, clientMessageId);
+      // Sonido de "enviado" sólo con el acuse del server: la burbuja optimista
+      // que falla después no tiene que haber sonado.
+      if (result.ok) {
+        getSoundEngine().sent();
+      }
+      return result;
+    },
     [controller],
   );
 
@@ -378,6 +414,7 @@ export function LiveProvider({
         refreshMatches,
         chat: live.chat,
         openChat,
+        openChatWithPeer,
         closeChat,
         loadMoreMessages,
         refreshChat,

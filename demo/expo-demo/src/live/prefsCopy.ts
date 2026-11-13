@@ -14,6 +14,10 @@ export const prefsCopy = {
   reset: 'Restablecer preferencias',
   resetHint: 'Vuelve radio, filtros y bots a los valores de fábrica. No cambia tu zona ni tu sesión.',
 
+  soundsLabel: 'Sonidos',
+  soundsHint: 'Un tono corto para ping, match y mensaje. Se activan con el primer toque en la pantalla.',
+  soundsBlocked: 'Tocá la pantalla para activar los sonidos.',
+
   selfLive: 'perfil de la sesión',
   selfFallback: 'Perfil del dataset: la API todavía no devolvió tu perfil de la sesión.',
   selfGuest: 'Sesión de invitado: no hay perfil propio en el catálogo.',

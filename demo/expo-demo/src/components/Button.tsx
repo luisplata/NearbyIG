@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { focusRing } from '../theme/focusRing';
 import { colors, fontFamily, fontSize, radii, space } from '../theme/theme';
 
 import { Icon, type IconName } from './Icon';
@@ -18,8 +19,9 @@ export type ButtonProps = {
 };
 
 /**
- * Botón del contrato: 44 px de alto mínimo, foco visible con borde `accent` y
- * etiqueta semántica explícita cuando el texto no alcanza (F-13 / E-5).
+ * Botón del contrato: 44 px de alto mínimo, foco visible con el anillo compartido
+ * (`focusRing`, no mueve el layout) y etiqueta semántica explícita cuando el texto
+ * no alcanza (F-13 / E-5).
  */
 export function Button({
   label,
@@ -46,7 +48,7 @@ export function Button({
         styles.base,
         variantStyles[variant],
         fullWidth && styles.fullWidth,
-        focused && styles.focused,
+        focusRing(focused),
         pressed && !disabled && styles.pressed,
         disabled && styles.disabled,
       ]}
@@ -86,9 +88,6 @@ const styles = StyleSheet.create({
   },
   fullWidth: {
     width: '100%',
-  },
-  focused: {
-    borderColor: colors.accent,
   },
   pressed: {
     opacity: 0.86,

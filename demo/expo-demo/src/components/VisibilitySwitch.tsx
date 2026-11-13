@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 
 import { fmt } from '../generated/copy';
+import { focusRing } from '../theme/focusRing';
 import { colors } from '../theme/theme';
 
 import { Icon } from './Icon';
@@ -37,7 +38,7 @@ export function VisibilitySwitch({
       style={({ pressed }) => [
         styles.button,
         checked && styles.checked,
-        focused && !disabled && styles.focused,
+        focusRing(focused && !disabled),
         pressed && !disabled && styles.pressed,
       ]}
     >
@@ -58,9 +59,6 @@ const styles = StyleSheet.create({
   },
   checked: {
     backgroundColor: colors.surfaceAlt,
-  },
-  focused: {
-    borderColor: colors.accent,
   },
   pressed: {
     backgroundColor: colors.surfaceAlt,

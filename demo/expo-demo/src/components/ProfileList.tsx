@@ -19,6 +19,8 @@ export function ProfileList({
   onClearFilters,
   onBlock,
   onReport,
+  chatFor,
+  onOpenChat,
 }: {
   state: DemoState;
   profiles: UiProfile[];
@@ -26,6 +28,9 @@ export function ProfileList({
   onClearFilters: () => void;
   onBlock?: (profile: UiProfile) => void;
   onReport?: (profile: UiProfile) => void;
+  /** Match del perfil en la bandeja vigente, o `null`. Sin esto no hay globo. */
+  chatFor?: (profile: UiProfile) => { unread: number } | null;
+  onOpenChat?: (profile: UiProfile) => void;
 }) {
   if (profiles.length === 0) {
     return (
@@ -47,6 +52,8 @@ export function ProfileList({
           onTap={() => onOpen(profile)}
           onBlock={onBlock === undefined ? undefined : () => onBlock(profile)}
           onReport={onReport === undefined ? undefined : () => onReport(profile)}
+          chat={chatFor === undefined ? undefined : chatFor(profile)}
+          onOpenChat={onOpenChat === undefined ? undefined : () => onOpenChat(profile)}
         />
       ))}
     </ScrollView>

@@ -157,6 +157,14 @@ export function SettingsScreen() {
         />
       )}
 
+      {/* Sonidos: apagado, el motor no crea `AudioContext` ni toca el player. */}
+      <ToggleRow
+        label={prefsCopy.soundsLabel}
+        value={prefs.soundEnabled}
+        subtitle={prefsCopy.soundsHint}
+        onChange={prefs.setSoundEnabled}
+      />
+
       <EntryRow
         icon="lock"
         label={fmt('settings.privacy')}

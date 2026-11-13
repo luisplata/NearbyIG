@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
+import { chatText } from '../live/chatCopy';
 import { safetyCopy } from '../live/safetyCopy';
 import { formatDistance } from '../state/format';
 import type { AvatarRenderState } from '../state/types';
@@ -16,6 +17,11 @@ import type { UiProfile } from '../state/types';
 /**
  * Tarjeta de perfil de la lista. El label accesible expone nombre y distancia
  * (F-13) y el resto del contenido queda fuera del árbol semántico.
+ *
+ * **Acceso al chat.** Si el perfil ya tiene match, la tarjeta muestra el globo de
+ * chat con los mensajes sin leer. Antes la única puerta al chat era Pings →
+ * Matches, y desde la lista no había ninguna pista de que la conversación
+ * existiera; el globo es esa pista y el atajo de un toque.
  */
 export function ProfileCard({
   profile,
@@ -23,6 +29,8 @@ export function ProfileCard({
   onTap,
   onBlock,
   onReport,
+  chat,
+  onOpenChat,
 }: {
   profile: UiProfile;
   renderState: AvatarRenderState;
@@ -30,6 +38,9 @@ export function ProfileCard({
   /** Acción rápida de la tarjeta (perfil ajeno). Sin handler, no se dibuja. */
   onBlock?: () => void;
   onReport?: () => void;
+  /** Hay match con este perfil; `unread` es lo que falta leer del otro lado. */
+  chat?: { unread: number } | null;
+  onOpenChat?: () => void;
 }) {
   const label = [
     fmt('a11y.profileDot', {
@@ -68,6 +79,27 @@ export function ProfileCard({
           </View>
         </View>
       </PressableRow>
+      {onOpenChat === undefined ? null : (
+        <View style={styles.chatAction}>
+          <IconButton
+            icon="chat"
+            size={18}
+            color={colors.accent}
+            label={
+              chat !== null && chat !== undefined && chat.unread > 0
+                ? chatText('unreadA11y', { count: String(chat.unread) })
+                : chatText('openChat')
+            }
+            onPress={onOpenChat}
+          />
+          {chat !== null && chat !== undefined && chat.unread > 0 ? (
+            <View style={styles.chatBadge}>
+              <Text style={styles.chatBadgeText}>{chat.unread}</Text>
+            </View>
+          ) : null}
+        </View>
+      )}
+
       {onBlock === undefined && onReport === undefined ? null : (
         <View style={styles.actions}>
           {onReport === undefined ? null : (
@@ -116,6 +148,27 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  chatAction: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatBadge: {
+    position: 'absolute',
+    right: 4,
+    top: 4,
+    minWidth: 14,
+    height: 14,
+    paddingHorizontal: 3,
+    borderRadius: 7,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatBadgeText: {
+    fontFamily: fontFamily.semibold,
+    fontSize: 9,
+    color: colors.bg,
   },
   body: {
     flex: 1,

@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { focusRing } from '../theme/focusRing';
 import { colors, fontSize, space } from '../theme/theme';
 
 import { Icon, type IconName } from './Icon';
 
-/** Botón de icono de 44×44 con etiqueta semántica y foco visible. */
+/** Botón de icono de 44×44 con etiqueta semántica y anillo de foco compartido. */
 export function IconButton({
   icon,
   label,
@@ -28,7 +29,7 @@ export function IconButton({
       onPress={onPress}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
-      style={({ pressed }) => [styles.button, focused && styles.focused, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.button, focusRing(focused), pressed && styles.pressed]}
     >
       <Icon name={icon} size={size} color={color} />
     </Pressable>
@@ -56,9 +57,6 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 1,
     borderColor: 'transparent',
-  },
-  focused: {
-    borderColor: colors.accent,
   },
   pressed: {
     backgroundColor: colors.surfaceAlt,

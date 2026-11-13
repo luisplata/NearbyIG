@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { copy } from '../src/generated/copy';
+import { fmt } from '../src/generated/copy';
+import { chatCopy } from '../src/live/chatCopy';
 import {
   DEFAULT_VIEW,
   NAV_ITEMS,
   badgeCount,
   isSelectedTab,
+  pingsBadge,
   type NavItem,
 } from '../src/navigation/navItems';
 
@@ -17,22 +19,36 @@ function item(id: NavItem['id']): NavItem {
   return found;
 }
 
+/**
+ * **Por qué cambió este test.** El cuarto ítem ya no es "Pings" sino **"Chat"**, y
+ * el badge dejó de contar pings para contar mensajes sin leer. El usuario no
+ * encontraba el chat dentro de Pings → pestaña Matches, así que el chat pasó a
+ * ser un tab principal y los pings, un segmento adentro. Los pings pendientes no
+ * desaparecen del nav: se dibujan como punto sobre el mismo tab y como contador
+ * en el segmento Recibidos (ver `pingsBadge`).
+ */
 describe('navegación de cuatro tabs', () => {
-  it('ordena Lista → Radar → Pings → Perfil y no incluye Mapa', () => {
-    expect(NAV_ITEMS.map((entry) => entry.id)).toEqual(['list', 'radar', 'pings', 'profile']);
-    expect(NAV_ITEMS.map((entry) => entry.labelKey)).toEqual([
-      'nav.list',
-      'nav.radar',
-      'nav.pings',
-      'nav.profile',
+  it('ordena Lista → Radar → Chat → Perfil y no incluye Mapa', () => {
+    expect(NAV_ITEMS.map((entry) => entry.id)).toEqual(['list', 'radar', 'chat', 'profile']);
+    expect(NAV_ITEMS.map((entry) => entry.label)).toEqual([
+      fmt('nav.list'),
+      fmt('nav.radar'),
+      chatCopy.navChat,
+      fmt('nav.profile'),
     ]);
+    expect(NAV_ITEMS.map((entry) => entry.icon)).toEqual(['list', 'radar', 'chat', 'person']);
     expect(NAV_ITEMS).toHaveLength(4);
     expect(NAV_ITEMS.some((entry) => entry.kind === 'view' && entry.view === 'map')).toBe(false);
   });
 
-  it('todas las etiquetas resuelven en el catálogo de copy', () => {
+  it('el tab Chat se llama Chat y no Pings', () => {
+    expect(item('chat').label).toBe('Chat');
+    expect(fmt('nav.pings')).not.toBe('Chat');
+  });
+
+  it('todas las etiquetas son texto no vacío', () => {
     for (const entry of NAV_ITEMS) {
-      expect(copy[entry.labelKey]).toBeTruthy();
+      expect(entry.label.trim().length, entry.id).toBeGreaterThan(0);
     }
   });
 
@@ -47,21 +63,28 @@ describe('navegación de cuatro tabs', () => {
     expect(isSelectedTab(item('radar'), 'list')).toBe(false);
     expect(isSelectedTab(item('radar'), 'radar')).toBe(true);
     expect(isSelectedTab(item('radar'), 'map')).toBe(false);
-    expect(isSelectedTab(item('pings'), 'list')).toBe(false);
+    expect(isSelectedTab(item('chat'), 'list')).toBe(false);
     expect(isSelectedTab(item('profile'), 'radar')).toBe(false);
   });
 
-  it('Pings y Perfil abren overlays sin cambiar la vista', () => {
-    const pings = item('pings');
+  it('Chat y Perfil abren overlays sin cambiar la vista', () => {
+    const chat = item('chat');
     const profile = item('profile');
-    expect(pings.kind === 'overlay' ? pings.overlay : null).toBe('pings');
+    // La clave del overlay sigue siendo `pings`: es la del reducer congelado.
+    expect(chat.kind === 'overlay' ? chat.overlay : null).toBe('pings');
     expect(profile.kind === 'overlay' ? profile.overlay : null).toBe('settings');
   });
 
-  it('el badge es sólo de Pings y se oculta en cero', () => {
-    expect(badgeCount(item('pings'), 3)).toBe(3);
-    expect(badgeCount(item('pings'), 0)).toBeUndefined();
-    expect(badgeCount(item('list'), 3)).toBeUndefined();
-    expect(badgeCount(item('profile'), 3)).toBeUndefined();
+  it('el badge del Chat cuenta mensajes, nunca pings', () => {
+    expect(badgeCount(item('chat'), { messages: 3, pings: 9 })).toBe(3);
+    expect(badgeCount(item('chat'), { messages: 0, pings: 9 })).toBeUndefined();
+    expect(badgeCount(item('list'), { messages: 3, pings: 0 })).toBeUndefined();
+    expect(badgeCount(item('radar'), { messages: 3, pings: 0 })).toBeUndefined();
+    expect(badgeCount(item('profile'), { messages: 3, pings: 0 })).toBeUndefined();
+  });
+
+  it('los pings pendientes viajan aparte, para el segmento Recibidos', () => {
+    expect(pingsBadge({ messages: 0, pings: 4 })).toBe(4);
+    expect(pingsBadge({ messages: 7, pings: 0 })).toBeUndefined();
   });
 });

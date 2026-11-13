@@ -7,9 +7,9 @@ import type { DiscoveryFilters } from '../state/types';
  * Preferencias del usuario que sobreviven a una recarga.
  *
  * **Qué guarda.** Sólo decisiones de UI que el usuario tomó a mano: radio,
- * intenciones, género, verificados, en línea y el toggle de bots. La zona ya
- * tiene su propia clave (`nearbyig.demoZone`) y la sesión es efímera por
- * contrato: el token no se persiste, así que recargar abre una sesión nueva.
+ * intenciones, género, verificados, en línea, el toggle de bots y el de sonidos.
+ * La zona ya tiene su propia clave (`nearbyig.demoZone`) y la sesión es efímera
+ * por contrato: el token no se persiste, así que recargar abre una sesión nueva.
  *
  * **Por qué un módulo aparte.** No es estado de la máquina de estados (el
  * reducer tiene 27 acciones congeladas y el golden de paridad no puede moverse).
@@ -28,6 +28,12 @@ export type Preferences = {
   verifiedOnly: boolean;
   onlineOnly: boolean;
   includeBots: boolean;
+  /**
+   * Sonidos de la demo. Es una preferencia de UI más (no estado del reducer) y
+   * vive en el mismo JSON: apagarla tiene que sobrevivir a la recarga igual que
+   * el toggle de bots.
+   */
+  soundEnabled: boolean;
 };
 
 /** Los valores de fábrica: mismo estado que `initialState()` del reducer. */
@@ -38,6 +44,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   verifiedOnly: false,
   onlineOnly: false,
   includeBots: true,
+  soundEnabled: true,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -100,6 +107,7 @@ export function parsePreferences(raw: string | null | undefined): Preferences | 
     verifiedOnly: readFlag(parsed['verifiedOnly'], DEFAULT_PREFERENCES.verifiedOnly),
     onlineOnly: readFlag(parsed['onlineOnly'], DEFAULT_PREFERENCES.onlineOnly),
     includeBots: readFlag(parsed['includeBots'], DEFAULT_PREFERENCES.includeBots),
+    soundEnabled: readFlag(parsed['soundEnabled'], DEFAULT_PREFERENCES.soundEnabled),
   };
 }
 
@@ -126,11 +134,19 @@ export function serializePreferences(prefs: Preferences): string {
     verifiedOnly: normalized.verifiedOnly,
     onlineOnly: normalized.onlineOnly,
     includeBots: normalized.includeBots,
+    soundEnabled: normalized.soundEnabled,
   });
 }
 
-/** Foto de las preferencias a partir del estado del store. */
-export function preferencesOf(filters: DiscoveryFilters, includeBots: boolean): Preferences {
+/**
+ * Foto de las preferencias a partir del estado del store. `soundEnabled` no
+ * vive en el reducer (no es una acción del contrato): lo aporta el provider.
+ */
+export function preferencesOf(
+  filters: DiscoveryFilters,
+  includeBots: boolean,
+  soundEnabled: boolean = DEFAULT_PREFERENCES.soundEnabled,
+): Preferences {
   return {
     radiusM: filters.radiusM,
     intentions: filters.intentions === null ? null : [...filters.intentions],
@@ -138,6 +154,7 @@ export function preferencesOf(filters: DiscoveryFilters, includeBots: boolean): 
     verifiedOnly: filters.verifiedOnly,
     onlineOnly: filters.onlineOnly,
     includeBots,
+    soundEnabled,
   };
 }
 

@@ -166,6 +166,15 @@ export type LiveControllerPorts = {
    */
   onNewPings?: (count: number) => void;
   /**
+   * Eventos del contrato recién recibidos, con la identidad de la sesión.
+   *
+   * Es el único punto donde SSE y polling convergen, así que enganchar acá un
+   * efecto (un sonido, una métrica) no puede duplicarse ni depender del
+   * transporte. Quien escuche tiene que dedupear por `id`: un frame reenviado y
+   * una página de polling repetida traen el mismo evento.
+   */
+  onEvents?: (events: readonly LiveEvent[], selfId: string | null) => void;
+  /**
    * Log de diagnóstico con prefijo `[geo]`. La app pasa `console.info`; los tests
    * no, así el ruido queda en el navegador y no en la salida de vitest.
    */
@@ -619,6 +628,9 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   };
 
   const apply = (events: readonly LiveEvent[]): void => {
+    // La identidad la conoce el controlador: el que escucha no tiene que
+    // buscarla en el estado para distinguir un mensaje propio de uno ajeno.
+    ports.onEvents?.(events, state.session?.profileId ?? null);
     const result = applyEvents(state.discovery, events, state.lastSeq);
     const patch: Partial<LiveState> = { lastSeq: result.lastSeq, lastEventAt: Date.now() };
     if (result.changed) {
@@ -1614,6 +1626,11 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
         const ping = await api.createPing(targetProfileId);
         set({ pingError: null });
         await refreshPings();
+        if (ping.status === 'accepted') {
+          // El bot aceptó solo: sin esta foto la bandeja de matches todavía no
+          // tiene el match y la UI no puede ofrecer "Abrir chat" en el acto.
+          await refreshMatches();
+        }
         return { ok: true, code: null, status: ping.status, matchId: ping.matchId };
       } catch (error) {
         return pingFailure(error);
@@ -1627,6 +1644,9 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
         const match = await api.acceptPing(pingId);
         set({ pingError: null });
         await refreshPings();
+        // Mismo motivo que en el ping: el match recién creado tiene que estar en
+        // la bandeja para que el CTA "Abrir chat" funcione sin esperar al stream.
+        await refreshMatches();
         return { ok: true, code: null, status: 'accepted', matchId: match.id };
       } catch (error) {
         // El estado que diga el server manda: un accept repetido es 409 y la

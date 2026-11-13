@@ -10,14 +10,26 @@
  * `chat.blockedNotice`, `chat.self.*`, `profile.report`, `profile.block`.
  */
 export const chatCopy = {
+  /** Etiqueta del tab principal. El overlay sigue siendo `pings` en el reducer. */
+  navChat: 'Chat',
+  title: 'Chat',
+
+  segConversations: 'Conversaciones',
+  hintConversations: 'Abrí una conversación para chatear. Los pings viven en Recibidos y Enviados.',
+  segInbox: 'Recibidos',
+  segSent: 'Enviados',
+
   tabMatches: 'Matches',
   matchesHint: 'Matches reales de esta sesión: abrí uno para conversar.',
-  matchesEmpty: 'Todavía no tenés matches en esta sesión. Aceptá un ping o pingueá a un bot.',
+  matchesEmpty:
+    'Todavía no hay matches. Mandá un ping: en la demo los bots aceptan solos y la conversación aparece acá.',
+  matchesEmptyCta: 'Buscar gente',
   matchNoMessages: 'Match creado. Todavía no hay mensajes.',
   matchYouPrefix: 'Vos: ',
   matchBotTag: 'bot',
   unreadA11y: '{count} mensajes sin leer',
   openChat: 'Abrir chat',
+  opening: 'Abriendo…',
 
   conversationEmpty: 'Match creado. Escribí el primer mensaje.',
   botNote: 'Bot de la demo: responde solo con texto fijo.',

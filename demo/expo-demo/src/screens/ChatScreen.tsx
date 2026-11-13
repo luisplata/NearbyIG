@@ -166,7 +166,7 @@ function LiveChat({ chat }: { chat: LiveChatState }) {
         <View style={styles.headerText}>
           <View style={styles.nameRow}>
             <Text numberOfLines={1} style={[text.title, { fontSize: fontSize[2] }]}>
-              {peer?.nickname ?? fmt('nav.pings')}
+              {peer?.nickname ?? chatText('title')}
             </Text>
             {isBot ? <Chip label={chatText('matchBotTag')} /> : null}
           </View>

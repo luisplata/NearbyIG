@@ -74,11 +74,21 @@ export function unreadCount(state: DemoState): number {
  * Badge de pings de la barra inferior.
  *
  * En modo live el número es la bandeja real (pendientes que todavía esperan
- * respuesta); en dataset es el guion del mock. Mezclarlos contaría dos veces el
- * mismo ping cuando la sesión live arranca con el catálogo del build.
+ * respuesta) **más los mensajes sin leer** de los matches: el chat vive dentro de
+ * Pings, así que un mensaje nuevo tiene que mover el mismo tab o el usuario no
+ * se entera de que hay algo para leer. En dataset es el guion del mock.
+ * Mezclarlos contaría dos veces el mismo ping cuando la sesión live arranca con
+ * el catálogo del build.
  */
-export function pingsBadgeCount(state: DemoState, livePending: number): number {
-  return state.source === 'live' ? livePending : state.incomingPings.length;
+export function pingsBadgeCount(
+  state: DemoState,
+  livePending: number,
+  liveUnreadMessages: number = 0,
+): number {
+  if (state.source !== 'live') {
+    return state.incomingPings.length;
+  }
+  return livePending + Math.max(0, liveUnreadMessages);
 }
 
 /**

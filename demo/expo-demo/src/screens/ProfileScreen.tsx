@@ -2,7 +2,9 @@ import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
+import { chatText } from '../live/chatCopy';
 import { useLive } from '../live/LiveProvider';
+import { matchForPeer } from '../live/matches';
 import { pingErrorKey, pingForPeer, pingSendBlock } from '../live/pings';
 import { pingText } from '../live/pingsCopy';
 import { isBlockedPeer, safetyErrorKey } from '../live/safety';
@@ -33,6 +35,10 @@ import { Chip } from '../components/Chip';
  * duplicado con 409) y un `accepted` —el caso del bot, que acepta solo— muestra
  * el match creado. Los errores del backend se explican con su código, no con un
  * "algo salió mal".
+ *
+ * **Abrir chat.** Si ya hay match, el botón está acá mismo: antes la única
+ * puerta era Pings → pestaña Matches, así que después de pinguear a un bot (que
+ * acepta solo) el usuario veía "match creado" y no tenía por dónde seguir.
  */
 export function ProfileScreen() {
   const { state, dispatch, store } = useDemo();
@@ -51,6 +57,7 @@ export function ProfileScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [blockBusy, setBlockBusy] = useState(false);
+  const [chatBusy, setChatBusy] = useState(false);
   const [blockNote, setBlockNote] = useState<string | null>(null);
   const [blockError, setBlockError] = useState<string | null>(null);
   if (profile === null) {
@@ -67,6 +74,25 @@ export function ProfileScreen() {
   const blockedReason = pingBlockedReason(state, profile.id);
   const alreadySent = state.pingsSent.includes(profile.id);
   const matched = state.matches.includes(profile.id);
+  /**
+   * El match puede existir sin que la fila esté en la foto (recién creado): el
+   * provider pide la bandeja una vez antes de rendirse.
+   */
+  const liveMatch = liveMode ? matchForPeer(live.matches, profile.id) : null;
+  const hasChat = liveMode ? liveMatch !== null : matched;
+
+  const openChat = async (): Promise<void> => {
+    if (!liveMode) {
+      dispatch({ type: 'OPEN_CHAT', profileId: profile.id });
+      return;
+    }
+    setChatBusy(true);
+    const result = await live.openChatWithPeer(profile.id);
+    setChatBusy(false);
+    if (result.ok) {
+      dispatch({ type: 'OPEN_OVERLAY', overlay: 'chat' });
+    }
+  };
 
   const sendPing = async (): Promise<void> => {
     if (!liveMode) {
@@ -162,6 +188,14 @@ export function ProfileScreen() {
           }
           fullWidth
         />
+        {hasChat ? (
+          <Button
+            label={chatBusy ? chatText('opening') : chatText('openChat')}
+            fullWidth
+            disabled={chatBusy}
+            onPress={() => void openChat()}
+          />
+        ) : null}
         {guest ? (
           <Text style={[text.small, styles.hint]}>{pingText('guestNote')}</Text>
         ) : null}
@@ -187,13 +221,10 @@ export function ProfileScreen() {
             {fmt('profile.pingSentHint', { name: profile.nickname })}
           </Text>
         ) : null}
-        {matched ? (
-          <Button
-            label={fmt('profile.viewChat')}
-            variant="outline"
-            fullWidth
-            onPress={() => dispatch({ type: 'OPEN_CHAT', profileId: profile.id })}
-          />
+        {liveMatch !== null && liveMatch.unreadCount > 0 ? (
+          <Text style={[text.small, styles.match]}>
+            {chatText('unreadA11y', { count: String(liveMatch.unreadCount) })}
+          </Text>
         ) : null}
       </View>
 

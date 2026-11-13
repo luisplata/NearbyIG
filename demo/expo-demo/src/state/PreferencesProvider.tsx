@@ -19,11 +19,13 @@ import {
   serializePreferences,
 } from '../live/preferences';
 
+import { useSoundPreference } from '../sound/useSound';
+
 import { useDemo } from './DemoProvider';
 
 /**
  * Preferencias persistentes del usuario: radio, intenciones, género, verificados,
- * en línea y toggle de bots.
+ * en línea, toggle de bots y toggle de sonidos.
  *
  * **Ciclo.** Al montar lee el storage de preferencias del build,
  * hidrata el store con acciones del reducer (las 27 del contrato, sin inventar
@@ -45,6 +47,9 @@ export type PreferencesBinding = {
   botCount: number;
   setIncludeBots: (value: boolean) => void;
   toggleBots: () => void;
+  /** Avisos sonoros. Apagado, el motor ni siquiera toca el `AudioContext`. */
+  soundEnabled: boolean;
+  setSoundEnabled: (value: boolean) => void;
   /** Radio, filtros y bots a fábrica. Zona y sesión intactas. */
   reset: () => void;
   /** La hidratación ya leyó el storage (o no había nada que leer). */
@@ -56,6 +61,12 @@ const PreferencesContext = createContext<PreferencesBinding | null>(null);
 export function PreferencesProvider({ children }: { children: ReactNode }) {
   const { state, dispatch, store } = useDemo();
   const [hydrated, setHydrated] = useState(false);
+  /**
+   * Los sonidos no son estado del reducer (no hay acción en el contrato), así que
+   * el flag vive acá y se hidrata del mismo JSON que el resto de preferencias.
+   * Default: activado.
+   */
+  const [soundEnabled, setSoundEnabled] = useState(DEFAULT_PREFERENCES.soundEnabled);
   const booted = useRef(false);
 
   useEffect(() => {
@@ -72,10 +83,16 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       dispatch(action);
     }
     store.setIncludeBots(stored.includeBots);
+    setSoundEnabled(stored.soundEnabled);
     setHydrated(true);
   }, [dispatch, store]);
 
-  const serialized = serializePreferences(preferencesOf(state.filters, state.includeBots));
+  // El motor de sonido sigue al toggle: apagado no crea contexto ni suena.
+  useSoundPreference(soundEnabled);
+
+  const serialized = serializePreferences(
+    preferencesOf(state.filters, state.includeBots, soundEnabled),
+  );
 
   useEffect(() => {
     if (!hydrated) {
@@ -100,6 +117,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       dispatch(action);
     }
     store.setIncludeBots(DEFAULT_PREFERENCES.includeBots);
+    setSoundEnabled(DEFAULT_PREFERENCES.soundEnabled);
   }, [dispatch, store]);
 
   const binding = useMemo<PreferencesBinding>(
@@ -108,10 +126,20 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       botCount: state.botIds.length,
       setIncludeBots,
       toggleBots,
+      soundEnabled,
+      setSoundEnabled,
       reset,
       hydrated,
     }),
-    [state.includeBots, state.botIds, setIncludeBots, toggleBots, reset, hydrated],
+    [
+      state.includeBots,
+      state.botIds,
+      setIncludeBots,
+      toggleBots,
+      soundEnabled,
+      reset,
+      hydrated,
+    ],
   );
 
   return <PreferencesContext.Provider value={binding}>{children}</PreferencesContext.Provider>;

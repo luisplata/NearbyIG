@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { focusRing } from '../theme/focusRing';
 import { colors, fontFamily, fontSize, radii, space } from '../theme/theme';
 
 import { Icon, type IconName } from './Icon';
@@ -15,8 +16,12 @@ export type ChipProps = {
 };
 
 /**
- * Chip del contrato. Con `onPress` es un control de 44 px con foco visible y
- * `accessibilityState.selected`; sin `onPress` es una etiqueta de dato.
+ * Chip del contrato. Con `onPress` es un control de 44 px con `accessibilityState
+ * .selected` y el anillo de foco compartido; sin `onPress` es una etiqueta de dato.
+ *
+ * El foco se dibuja en el `Pressable` (la caja de 44 px), no en la píldora
+ * interna: así el anillo sigue la forma del control que recibe el foco y no
+ * aparece como dos bordes distintos.
  */
 export function Chip({ label, selected = false, onPress, emphasis = false, icon }: ChipProps) {
   const [focused, setFocused] = useState(false);
@@ -31,7 +36,6 @@ export function Chip({ label, selected = false, onPress, emphasis = false, icon 
         emphasis || selected
           ? { borderColor: emphasis ? colors.accent : colors.accent }
           : { borderColor: colors.border },
-        focused && styles.focused,
       ]}
     >
       {icon === undefined ? null : <Icon name={icon} size={14} color={foreground} />}
@@ -57,7 +61,11 @@ export function Chip({ label, selected = false, onPress, emphasis = false, icon 
       onPress={onPress}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
-      style={({ pressed }) => [styles.pressable, focused && styles.focusedRing, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.pressable,
+        focusRing(focused),
+        pressed && styles.pressed,
+      ]}
     >
       {body}
     </Pressable>
@@ -72,12 +80,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
     borderRadius: radii[4],
-    borderWidth: 1,
-    borderColor: 'transparent',
     paddingHorizontal: 2,
-  },
-  focusedRing: {
-    borderColor: colors.accent,
   },
   pressed: {
     opacity: 0.86,
@@ -92,9 +95,6 @@ const styles = StyleSheet.create({
     borderRadius: radii[4],
     borderWidth: 1,
     marginHorizontal: 2,
-  },
-  focused: {
-    borderColor: colors.accent,
   },
   label: {
     fontFamily: fontFamily.semibold,

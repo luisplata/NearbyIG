@@ -44,6 +44,7 @@ const CUSTOM: Preferences = {
   verifiedOnly: true,
   onlineOnly: true,
   includeBots: false,
+  soundEnabled: false,
 };
 
 describe('modelo de preferencias', () => {
@@ -79,6 +80,7 @@ describe('modelo de preferencias', () => {
       verifiedOnly: DEFAULT_PREFERENCES.verifiedOnly,
       onlineOnly: true,
       includeBots: false,
+      soundEnabled: DEFAULT_PREFERENCES.soundEnabled,
     });
   });
 
@@ -95,6 +97,7 @@ describe('modelo de preferencias', () => {
       verifiedOnly: false,
       onlineOnly: true,
       includeBots: false,
+      soundEnabled: DEFAULT_PREFERENCES.soundEnabled,
     });
   });
 
@@ -137,7 +140,8 @@ describe('hidratación y reset', () => {
     expect(state.filters.gender).toBe('female');
     expect(state.filters.verifiedOnly).toBe(true);
     expect(state.filters.onlineOnly).toBe(true);
-    expect(preferencesOf(state.filters, false)).toEqual(CUSTOM);
+    // El sonido es una preferencia más: la foto tiene que reflejar el toggle.
+    expect(preferencesOf(state.filters, false, CUSTOM.soundEnabled)).toEqual(CUSTOM);
   });
 
   it('restablecer vuelve a fábrica sin tocar la zona ni la sesión', () => {
@@ -186,7 +190,7 @@ describe('storage de preferencias', () => {
     store.setIncludeBots(stored.includeBots);
 
     const state = store.getState();
-    expect(preferencesOf(state.filters, state.includeBots)).toEqual(CUSTOM);
+    expect(preferencesOf(state.filters, state.includeBots, stored.soundEnabled)).toEqual(CUSTOM);
     expect(state.catalog).toHaveLength(2);
     expect(visibleProfiles(state).map((profile) => profile.id)).toEqual(['mx-p02']);
   });

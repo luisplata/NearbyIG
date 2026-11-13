@@ -1,6 +1,6 @@
 import { useFonts } from 'expo-font';
 import { useEffect, useMemo, useState } from 'react';
-import { Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { DemoFrame } from './components/DemoFrame';
 import { FilterSheet } from './components/FilterSheet';
@@ -15,19 +15,23 @@ import { ToastHost } from './components/ToastHost';
 import { VisibilitySwitch } from './components/VisibilitySwitch';
 import { ZoneSheet } from './components/ZoneSheet';
 import { fmt } from './generated/copy';
+import { chatText } from './live/chatCopy';
 import { LiveProvider, useLive } from './live/LiveProvider';
+import { prefsCopy } from './live/prefsCopy';
 import { safetyText } from './live/safetyCopy';
 import { useGhost } from './live/useGhost';
 import { AboutScreen } from './screens/AboutScreen';
 import { BlockedScreen } from './screens/BlockedScreen';
+import { ChatHubScreen } from './screens/ChatHubScreen';
 import { ChatScreen } from './screens/ChatScreen';
 import { DiscoveryScreen } from './screens/DiscoveryScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
-import { PingsScreen } from './screens/PingsScreen';
 import { PrivacyScreen } from './screens/PrivacyScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { SafetyScreen } from './screens/SafetyScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { getSoundEngine, installGestureUnlock } from './sound/engine';
+import { useSoundBlocked, useSoundEffects } from './sound/useSound';
 import { DemoStoreProvider, useDemo } from './state/DemoProvider';
 import { PreferencesProvider } from './state/PreferencesProvider';
 import { bellBadgeCount, profileById } from './state/selectors';
@@ -54,6 +58,13 @@ export default function App() {
       document.documentElement.lang = 'es';
     }
   }, []);
+
+  /**
+   * Desbloqueo de audio: el navegador sólo deja sonar después de un gesto. El
+   * primer `pointerdown`/`keydown` reanuda el contexto y los listeners se
+   * remueven (no queda un handler pegado a cada toque de la demo).
+   */
+  useEffect(() => installGestureUnlock(), []);
 
   if (!fontsLoaded) {
     return null;
@@ -85,7 +96,11 @@ function DemoShell() {
   /** Con un match real abierto el título sale del peer del chat, no del catálogo. */
   const overlayName = live.state.chat?.peer?.nickname ?? overlayProfile?.nickname;
   const ghost = useGhost();
+  const soundBlocked = useSoundBlocked();
   const zonePrompt = live.state.zonePrompt;
+  // Pings, matches y mensajes del dataset del build suenan por acá; en live los
+  // dispara el stream desde el provider.
+  useSoundEffects();
   /**
    * Campana: `unreadCount` de `/notifications` en live. En dataset sigue siendo
    * el guion (notificaciones sin leer), que es el comportamiento de siempre.
@@ -100,10 +115,16 @@ function DemoShell() {
       dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: state.profileId });
       return;
     }
-    // Cerrar el chat real devuelve la pantalla al guion del dataset: sin esto, el
-    // próximo `OPEN_CHAT` de un match mock mostraría la conversación del server.
+    /**
+     * Volver desde una conversación cae en el **Chat**, no en descubrimiento: es
+     * la pantalla desde la que se abrió y la que el usuario espera encontrar.
+     * Además cierra el chat real, así el próximo match del guion no muestra la
+     * conversación del server.
+     */
     if (state.overlay === 'chat') {
       live.closeChat();
+      dispatch({ type: 'OPEN_OVERLAY', overlay: 'pings' });
+      return;
     }
     dispatch({ type: 'CLOSE_OVERLAY' });
   };
@@ -177,6 +198,19 @@ function DemoShell() {
 
           <LiveBar onOpenProfiles={() => setPickerOpen(true)} />
 
+          {/* Aviso discreto y una sola vez: un toque desbloquea el audio. */}
+          {soundBlocked ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLiveRegion="polite"
+              accessibilityLabel={prefsCopy.soundsBlocked}
+              onPress={() => void getSoundEngine().unlock()}
+              style={styles.soundHintRow}
+            >
+              <Text style={[text.small, styles.soundHint]}>{prefsCopy.soundsBlocked}</Text>
+            </Pressable>
+          ) : null}
+
           <View style={styles.stack}>
             <DiscoveryScreen />
 
@@ -239,7 +273,8 @@ function overlayTitle(overlay: DemoOverlay, nickname: string | undefined): strin
     case 'chat':
       return nickname ?? fmt('chat.placeholder');
     case 'pings':
-      return fmt('nav.pings');
+      // El overlay sigue llamándose `pings` en el reducer; la pantalla es Chat.
+      return chatText('title');
     case 'notifications':
       return fmt('notif.title');
     case 'filters':
@@ -268,7 +303,7 @@ function OverlayBody({
     case 'chat':
       return <ChatScreen />;
     case 'pings':
-      return <PingsScreen />;
+      return <ChatHubScreen />;
     case 'notifications':
       return <NotificationsScreen />;
     case 'filters':
@@ -323,6 +358,14 @@ const styles = StyleSheet.create({
     color: colors.danger,
     paddingHorizontal: space[2],
     paddingBottom: 4,
+  },
+  soundHintRow: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: space[3],
+  },
+  soundHint: {
+    color: colors.accent,
   },
   stack: {
     flex: 1,

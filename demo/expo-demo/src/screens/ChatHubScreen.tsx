@@ -5,7 +5,7 @@ import { fmt } from '../generated/copy';
 import { fixtures } from '../generated/fixtures';
 import type { Intention } from '../generated/fixtures';
 import { chatText } from '../live/chatCopy';
-import type { MatchRow } from '../live/chat';
+import { unreadMatchCount, type MatchRow } from '../live/chat';
 import { useLive } from '../live/LiveProvider';
 import { canResolve, formatPingTime, pingErrorKey, type PingRow } from '../live/pings';
 import { pingText, type PingsCopyKey } from '../live/pingsCopy';
@@ -24,91 +24,104 @@ import { Icon } from '../components/Icon';
 import { PressableRow } from '../components/PressableRow';
 
 /**
- * Bandeja de pings **y** de matches.
+ * Pantalla de **Chat**: conversaciones primero, pings después.
  *
- * **Dos fuentes, una pantalla.** Con sesión live la bandeja es la del backend
- * (`GET /pings?box=inbox|sent`) y la tercera pestaña son los matches reales
- * (`GET /matches`): cada fila trae el peer ya proyectado, el último mensaje y
- * cuántos mensajes del otro lado quedan sin leer. Sin sesión (dataset del build)
- * se ve el guion de siempre, con aceptar/rechazar simulados. El mock no se rompió:
- * es el piso de la demo cuando la API no está configurada o no responde.
+ * **Qué cambió y por qué.** Antes esta pantalla se llamaba "Pings" y el chat era
+ * una pestaña adentro; el usuario no la encontraba y no había forma de llegar a
+ * una conversación sin adivinar el camino. Ahora es un tab principal del nav y
+ * abre en **Conversaciones**. Los pings no se perdieron: son los segmentos
+ * Recibidos y Enviados, en ese orden de importancia.
  *
- * **Aceptar crea match, y el match se puede abrir.** La respuesta del accept trae
- * el `Match`; la fila pasa a `accepted` y el match aparece en la pestaña Matches,
- * que es la puerta al chat real.
+ * **Dos fuentes, una pantalla.** Con sesión live las conversaciones son
+ * `GET /matches` (con último mensaje y no leídos) y las bandejas son
+ * `GET /pings?box=inbox|sent`. Sin sesión se ve el guion del dataset: matches del
+ * reducer, pings entrantes y pings enviados. El mock es el piso de la demo cuando
+ * la API no está configurada o no responde.
+ *
+ * **Badges.** El nav muestra mensajes sin leer; el segmento Recibidos muestra los
+ * pings pendientes en su propia etiqueta. Son números distintos y no se suman.
  */
-export function PingsScreen() {
+export type ChatSegment = 'conversations' | 'inbox' | 'sent';
+
+export function ChatHubScreen() {
   const { state } = useDemo();
   const live = useLive();
   if (state.source === 'live' && live.enabled) {
-    return <LivePings />;
+    return <LiveChatHub />;
   }
-  return <MockPings />;
-}
-
-/** Guion del dataset: secciones de recibidos y enviados, como antes. */
-function MockPings() {
-  const { state } = useDemo();
-  const incoming = state.incomingPings.flatMap((id) => {
-    const profile = profileById(id, state.catalog);
-    return profile === null ? [] : [profile];
-  });
-  // Un ping enviado sigue "esperando respuesta" hasta que hay match (ahí la
-  // conversación vive en el chat) o el perfil se bloquea.
-  const sent = state.pingsSent.flatMap((id) => {
-    const profile = profileById(id, state.catalog);
-    if (profile === null || state.matches.includes(id) || state.blocked.includes(id)) {
-      return [];
-    }
-    return [profile];
-  });
-
-  if (incoming.length === 0 && sent.length === 0) {
-    return <EmptyState message={fmt('ping.inboxEmpty')} icon="ping" />;
-  }
-
-  return (
-    <ScrollView contentContainerStyle={styles.content}>
-      {incoming.length === 0 ? null : (
-        <Section title={fmt('ping.inboxTitle')}>
-          {incoming.map((profile) => (
-            <MockReceivedCard key={profile.id} profile={profile} />
-          ))}
-        </Section>
-      )}
-      {sent.length === 0 ? null : (
-        <Section title={fmt('ping.sentTitle')}>
-          {sent.map((profile) => (
-            <MockSentCard key={profile.id} profile={profile} />
-          ))}
-        </Section>
-      )}
-    </ScrollView>
-  );
+  return <MockChatHub />;
 }
 
 /**
- * Bandeja real: pestañas recibidos/enviados/matches, refresco manual y estado por
- * fila. El polling del controlador (5 s) mantiene la lista de pings al día sin
- * que el usuario tenga que tocar nada; la de matches se refresca al abrir la
- * pestaña y con los eventos `match.created`/`message.created` del stream.
+ * Segmentos. El contador va en la etiqueta porque un chip extra por número no
+ * entra en 360 px y el número al lado de la palabra se lee sin pensar.
  */
-function LivePings() {
+function SegmentBar({
+  segment,
+  unread,
+  pending,
+  onSelect,
+}: {
+  segment: ChatSegment;
+  unread: number;
+  pending: number;
+  onSelect: (segment: ChatSegment) => void;
+}) {
+  return (
+    <View style={styles.tabs}>
+      <Chip
+        label={
+          unread > 0
+            ? `${chatText('segConversations')} · ${unread}`
+            : chatText('segConversations')
+        }
+        selected={segment === 'conversations'}
+        onPress={() => onSelect('conversations')}
+      />
+      <Chip
+        label={
+          pending > 0 ? `${chatText('segInbox')} · ${pending}` : chatText('segInbox')
+        }
+        icon={pending > 0 ? 'ping' : undefined}
+        selected={segment === 'inbox'}
+        onPress={() => onSelect('inbox')}
+      />
+      <Chip
+        label={chatText('segSent')}
+        selected={segment === 'sent'}
+        onPress={() => onSelect('sent')}
+      />
+    </View>
+  );
+}
+
+/** Salida del estado vacío: cerrar la pantalla y buscar gente para pinguear. */
+function useFindPeople(): () => void {
+  const { dispatch } = useDemo();
+  return () => {
+    dispatch({ type: 'CLOSE_OVERLAY' });
+    dispatch({ type: 'SET_VIEW', view: 'list' });
+  };
+}
+
+function LiveChatHub() {
   const { dispatch } = useDemo();
   const live = useLive();
-  const [tab, setTab] = useState<'inbox' | 'sent' | 'matches'>('inbox');
+  const findPeople = useFindPeople();
+  const [segment, setSegment] = useState<ChatSegment>('conversations');
   const [busy, setBusy] = useState<string | null>(null);
-  const rows = tab === 'inbox' ? live.pings.inbox : live.pings.sent;
+  const rows = segment === 'inbox' ? live.pings.inbox : live.pings.sent;
   const error = live.pings.error;
-  const unread = live.matches.reduce((total, row) => total + row.unreadCount, 0);
+  const unread = unreadMatchCount(live.matches);
+  const pending = live.pings.pending;
 
-  // La pestaña Matches pide su foto al entrar: la bandeja no tiene polling propio
+  // La bandeja de conversaciones no tiene polling propio: se pide al entrar
   // (mismo criterio que la campana: no sumar requests al rate limit).
   useEffect(() => {
-    if (tab === 'matches') {
+    if (segment === 'conversations') {
       void live.refreshMatches();
     }
-  }, [tab, live.refreshMatches]);
+  }, [segment, live.refreshMatches]);
 
   const run = async (pingId: string, mode: 'accept' | 'reject'): Promise<void> => {
     setBusy(pingId);
@@ -130,87 +143,82 @@ function LivePings() {
 
   return (
     <View style={styles.liveRoot}>
-      <View style={styles.tabs}>
+      <SegmentBar
+        segment={segment}
+        unread={unread}
+        pending={pending}
+        onSelect={setSegment}
+      />
+      <View style={styles.toolbar}>
         <Chip
-          label={pingText('tabInbox')}
-          selected={tab === 'inbox'}
-          onPress={() => setTab('inbox')}
+          label={pingText('refresh')}
+          onPress={() =>
+            void (segment === 'conversations' ? live.refreshMatches() : live.refreshPings())
+          }
         />
-        <Chip
-          label={pingText('tabSent')}
-          selected={tab === 'sent'}
-          onPress={() => setTab('sent')}
-        />
-        <Chip
-          label={chatText('tabMatches')}
-          selected={tab === 'matches'}
-          onPress={() => setTab('matches')}
-        />
-        {tab === 'inbox' && live.pings.pending > 0 ? (
-          <Chip label={String(live.pings.pending)} icon="ping" selected emphasis />
-        ) : null}
-        {tab === 'matches' && unread > 0 ? (
-          <Chip label={String(unread)} icon="heart" selected emphasis />
-        ) : null}
-        <View style={styles.refresh}>
-          <Chip
-            label={pingText('refresh')}
-            onPress={() =>
-              void (tab === 'matches' ? live.refreshMatches() : live.refreshPings())
-            }
-          />
-        </View>
       </View>
 
-      {tab === 'matches' ? (
-        <Text style={[text.small, styles.hint]}>{chatText('matchesHint')}</Text>
-      ) : (
-        <Text style={[text.small, styles.hint]}>{pingText('liveHint')}</Text>
-      )}
+      <Text style={[text.small, styles.hint]}>
+        {segment === 'conversations' ? chatText('matchesHint') : pingText('liveHint')}
+      </Text>
 
-      {error === null || tab === 'matches' ? null : (
+      {error === null || segment === 'conversations' ? null : (
         <Text style={[text.small, styles.error]}>
           {pingText(pingErrorKey(error), { code: error })}
         </Text>
       )}
 
-      {tab === 'matches' ? <MatchList busy={busy} onOpen={openChat} /> : null}
-
-      {tab !== 'matches' ? (
-        rows.length === 0 ? (
-          <EmptyState
-            message={pingText(tab === 'inbox' ? 'inboxEmptyLive' : 'sentEmptyLive')}
-            icon="ping"
-          />
-        ) : (
-          <ScrollView contentContainerStyle={styles.content}>
-            {rows.map((row) => (
+      {segment === 'conversations' ? (
+        <MatchList busy={busy} onOpen={openChat} onFindPeople={findPeople} />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          message={pingText(segment === 'inbox' ? 'inboxEmptyLive' : 'sentEmptyLive')}
+          icon="ping"
+        />
+      ) : (
+        <ScrollView contentContainerStyle={styles.content}>
+          {rows.map((row) => {
+            const matchId = row.matchId;
+            return (
               <LiveCard
                 key={row.id}
                 row={row}
                 busy={busy === row.id}
                 onAccept={() => void run(row.id, 'accept')}
                 onReject={() => void run(row.id, 'reject')}
+                onOpenChat={matchId === null ? undefined : () => void openChat(matchId)}
               />
-            ))}
-          </ScrollView>
-        )
-      ) : null}
+            );
+          })}
+        </ScrollView>
+      )}
     </View>
   );
 }
 
-/** Pestaña Matches: preview, hora y no leídos. Tap = abrir la conversación. */
+/**
+ * Conversaciones. Si no hay ninguna, el estado vacío **explica cómo conseguir
+ * una**: antes era una lista muda y el usuario no sabía qué hacer después.
+ */
 function MatchList({
   busy,
   onOpen,
+  onFindPeople,
 }: {
   busy: string | null;
   onOpen: (matchId: string) => Promise<void>;
+  onFindPeople: () => void;
 }) {
   const live = useLive();
   if (live.matches.length === 0) {
-    return <EmptyState message={chatText('matchesEmpty')} icon="heart" />;
+    return (
+      <EmptyState
+        message={chatText('matchesEmpty')}
+        actionLabel={chatText('matchesEmptyCta')}
+        onAction={onFindPeople}
+        icon="chat"
+      />
+    );
   }
   return (
     <ScrollView contentContainerStyle={styles.content}>
@@ -277,6 +285,7 @@ function MatchCard({
             </View>
           ) : null}
         </View>
+        <Icon name="chevronRight" size={18} color={colors.muted} />
       </View>
     </PressableRow>
   );
@@ -294,11 +303,14 @@ function LiveCard({
   busy,
   onAccept,
   onReject,
+  onOpenChat,
 }: {
   row: PingRow;
   busy: boolean;
   onAccept: () => void;
   onReject: () => void;
+  /** Sólo existe con match: es la salida directa a la conversación. */
+  onOpenChat?: () => void;
 }) {
   const time = formatPingTime(row.createdAt);
   const intention = intentionLabel(row.peer.intention);
@@ -330,9 +342,19 @@ function LiveCard({
       </View>
 
       {row.status === 'accepted' ? (
-        <Text style={[text.small, styles.match]}>
-          {pingText('matchCreated', { name: row.peer.nickname })}
-        </Text>
+        <>
+          <Text style={[text.small, styles.match]}>
+            {pingText('matchCreated', { name: row.peer.nickname })}
+          </Text>
+          {onOpenChat === undefined ? null : (
+            <Button
+              label={busy ? chatText('opening') : chatText('openChat')}
+              fullWidth
+              disabled={busy}
+              onPress={onOpenChat}
+            />
+          )}
+        </>
       ) : null}
 
       {canResolve(row) ? (
@@ -367,38 +389,99 @@ function intentionLabel(value: string): string | null {
 
 const INTENTIONS: readonly Intention[] = fixtures.filters.intentions;
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text style={[text.small, styles.sectionTitle]}>{title}</Text>
-      {children}
-    </View>
-  );
-}
+/**
+ * Dataset: el guion de siempre, con las etiquetas nuevas. Conversaciones son los
+ * matches del reducer (abren el chat mock); Recibidos y Enviados son los pings
+ * simulados con aceptar/rechazar.
+ */
+function MockChatHub() {
+  const { state, dispatch } = useDemo();
+  const findPeople = useFindPeople();
+  const [segment, setSegment] = useState<ChatSegment>('conversations');
+  const incoming = state.incomingPings.flatMap((id) => {
+    const profile = profileById(id, state.catalog);
+    return profile === null ? [] : [profile];
+  });
+  // Un ping enviado sigue "esperando respuesta" hasta que hay match (ahí la
+  // conversación vive en el chat) o el perfil se bloquea.
+  const sent = state.pingsSent.flatMap((id) => {
+    const profile = profileById(id, state.catalog);
+    if (profile === null || state.matches.includes(id) || state.blocked.includes(id)) {
+      return [];
+    }
+    return [profile];
+  });
+  const matches = state.matches.flatMap((id) => {
+    const profile = profileById(id, state.catalog);
+    return profile === null ? [] : [profile];
+  });
 
-function Card({
-  profile,
-  subtitle,
-  children,
-}: {
-  profile: UiProfile;
-  subtitle: string;
-  children?: ReactNode;
-}) {
+  const openChat = (profile: UiProfile): void => {
+    dispatch({ type: 'OPEN_CHAT', profileId: profile.id });
+  };
+
   return (
-    <View style={styles.card}>
-      <View style={styles.header}>
-        <Avatar photoId={profile.photoId} size={44} />
-        <View style={styles.info}>
-          <Text numberOfLines={1} style={[text.bodyLarge, styles.name]}>
-            {profile.nickname}
-          </Text>
-          <Text numberOfLines={1} style={[text.small, { color: colors.muted }]}>
-            {subtitle}
-          </Text>
-        </View>
-      </View>
-      {children}
+    <View style={styles.liveRoot}>
+      <SegmentBar
+        segment={segment}
+        unread={0}
+        pending={incoming.length}
+        onSelect={setSegment}
+      />
+      <Text style={[text.small, styles.hint]}>{chatText('hintConversations')}</Text>
+
+      {segment === 'conversations' ? (
+        matches.length === 0 ? (
+          <EmptyState
+            message={chatText('matchesEmpty')}
+            actionLabel={chatText('matchesEmptyCta')}
+            onAction={findPeople}
+            icon="chat"
+          />
+        ) : (
+          <ScrollView contentContainerStyle={styles.content}>
+            {matches.map((profile) => (
+              <PressableRow
+                key={profile.id}
+                accessibilityLabel={`${profile.nickname}, ${chatText('openChat')}`}
+                onPress={() => openChat(profile)}
+                style={styles.card}
+              >
+                <View style={styles.header}>
+                  <Avatar photoId={profile.photoId} size={44} />
+                  <View style={styles.info}>
+                    <Text numberOfLines={1} style={[text.bodyLarge, styles.name]}>
+                      {profile.nickname}
+                    </Text>
+                    <Text numberOfLines={1} style={[text.small, { color: colors.muted }]}>
+                      {formatDistance(profile.distanceM)}
+                    </Text>
+                  </View>
+                  <Icon name="chat" size={18} color={colors.accent} />
+                </View>
+              </PressableRow>
+            ))}
+          </ScrollView>
+        )
+      ) : segment === 'inbox' ? (
+        incoming.length === 0 ? (
+          <EmptyState message={fmt('ping.inboxEmpty')} icon="ping" />
+        ) : (
+          <ScrollView contentContainerStyle={styles.content}>
+            {incoming.map((profile) => (
+              <MockReceivedCard key={profile.id} profile={profile} />
+            ))}
+          </ScrollView>
+        )
+      ) : sent.length === 0 ? (
+        <EmptyState message={pingText('sentEmptyLive')} icon="ping" />
+      ) : (
+        <ScrollView contentContainerStyle={styles.content}>
+          {sent.map((profile) => (
+            <MockSentCard key={profile.id} profile={profile} />
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -406,7 +489,10 @@ function Card({
 function MockReceivedCard({ profile }: { profile: UiProfile }) {
   const { dispatch } = useDemo();
   return (
-    <Card profile={profile} subtitle={`${fmt('notif.ping')} · ${formatDistance(profile.distanceM)}`}>
+    <Card
+      profile={profile}
+      subtitle={`${fmt('notif.ping')} · ${formatDistance(profile.distanceM)}`}
+    >
       <View style={styles.actions}>
         <View style={styles.action}>
           <Button
@@ -442,6 +528,33 @@ function MockSentCard({ profile }: { profile: UiProfile }) {
   );
 }
 
+function Card({
+  profile,
+  subtitle,
+  children,
+}: {
+  profile: UiProfile;
+  subtitle: string;
+  children?: ReactNode;
+}) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.header}>
+        <Avatar photoId={profile.photoId} size={44} />
+        <View style={styles.info}>
+          <Text numberOfLines={1} style={[text.bodyLarge, styles.name]}>
+            {profile.nickname}
+          </Text>
+          <Text numberOfLines={1} style={[text.small, { color: colors.muted }]}>
+            {subtitle}
+          </Text>
+        </View>
+      </View>
+      {children}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   liveRoot: {
     flex: 1,
@@ -450,11 +563,14 @@ const styles = StyleSheet.create({
   tabs: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 2,
   },
-  refresh: {
-    flex: 1,
-    alignItems: 'flex-end',
+  toolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 2,
   },
   hint: {
     color: colors.muted,
@@ -465,15 +581,6 @@ const styles = StyleSheet.create({
   content: {
     gap: space[1],
     paddingBottom: space[3],
-  },
-  section: {
-    gap: space[1],
-    paddingTop: space[1],
-  },
-  sectionTitle: {
-    color: colors.muted,
-    fontWeight: '600',
-    letterSpacing: 0.4,
   },
   card: {
     backgroundColor: colors.surface,

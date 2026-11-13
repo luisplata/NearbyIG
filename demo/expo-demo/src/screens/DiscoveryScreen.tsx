@@ -2,7 +2,9 @@ import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
+import { unreadMatchCount } from '../live/chat';
 import { useLive } from '../live/LiveProvider';
+import { matchForPeer } from '../live/matches';
 import { prefsCopy } from '../live/prefsCopy';
 import { mapCenterFor, regionForZone } from '../live/regions';
 import { useDemo } from '../state/DemoProvider';
@@ -72,6 +74,31 @@ export function DiscoveryScreen() {
 
   const onReport = (profile: UiProfile): void => {
     dispatch({ type: 'OPEN_OVERLAY', overlay: 'safety', profileId: profile.id });
+  };
+
+  /**
+   * Chats ya existentes, para que la tarjeta ofrezca el globo. En live la foto es
+   * la de `GET /matches`; en dataset, el guion (`state.matches` sin no leídos).
+   */
+  const chatFor = (profile: UiProfile): { unread: number } | null => {
+    if (liveMode) {
+      const row = matchForPeer(live.matches, profile.id);
+      return row === null ? null : { unread: row.unreadCount };
+    }
+    return state.matches.includes(profile.id) ? { unread: 0 } : null;
+  };
+
+  /** Un toque al globo abre la conversación, sin pasar por Pings → Matches. */
+  const onOpenChat = (profile: UiProfile): void => {
+    if (!liveMode) {
+      dispatch({ type: 'OPEN_CHAT', profileId: profile.id });
+      return;
+    }
+    void live.openChatWithPeer(profile.id).then((result) => {
+      if (result.ok) {
+        dispatch({ type: 'OPEN_OVERLAY', overlay: 'chat' });
+      }
+    });
   };
 
   const onNav = (item: NavItem): void => {
@@ -153,6 +180,8 @@ export function DiscoveryScreen() {
               onClearFilters={() => dispatch({ type: 'CLEAR_FILTERS' })}
               onBlock={onBlock}
               onReport={onReport}
+              chatFor={chatFor}
+              onOpenChat={onOpenChat}
             />
           </>
         )}
@@ -160,7 +189,14 @@ export function DiscoveryScreen() {
 
       <BottomNav
         view={state.view}
-        pingsCount={pingsBadgeCount(state, live.pings.pending)}
+        /**
+         * El badge del tab Chat cuenta **mensajes sin leer**; los pings
+         * pendientes viajan aparte y se dibujan en el segmento Recibidos.
+         */
+        badges={{
+          messages: liveMode ? unreadMatchCount(live.matches) : 0,
+          pings: pingsBadgeCount(state, live.pings.pending, 0),
+        }}
         onSelect={onNav}
       />
     </View>

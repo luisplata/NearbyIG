@@ -44,6 +44,20 @@
         font: 15px/1.5 system-ui, sans-serif;
       }
     </style>
+    <!--
+      Foco propio: el indicador es el anillo de `src/theme/focusRing.ts`
+      (`box-shadow`, sigue el border-radius y no mueve el layout). Se apaga el
+      outline nativo en los dos selectores para que el navegador no dibuje su
+      rectángulo encima. No se deja la UI sin foco visible: el anillo está.
+    -->
+    <style id="focus-ring">
+      :focus {
+        outline: none;
+      }
+      :focus-visible {
+        outline: none;
+      }
+    </style>
   </head>
 
   <body>
