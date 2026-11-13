@@ -9,7 +9,7 @@ openapi: 3.1.0
 
 info:
   title: NearbyIG API
-  version: 0.1.0
+  version: 0.2.0
   summary: Contrato congelado de la demo (S1–S3).
   description: |
     Contrato de la demo NearbyIG escrito a mano antes del server. La superficie
@@ -20,10 +20,20 @@ info:
     implementa. Ninguna operation se implementa en Sprint 0: acá sólo se
     declara la forma.
 
+    **v0.2 (delta sobre v0.1):** la ocupación de un slot demo se ve antes de
+    intentar reclamarlo y el desalojo se pide explícitamente.
+      * `ProfileSummary.inUse` publica si hay una sesión viva en el slot, así el
+        selector de perfiles puede mostrar "en uso" sin comer un 409.
+      * `POST /auth/takeover` desaloja un slot concreto y devuelve una
+        `DemoSession` nueva. `POST /auth/demo-session` sigue respondiendo
+        `409 PROFILE_IN_USE` sobre un slot ocupado: el desalojo nunca es
+        implícito.
+    Ningún DTO, código de error ni response cambia de forma.
+
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: '9a46aa91e7d3'
+  x-contract-id: '7203b8216b58'
 
 servers:
   - url: http://localhost:3000
@@ -35,7 +45,11 @@ security:
 
 tags:
   - name: auth
-    description: Sesión demo, logout y ticket efímero para `GET /events`.
+    description: |
+      Sesión demo, takeover de un slot, logout y ticket efímero para
+      `GET /events`. `POST /auth/demo-session` es la única operation pública;
+      `POST /auth/takeover` pide sesión porque el desalojo necesita un sujeto: es
+      el invitado que pasa a humano o el navegador que cambia de perfil.
   - name: events
     description: |
       Stream SSE y polling del mismo log de eventos. El orden lo da `seq`, no
@@ -45,10 +59,31 @@ tags:
       Regiones y zonas de la demo. Sólo proyecciones: `ZoneSummary` lleva
       `zoneKey`, `nameKey` y `regionKey`, nunca geometría. El polígono vive en
       `contract/catalog/zones.json`, fuera del spec.
+  - name: profiles
+    description: |
+      Perfiles del catálogo demo: 10 humanos por región (`mx`, `co`). La fila es
+      `ProfileSummary`, con los campos del dataset más `regionKey`, `demoSlot` y
+      `sourceType`. El avatar se resuelve por `photoId`; ningún response expone
+      coordenadas.
+  - name: presence
+    description: |
+      Dónde está la sesión. `PUT /presence` es la única entrada del contrato que
+      acepta coordenadas: recibe un punto privado o una `demoZoneKey` y devuelve
+      la proyección (`regionKey`, `zoneKey`), nunca el punto. Región y zona se
+      derivan con `ST_Covers` contra los polígonos del catálogo; fuera de todo
+      polígono es `fallbackRequired: true`, no un error.
+  - name: discovery
+    description: |
+      Quién está cerca. Devuelve `ProfileSummary` filtrado por radio, intención,
+      género, verificado y online. `distanceM` y `bearingDeg` los calcula el
+      server y se redondean al metro y al grado; la respuesta no lleva el punto de
+      nadie.
 
 paths:
   /auth/demo-session:
     $ref: './paths/auth.yaml#/demo-session'
+  /auth/takeover:
+    $ref: './paths/auth.yaml#/takeover'
   /auth/logout:
     $ref: './paths/auth.yaml#/logout'
   /auth/stream-ticket:
@@ -61,6 +96,12 @@ paths:
     $ref: './paths/catalog.yaml#/demo-regions'
   /demo/zones:
     $ref: './paths/catalog.yaml#/demo-zones'
+  /demo/profiles:
+    $ref: './paths/profiles.yaml#/demo-profiles'
+  /presence:
+    $ref: './paths/presence.yaml#/presence'
+  /discovery:
+    $ref: './paths/discovery.yaml#/discovery'
 
 components:
   # Respuestas de error compartidas. Todas tienen la misma forma
@@ -73,10 +114,25 @@ components:
   responses:
     Unauthorized:
       description: |
-        Falta la credencial, el JWT venció o el ticket de stream no es válido.
-        `code` distingue los tres casos: `UNAUTHENTICATED`, `TICKET_EXPIRED`,
-        `TICKET_REUSED`.
+        Falta la credencial o el JWT venció (`UNAUTHENTICATED`). Es el 401 de toda
+        operation que autentica con `demoSession`; el ticket de stream tiene su
+        propio 401 porque sus dos códigos no existen fuera de `GET /events`.
       x-error-code: UNAUTHENTICATED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    StreamTicketInvalid:
+      description: |
+        401 de `GET /events`, que autentica con `streamTicket` en lugar del header.
+        El ticket ausente o vencido es `TICKET_EXPIRED`; el ya consumido es
+        `TICKET_REUSED`. Los dos códigos viajan acá y en ningún otro lado: un
+        status puede volver con más de un `code` y `Problem.code` es el
+        discriminante.
+      x-error-code:
+        - TICKET_EXPIRED
+        - TICKET_REUSED
       content:
         application/problem+json:
           schema:
@@ -84,8 +140,12 @@ components:
 
     Conflict:
       description: |
-        El recurso pedido choca con el estado actual: el slot demo ya está
-        ocupado por otra sesión viva (`PROFILE_IN_USE`).
+        El pedido choca con el estado del slot demo (`PROFILE_IN_USE`). En
+        `POST /auth/demo-session` es un slot que ya ocupa otra sesión viva: el
+        claim no desaloja, así que el cliente tiene que elegir otro o pedir el
+        takeover. En `POST /auth/takeover` es un pedido sobre el slot que ya
+        ocupa la propia sesión que llama: no hay nada que desalojar y reemitir el
+        token apagaría la credencial en uso.
       x-error-code: PROFILE_IN_USE
       content:
         application/problem+json:
@@ -136,6 +196,79 @@ components:
           schema:
             $ref: './schemas/errors.yaml#/Problem'
 
+    RegionMismatch:
+      description: |
+        El recurso pedido pertenece a otra región que la de la sesión
+        (`REGION_MISMATCH`). Es un 403 y no un 404 a propósito: el perfil existe,
+        lo que no existe es el derecho a verlo desde esta sesión.
+      x-error-code: REGION_MISMATCH
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    ProfileNotFound:
+      description: |
+        El `profileId` que nombra la sesión ya no existe en el catálogo
+        (`PROFILE_NOT_FOUND`): se regeneró el seed debajo de una sesión viva, así
+        que el token es válido pero apunta a un perfil que no está. Es un 404 y no
+        un 401: la credencial no está mal, el recurso sí.
+      x-error-code: PROFILE_NOT_FOUND
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    PresenceStale:
+      description: |
+        No hay presencia viva que apagar (`PRESENCE_STALE`): nunca se registró, ya
+        se borró o venció. La operación es idempotente en el resultado, no en el
+        status, para que el cliente distinga "apagué mi presencia" de "no había
+        nada que apagar".
+      x-error-code: PRESENCE_STALE
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    PresenceUnprocessable:
+      description: |
+        422 de `PUT /presence`, con dos `code`: `VALIDATION_FAILED` cuando el body
+        no trae exactamente uno de `point`/`demoZoneKey` (o no cumple su forma), y
+        `ZONE_UNKNOWN` cuando la `demoZoneKey` existe como forma pero no en el
+        catálogo de la región. El status es uno y el discriminante es
+        `Problem.code`, igual que en el 401.
+      x-error-code:
+        - VALIDATION_FAILED
+        - ZONE_UNKNOWN
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    RateLimited:
+      description: |
+        El cliente superó el límite de pedidos de la ventana (`RATE_LIMITED`). Es
+        un 429 y no un 422: el pedido está bien formado, lo que falta es cuota. El
+        cliente reintenta con backoff, no corrigiendo el body.
+      x-error-code: RATE_LIMITED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    NotImplemented:
+      description: |
+        La operation existe en el contrato y todavía no está implementada en el
+        sprint que la sirve (`NOT_IMPLEMENTED`). Un server de S1/S2 que recibe
+        `GET /discovery` responde esto en vez de 404: el path existe, la
+        implementación no. Así `x-implementation-sprint` es accionable.
+      x-error-code: NOT_IMPLEMENTED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
   securitySchemes:
     demoSession:
       type: http
@@ -159,6 +292,8 @@ components:
       $ref: './schemas/auth.yaml#/DemoSession'
     DemoSessionRequest:
       $ref: './schemas/auth.yaml#/DemoSessionRequest'
+    TakeoverRequest:
+      $ref: './schemas/auth.yaml#/TakeoverRequest'
     StreamTicket:
       $ref: './schemas/auth.yaml#/StreamTicket'
     EventEnvelope:
@@ -173,6 +308,14 @@ components:
       $ref: './schemas/events.yaml#/ProfileMovedPayload'
     ProfilePresencePayload:
       $ref: './schemas/events.yaml#/ProfilePresencePayload'
+    PingReceivedPayload:
+      $ref: './schemas/events.yaml#/PingReceivedPayload'
+    MatchCreatedPayload:
+      $ref: './schemas/events.yaml#/MatchCreatedPayload'
+    MessageCreatedPayload:
+      $ref: './schemas/events.yaml#/MessageCreatedPayload'
+    TypingStartedPayload:
+      $ref: './schemas/events.yaml#/TypingStartedPayload'
     ErrorCode:
       $ref: './schemas/errors.yaml#/ErrorCode'
     Problem:
@@ -193,3 +336,23 @@ components:
       $ref: './schemas/region.yaml#/ZoneList'
     ZoneSummary:
       $ref: './schemas/region.yaml#/ZoneSummary'
+    Gender:
+      $ref: './schemas/common.yaml#/Gender'
+    Intention:
+      $ref: './schemas/common.yaml#/Intention'
+    ProfileList:
+      $ref: './schemas/profile.yaml#/ProfileList'
+    ProfileSummary:
+      $ref: './schemas/profile.yaml#/ProfileSummary'
+    SelfProfile:
+      $ref: './schemas/profile.yaml#/SelfProfile'
+    # `PresenceUpdate` y `PrivatePoint` NO se montan: llevan el punto privado y
+    # `components.schemas` es la superficie que puede salir (ver
+    # schemas/presence.yaml). El requestBody de `PUT /presence` los referencia
+    # directo, que es donde tienen que estar.
+    PresenceState:
+      $ref: './schemas/presence.yaml#/PresenceState'
+    DiscoveryQuery:
+      $ref: './schemas/discovery.yaml#/DiscoveryQuery'
+    DiscoveryResult:
+      $ref: './schemas/discovery.yaml#/DiscoveryResult'

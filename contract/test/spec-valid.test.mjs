@@ -15,16 +15,31 @@ const { raw, spec } = loadSpec();
  * Inventario congelado. Cada PR de la cadena agrega sus filas acá; ninguna se
  * borra ni se renombra. Si un PR agrega una operation sin tocar esta lista, el
  * test falla: el inventario no puede crecer en silencio.
+ *
+ * Con PR6 la lista quedó **completa** para v0.1: era exactamente la tabla de la
+ * spec (S1–S3). De ahí en adelante, una fila nueva es un cambio de superficie,
+ * no un PR de la cadena. La primera excepción es deliberada: **v0.2** agrega
+ * `POST /auth/takeover` (desalojo explícito de un slot) junto con
+ * `ProfileSummary.inUse`, porque la demo de Sprint 1 necesita mostrar "en uso" y
+ * desalojar sin inventar superficie fuera del contrato.
  */
 const EXPECTED_OPERATIONS = [
   'POST /auth/demo-session',
+  'POST /auth/takeover',
   'POST /auth/logout',
   'POST /auth/stream-ticket',
   'GET /events',
   'GET /events/poll',
   'GET /demo/regions',
   'GET /demo/zones',
+  'GET /demo/profiles',
+  'PUT /presence',
+  'DELETE /presence',
+  'GET /discovery',
 ];
+
+/** Paths que la superficie congelada S1–S3 deja afuera a propósito. */
+const FORBIDDEN_PATHS = /ping|match|chat|block|report|\/health/;
 
 const SUPPORTED_SPRINTS = [1, 2, 3];
 const operations = listOperations(spec);
@@ -88,6 +103,16 @@ test('el inventario de operations es exactamente el esperado', () => {
 test('ningún path lleva prefijo de versión', () => {
   for (const path of Object.keys(spec.paths ?? {})) {
     assert.ok(!path.startsWith('/v1'), `${path}: el versionado vive en info, no en el path`);
+  }
+});
+
+test('la superficie no incluye ping, match, chat, block, report ni health', () => {
+  for (const path of Object.keys(spec.paths ?? {})) {
+    assert.doesNotMatch(
+      path,
+      FORBIDDEN_PATHS,
+      `${path}: esa superficie no está congelada; entra cuando exista un diseño que la congele (S4/S5)`,
+    );
   }
 });
 

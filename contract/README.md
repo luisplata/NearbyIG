@@ -14,31 +14,57 @@ que sale de este directorio hacia el artefacto publicado es el doc HTML de
 | OpenAPI 3.1 a mano + lint + tests | Server, DB, Docker, NestJS |
 | Superficie congelada S1–S3 con sprint por operation | Ninguna operation implementada |
 | `ErrorCode` cerrado, envelope de eventos, catálogo MX/CO | Firebase, OAuth, secretos |
-| Cliente TS type-only generado (PR8) | Cliente runtime |
+| Cliente TS type-only generado y commiteado | Cliente runtime |
 
 El primer `curl` es Sprint 1. Hasta que `npm run contract:check` esté verde, no
 hay contrato que implementar.
 
 ## Comandos
 
-Corré `npm ci` una vez en la raíz (el tooling del contrato son dos devDependencies
-pinneadas: `@redocly/cli` y `yaml`).
+Corré `npm ci` una vez en la raíz. El tooling del contrato son cuatro
+devDependencies pinneadas exactas: `@redocly/cli`, `openapi-typescript`,
+`typescript` y `yaml`. Ninguna es runtime: el contrato no depende de nada en
+producción.
 
 | Comando | Qué hace |
 |---|---|
 | `npm run contract:validate` | `redocly lint` + invariantes estructurales |
+| `npm run contract:generate` | regenera `generated/api.ts` desde el spec |
+| `npm run contract:generate:check` | falla si el generado difiere **por bytes** |
+| `npm run contract:typecheck` | `tsc -p contract/tsconfig.json` (`strict`, `noEmit`) |
+| `npm run contract:seed` | emite el catálogo en forma canónica + `seed/manifest.json` |
+| `npm run contract:seed:check` | falla si lo commiteado difiere de lo emitido |
+| `npm run contract:seed:dry-run` | tabla `path \| rows \| sha \| estado`, sin escribir |
+| `npm run contract:event-log` | deriva `event/sample-log.json` del catálogo |
+| `npm run contract:event-log:check` | falla si el log commiteado no es el derivado |
 | `npm run contract:test` | `node --test` sobre `contract/test/*.test.mjs` |
 | `npm run contract:docs` | genera el doc HTML estático en `contract/dist/` |
-| `npm run contract:check` | `contract:validate` → `contract:test` → `git diff --exit-code` |
+| `npm run contract:gates` | los 5 gates de Sprint 0, pass/fail por gate |
+| `npm run contract:check` | el gate completo (ver abajo) |
 
-`contract:check` es el gate. Suma un guard por PR: seeds en PR7, `generate:check`
-y `typecheck` en PR8.
+`contract:check` compone, en este orden:
+
+```text
+contract:validate      →  el spec es OpenAPI 3.1 y cumple sus invariantes
+contract:generate:check →  api.ts commiteado == regenerado (bytes)
+contract:seed:check    →  catálogo y manifest sin drift
+contract:event-log:check →  sample-log.json == derivado del catálogo
+contract:test          →  los casos de node:test (hoy 77)
+contract:typecheck     →  el cliente compila en strict
+git diff --exit-code   →  red secundaria: nada quedó sin commitear
+```
+
+El seed se verifica antes de los tests porque un `manifest` viejo invalida
+cualquier verde posterior. El orden importa: cada paso barato falla primero y con
+un mensaje propio, en vez de dejar que un test lejano explique el síntoma.
 
 Corre en CI en `.github/workflows/contract.yml`, un workflow propio: `push` a `main`
 y PRs que toquen `contract/`, `package.json`, `package-lock.json` o el workflow.
-Permisos mínimos (`contents: read`) y `concurrency` por ref. El workflow de Pages
-(`pages.yml`) no se toca y sigue siendo el único que publica Pages; un test lo
-verifica en `scripts/lib/workflow.test.mjs`.
+El job corre `contract:check`, además `contract:generate:check` como paso propio
+(para que el drift del cliente se vea en el log de CI) y `npm run test:scripts`
+para que el mock siga verde. Permisos mínimos (`contents: read`) y `concurrency`
+por ref. El workflow de Pages (`pages.yml`) no se toca y sigue siendo el único que
+publica Pages; un test lo verifica en `scripts/lib/workflow.test.mjs`.
 
 ## Docs publicados
 
@@ -85,19 +111,42 @@ contract/
   paths/auth.yaml           path items de auth (S1)
   paths/events.yaml         GET /events (SSE) y GET /events/poll (S2)
   paths/catalog.yaml        GET /demo/regions y GET /demo/zones (S2), sin geometría
-  schemas/auth.yaml         DemoSession, DemoSessionRequest, StreamTicket
-  schemas/events.yaml       envelope, los 6 tipos, payloads S2, EventsPage
+  paths/profiles.yaml       GET /demo/profiles (S1), sin geometría
+  paths/presence.yaml       PUT y DELETE /presence (S2): la única entrada con coordenadas
+  paths/discovery.yaml      GET /discovery (S3): radio y filtros, sin geometría
+  schemas/auth.yaml         DemoSession, DemoSessionRequest, TakeoverRequest, StreamTicket
+  schemas/events.yaml       envelope, los 6 tipos, los 6 payloads, EventsPage
   schemas/region.yaml       Region, RegionList, ZoneSummary, ZoneList
-  schemas/common.yaml       RegionKey, SourceType, KeyLabel, Page
+  schemas/profile.yaml      ProfileSummary, ProfileList, SelfProfile
+  schemas/presence.yaml     PresenceUpdate (no montado), PrivatePoint (no montado), PresenceState
+  schemas/discovery.yaml    DiscoveryQuery, DiscoveryResult
+  schemas/common.yaml       RegionKey, SourceType, Gender, Intention, KeyLabel, Page
   catalog/regions.json      dos regiones: mx, co (con defaultZoneKey)
   catalog/zones.json        geometría de CDMX y Bogotá: anillos [lng, lat]
-  event/sample-log.json     fixture congelado: 40 eventos con un duplicado
+  catalog/profiles.mx.json  10 perfiles derivados de fixtures.json (posición a posición)
+  catalog/profiles.co.json  10 perfiles autorados, mismo shape
+  seed/manifest.json        versión, contractId, hash de fixtures y sha de cada archivo emitido
+  event/sample-log.json     log derivado del catálogo: 40 eventos con un duplicado
+  generated/api.ts          cliente TS type-only, generado y commiteado
+  tsconfig.json             strict + noEmit, sólo generated/
   scripts/lib/spec.mjs      carga los YAML, resuelve $ref, calcula x-contract-id
   scripts/lib/events.mjs    proyecciones puras: parseEnvelopeId, toSseFrames, toPollPage
+  scripts/lib/walk.mjs      DFS de schemas: properties, items, allOf, oneOf, examples
+  scripts/seed.mjs          emisor canónico del catálogo + manifest (--check, --dry-run)
+  scripts/event-log.mjs     deriva el sample log del catálogo (--check, --dry-run)
+  scripts/generate-client.mjs  openapi-typescript + header fijo + --check por bytes
   scripts/validate-spec.mjs gate: lint + invariantes
+  scripts/gates.mjs         los 5 gates de Sprint 0 con exit code agregado
   test/spec-valid.test.mjs  inventario de operations + invariantes
-  test/events-contract.test.mjs  envelope, dedupe y paridad SSE ≡ polling
+  test/takeover-contract.test.mjs  inUse + takeover: forma del delta v0.2
+  test/events-contract.test.mjs  envelope, dedupe, paridad SSE ≡ polling y log derivado
   test/zones-geometry.test.mjs   anillos válidos + geometría inalcanzable desde el spec
+  test/fixtures-parity.test.mjs  paridad campo a campo con fixtures (fixtures gana)
+  test/seed-idempotent.test.mjs  doble emisión byte-idéntica + gate anti-drift
+  test/presence-discovery.test.mjs  punto o zona, fallback y el filtro de discovery
+  test/no-coordinates.test.mjs   walk de responses y eventos: ninguna coordenada sale
+  test/client-drift.test.mjs     api.ts == regenerado, determinista y type-only
+  test/secrets.test.mjs          denylist + Firebase sobre todo contract/
 ```
 
 ### Cómo se arma un path
@@ -132,6 +181,7 @@ cuando exista un diseño que lo congele: pings, matches, chat, block, report y
 | Operation | Sprint | Archivo | Entra en |
 |---|---:|---|---|
 | `POST /auth/demo-session` | 1 | `paths/auth.yaml` | PR1 |
+| `POST /auth/takeover` | 1 | `paths/auth.yaml` | **v0.2** |
 | `POST /auth/logout` | 1 | `paths/auth.yaml` | PR1 |
 | `POST /auth/stream-ticket` | 1 | `paths/auth.yaml` | PR1 |
 | `GET /demo/profiles` | 1 | `paths/profiles.yaml` | PR5 |
@@ -139,6 +189,46 @@ cuando exista un diseño que lo congele: pings, matches, chat, block, report y
 | `GET /demo/regions`, `GET /demo/zones` | 2 | `paths/catalog.yaml` | PR4 |
 | `PUT /presence`, `DELETE /presence` | 2 | `paths/presence.yaml` | PR6 |
 | `GET /discovery` | 3 | `paths/discovery.yaml` | PR6 |
+
+## Ocupación y takeover (delta v0.2)
+
+La demo de Sprint 1 tiene selector de perfiles: hay que ver "en uso" **antes** de
+intentar reclamar, y hay que poder desalojar. v0.1 no modelaba ninguna de las dos
+cosas, así que el cliente sólo descubría la ocupación comiendo un `409` y no
+tenía forma de desalojar sin mentir. El delta es chico y no cambia ningún DTO
+existente:
+
+| Pieza | Forma | Qué resuelve |
+|---|---|---|
+| `ProfileSummary.inUse` | `boolean` obligatorio | El selector pinta "en uso" con una sola lectura |
+| `POST /auth/takeover` | body `{ regionKey, demoSlot }` → 200 `DemoSession` | El desalojo es explícito y con sujeto |
+
+Reglas que el contrato fija y el server no puede reinterpretar:
+
+| Caso | Respuesta | Por qué |
+|---|---|---|
+| slot ocupado por otra sesión viva | **200** `DemoSession` | El token nuevo es el único que sirve: el anterior queda revocado en el acto y sus tickets se queman |
+| slot libre | **200** `DemoSession` | La postcondición ("ocupás el slot") se cumple igual; `inUse` es una foto y la carrera es benigna |
+| slot ocupado por la **propia** sesión | **409** `PROFILE_IN_USE` | No hay nada que desalojar y "renovar" el token apagaría la credencial en uso |
+| `regionKey` distinta a la de la sesión | **403** `REGION_MISMATCH` | Un takeover nunca cruza regiones, ni siquiera para "liberar" |
+| body inválido o slot sin perfil | **422** `VALIDATION_FAILED` | Es schema, no estado |
+| sin token | **401** `UNAUTHENTICATED` | El takeover hereda `demoSession`: el desalojo tiene sujeto |
+
+**Por qué `inUse` no está en el seed.** `catalog/profiles.*.json` es data
+congelada y determinista; la ocupación es estado que cambia con cada login. Si
+`inUse` viviera en el catálogo, `contract:seed:check` fallaría en cada sesión
+abierta. Por eso `fixtures-parity` separa las 16 claves del seed de las 17 de la
+respuesta (`inUse` es la única respuesta-only).
+
+**Por qué takeover es una operation y no un flag.** Un `takeover: true` dentro de
+`DemoSessionRequest` convierte el claim en un desalojo opcional y el cliente que
+lo olvida descubre el bug en producción. Como operation aparte, el contrato
+obliga a nombrar el slot y a elegir el verbo: `demo-session` dice "dale, sin
+desalojar"; `takeover` dice "este slot es mío". `POST /auth/demo-session` sobre un
+slot ocupado sigue siendo `409 PROFILE_IN_USE`.
+
+`inUse` viaja también en `DiscoveryResult`, que reusa `ProfileSummary`: es el
+mismo dato (¿hay alguien en ese slot?) y no se agrega un DTO nuevo para esconderlo.
 
 ## Regiones y zonas: la geometría existe y nunca viaja
 
@@ -191,6 +281,101 @@ no resuelve límites administrativos.
    sea de la misma región.
 3. `npm run contract:test`. Nada del spec cambia: `ZoneSummary` ya la proyecta.
 
+## Perfiles: 20 filas y la paridad con fixtures
+
+`GET /demo/profiles` devuelve los 10 perfiles de una región, ordenados por
+`demoSlot`. La fila es `ProfileSummary`: los 13 campos del dataset más
+`regionKey`, `demoSlot`, `sourceType` y —desde v0.2— `inUse`, que es estado de
+runtime y no está en el seed (ver [Ocupación y takeover](#ocupación-y-takeover-delta-v02)).
+
+| Archivo | Filas | De dónde sale |
+|---|---:|---|
+| `catalog/profiles.mx.json` | 10 | **derivado** de `demo/shared/fixtures.json` → `profiles[i]`, posición por posición |
+| `catalog/profiles.co.json` | 10 | **autorado**: mismo shape, otros valores, `profileId` distintos |
+| `schemas/profile.yaml` | — | `ProfileSummary`, `ProfileList`, `SelfProfile` |
+
+Quién manda en cada campo:
+
+| Campo | Origen |
+|---|---|
+| los 13 del dataset (`nickname`, `initials`, `intention`, `gender`, `verified`, `online`, `distanceM`, `bearingDeg`, `photoId`, `instagramHandle`, `statusKey`, `bioKey` y el `id`) | **`fixtures.json` gana**: el catálogo no puede cambiar el valor |
+| `profileId` | `"{regionKey}-" + fixtures.profiles[i].id` (`mx-p01`), la identidad que usan los eventos |
+| `regionKey`, `demoSlot` (`i + 1`), `sourceType: human` | los agrega el contrato |
+
+`contract/test/fixtures-parity.test.mjs` no comprueba que el campo exista:
+compara el valor, y cuando difiere falla con perfil, campo y ambos valores. El
+mapping es una tabla de datos, así que además falla si `fixtures.json` estrena un
+campo sin entrada en la tabla (el catálogo se quedaría sin ese dato en silencio).
+
+Reglas que el catálogo cumple y el test congela:
+
+- 10 filas por región, `demoSlot` 1..10 sin huecos ni repetidos, `sourceType: human`.
+- los 20 `profileId` son únicos; `mx` y `co` no comparten ninguno.
+- cada intención (`networking`, `friendship`, `activities`) la usan ≥2 perfiles por región y los 3 géneros aparecen.
+- **sin objeto `avatar`**: la foto se resuelve por `photoId` contra el bundle de la demo, así el catálogo no duplica los datos del avatar.
+- `ProfileSummary` cierra con `additionalProperties: false` y declara exactamente esas 16 claves más `inUse`: un campo que no existe en el schema no llega a la respuesta, y `inUse` no llega al catálogo.
+
+Los invitados no están en el catálogo: son sesión de relleno, no perfiles
+descubribles. `demoSlot: null` está en el schema porque `SourceType` lo admite,
+pero ninguna de las 20 filas es `guest`.
+
+### Cómo cambiar un perfil
+
+1. Si es de `mx`, el valor se cambia **en `demo/shared/fixtures.json`** y se
+   regenera el catálogo. Editar `profiles.mx.json` a mano rompe la paridad.
+2. Si es de `co`, se edita `profiles.co.json` respetando el shape y la cobertura.
+3. `npm run contract:test`. El schema no cambia: `ProfileSummary` ya lo proyecta.
+
+## Seeds deterministas
+
+El seed **es** el catálogo emitido. `npm run contract:seed` escribe los cuatro
+archivos de `catalog/` en una forma única y `seed/manifest.json` con lo que emitió:
+
+| Archivo | Forma | `rows` |
+|---|---|---:|
+| `catalog/regions.json` | una fila por línea, claves ordenadas, orden `(regionKey)` | 2 |
+| `catalog/zones.json` | una zona por línea, vértices `[lng, lat]` con **6 decimales** | 2 |
+| `catalog/profiles.mx.json`, `catalog/profiles.co.json` | una fila por línea, orden `(regionKey, demoSlot)` | 10 + 10 |
+
+`seed/manifest.json`:
+
+| Campo | Qué ata |
+|---|---|
+| `seedVersion` | versión del **formato** (sube cuando cambia la forma, no los datos) |
+| `contractId` | el `x-contract-id` vigente: el seed y el contrato no pueden desincronizarse |
+| `sources.fixtures.sha256` | el hash de `demo/shared/fixtures.json` con LF: tocarlo sin regenerar rompe el gate |
+| `files[{ path, rows, sha256 }]` | qué se emitió; `path` relativo a `contract/` |
+| `seedId` | `seed-` + 12 hex de lo emitido (sin incluirse a sí mismo) |
+
+| Comando | Qué hace | Exit |
+|---|---|---:|
+| `npm run contract:seed` | emite y escribe; muestra la tabla con el estado previo | 0 |
+| `npm run contract:seed:check` | compara lo emitido con lo commiteado | 1 si hay `drift` o `nuevo` |
+| `npm run contract:seed:dry-run` | imprime la tabla y **no escribe nada** | 0 |
+
+La tabla es `path | rows | sha | estado` y el estado es uno de `sin cambios`,
+`drift` (existe y difiere) o `nuevo` (falta). `contract:check` corre
+`contract:seed:check` antes de los tests: un manifest viejo invalida cualquier
+verde posterior.
+
+**Qué se prueba:** dos emisiones producen bytes idénticos y el mismo `seedId`
+(`test/seed-idempotent.test.mjs`, emitiendo a dos directorios temporales). Eso es
+idempotencia de **emisión**, una función pura del input.
+
+**Qué no se prueba todavía:** la idempotencia de **inserción**. No hay DB en
+Sprint 0, así que cualquier `INSERT` acá sería una invención. En Sprint 1 se
+garantiza por claves naturales — `region_key + zone_key` para zonas y
+`region_key + demo_slot` para perfiles — con `ON CONFLICT DO NOTHING`. El seed ya
+trae esas dos claves: es lo único que S1 tiene que agregar al esquema.
+
+### Cómo regenerar el seed
+
+1. Cambiá el catálogo (o `fixtures.json`, si es un perfil `mx`).
+2. `npm run contract:seed`.
+3. Revisá el `git diff`: si aparece un archivo entero reescrito, es que el input
+   no estaba canónico. `--check` lo habría detectado igual.
+4. `npm run contract:check` y commiteá catálogo + manifest juntos.
+
 ## Eventos: envelope y replay
 
 Un solo envelope para las dos proyecciones. `GET /events` (SSE) y
@@ -208,9 +393,23 @@ dos son funciones puras del mismo archivo.
 | Cursor viejo / malformado | 410 `CURSOR_EXPIRED` / 422 `VALIDATION_FAILED` (no hay 400) |
 | Ticket | `streamTicket` en query, **sólo** en `GET /events`: `EventSource` no manda headers |
 
-`contract/event/sample-log.json` es un fixture congelado (40 entradas: 24 `seq`
-de `mx`, 15 de `co` y un duplicado). Todavía no se regenera desde el catálogo: el
-generador y el test de bytes llegan con los perfiles (PR5).
+`contract/event/sample-log.json` es **derivado**, no escrito a mano: lo emite
+`scripts/event-log.mjs` desde `catalog/profiles.*.json`. Cada entrada referencia un
+perfil real y copia sus valores (`distanceM`/`bearingDeg`, `online`), así que editar
+un perfil sin regenerar el log rompe `contract:event-log:check` (y el test de
+bytes). El fixture conserva lo que PR3 congeló: 40 entradas, 24 `seq` de `mx` y 15
+de `co`, un duplicado exacto de `mx:000000000007` y el quinto evento de `mx` con
+`occurredAt` anterior al anterior (`17:59:50`, el reloj no ordena).
+
+### Cómo regenerar el log de eventos
+
+1. Cambiá el catálogo (o `fixtures.json`, y después `npm run contract:seed`).
+2. `npm run contract:event-log`.
+3. `npm run contract:event-log:check` y `npm run contract:test`.
+4. Commiteá catálogo, manifest y log juntos: el test compara bytes, no fechas.
+
+Si lo que querés es más o menos volumen, la agenda está en `TRACK` dentro de
+`scripts/event-log.mjs` — no se edita el JSON.
 
 ### Cómo agregar un tipo de evento
 
@@ -218,8 +417,118 @@ generador y el test de bytes llegan con los perfiles (PR5).
    sumalo ahí: el enum es el contrato con el cliente.
 2. Declarar `<Tipo>Payload` con `additionalProperties: false` — sin `lat`, `lng`,
    `latitude` ni `longitude`; distancia y rumbo van como `distanceM`/`bearingDeg`.
-3. Sumarlo al `oneOf` de `EventPayload`. El envelope **no** cambia.
+3. Sumarlo al `oneOf` de `EventPayload` y montarlo en `components.schemas`. El
+   envelope **no** cambia.
 4. Extender `PAYLOAD_SCHEMA` en `contract/test/events-contract.test.mjs`.
+
+## Presencia y descubrimiento: la coordenada entra, no sale
+
+`PUT /presence` es la **única** entrada del contrato que acepta coordenadas.
+`GET /discovery` mide desde esa presencia y devuelve perfiles, nunca el punto.
+
+| Pieza | Regla |
+|---|---|
+| `PUT /presence` | acepta `point` **o** `demoZoneKey`, exactamente uno; los dos o ninguno es 422 |
+| `point` | `lat` + `lng` en grados decimales; se redondea a 6 decimales antes de `ST_Covers` |
+| región y zona | el server las deriva con `ST_Covers` contra `catalog/zones.json`; el contrato describe el resultado, no el algoritmo |
+| fallback | punto fuera de todo polígono → 200 con `fallbackRequired: true` y `zoneKey: null`; **no** es un `Problem` |
+| `DELETE /presence` | 204, o 409 `PRESENCE_STALE` si no había presencia viva |
+| `GET /discovery` | `radiusM` 200–5000 (default 5000), `intention`, `gender`, `verified`, `online` |
+| fila del resultado | `ProfileSummary`: descubrir no agrega campos, mide |
+| distancia | `distanceM` y `bearingDeg` server-side, redondeados al metro y al grado (half-up) |
+| exclusiones | el propio perfil, los bloqueados, los pausados y los perfiles de otra región |
+| sin implementar | en S1/S2, `GET /discovery` responde 501 `NOT_IMPLEMENTED` |
+
+**Por qué el request no está en `components.schemas`.** `PresenceUpdate` y
+`PrivatePoint` viven en `schemas/presence.yaml` pero **no** se montan en
+`openapi.yaml`. Montarlos los metería en `components.schemas`, que es la
+superficie que `zones-geometry.test.mjs` recorre entera: el guard fallaría —con
+razón— al ver un `lat`. La frontera no es "no hay coordenadas en el repo", es
+"ninguna coordenada puede salir"; poner el punto del lado de la entrada y dejar
+`components` del lado de la salida es lo que hace que el guard siga cerrado sin
+excepciones. El `requestBody` lo referencia directo, que es donde se usa.
+
+**El 422 de presencia lleva dos `code`.** `VALIDATION_FAILED` si el body no trae
+exactamente uno de `point`/`demoZoneKey`, `ZONE_UNKNOWN` si la zona no existe en
+el catálogo. El status es uno y `Problem.code` discrimina; por eso `x-error-code`
+acepta una lista (ver [Reglas de la casa](#reglas-de-la-casa)).
+
+### Cómo agregar un filtro de descubrimiento
+
+1. Sumar la propiedad a `DiscoveryQuery` en `schemas/discovery.yaml`.
+2. Sumar el parámetro con el mismo nombre, tipo, borde, `default` y `enum` en
+   `paths/discovery.yaml`. El test falla si las dos listas difieren.
+3. `npm run contract:test`. Si el filtro necesita datos que `ProfileSummary` no
+   tiene, primero se agrega al dataset y al catálogo (no al response).
+
+
+## Cliente TypeScript: generado, commiteado, sin runtime
+
+`contract/generated/api.ts` es el contrato con tipos. S3 lo importa; no hay
+cliente HTTP, ni hooks, ni cliente mock: eso lo pone la app, porque ningún
+generador sabe si la demo corre contra el mock o contra el server.
+
+| Pieza | Regla |
+|---|---|
+| Origen | sólo `openapi.yaml`; `openapi-typescript` **pinneado exacto** en `package.json` |
+| Header | versión del generador instalada + `x-contract-id` vigente, sin timestamps |
+| Formato | LF, claves en el orden del spec: dos corridas dan los mismos bytes |
+| Runtime | cero: el archivo no importa ni ejecuta nada (un test lo verifica) |
+| Gate | `contract:generate:check` compara **bytes**; `git diff --exit-code` es la red secundaria |
+| Tipos | `paths`, `components` (con `schemas`, `responses`, `securitySchemes`) y `operations` |
+| Compilación | `contract/tsconfig.json`: `strict`, `exactOptionalPropertyTypes`, `noEmit`, sólo `generated/` |
+
+### Cómo regenerar el cliente
+
+1. Cambiá el spec (`openapi.yaml`, `paths/`, `schemas/`).
+2. `npm run contract:validate` → si el `x-contract-id` cambió, copialo al spec y
+   repetí hasta que valide.
+3. `npm run contract:generate`.
+4. `npm run contract:typecheck` (tiene que compilar en `strict`).
+5. `npm run contract:check` y commit del spec **y** del generado juntos.
+
+### Cuando el gate de drift falla
+
+`contract:generate:check` falla en tres casos, y el mensaje dice cuál:
+
+| Caso | Qué hacer |
+|---|---|
+| falta `generated/api.ts` | `npm run contract:generate` |
+| el archivo difiere del regenerado | `npm run contract:generate` y commitear; **nunca** editar a mano |
+| difiere sólo en el header | el `x-contract-id` cambió: regenerá después de que `contract:validate` esté verde |
+
+Si después de regenerar el comando sigue fallando, el problema no es el archivo:
+es que el generador no es determinista. En ese caso **pará** y reportalo — un gate
+de drift inestable es peor que no tener gate, porque enseña a ignorarlo.
+
+## Los cinco gates de Sprint 0
+
+`npm run contract:gates` corre los cinco y reporta pass/fail por gate con exit code
+agregado. No corta en el primero: el reporte muestra el estado real de todos.
+
+```text
+G1 · el contrato compila y el cliente TS se genera
+   ✓ contract:validate · contract:generate:check · contract:typecheck
+G2 · los seeds corren dos veces sin duplicar
+   ✓ seed-idempotent · contract:seed:dry-run
+G3 · ningún DTO expone coordenadas
+   ✓ no-coordinates
+G4 · el mock sigue intacto y publicable
+   ✓ validate · sync:check · test:scripts · diff demo/ site/ · assemble --strict
+G5 · sin secretos ni configuración de Firebase
+   ✓ secrets
+```
+
+| Gate | Qué lo prueba |
+|---|---|
+| 1. Contrato compila y cliente se genera | `contract:validate` + `contract:generate:check` + `contract:typecheck` |
+| 2. Seeds dos veces sin duplicar | `seed-idempotent.test.mjs` + `contract:seed:dry-run` |
+| 3. Ningún DTO expone coordenadas | `no-coordinates.test.mjs` (walk de responses + eventos) |
+| 4. Mock intacto y publicable | `validate` + `sync:check` + `test:scripts` + `git diff -- demo site` + `assemble --strict` |
+| 5. Sin secretos ni Firebase | `secrets.test.mjs` (denylist compartida + claves de Firebase) |
+
+`contract:gates` es para el verify y para leer el estado de un vistazo;
+`contract:check` sigue siendo el gate que corre CI y que bloquea el merge.
 
 ## `x-contract-id`
 
@@ -244,30 +553,46 @@ Consecuencias que importan al revisar:
    los nombres del dataset (no `distanceMeters`, no `intent`).
 4. Agregar la fila a `EXPECTED_OPERATIONS` en `contract/test/spec-valid.test.mjs`.
 5. `npm run contract:validate` → copiar el `x-contract-id` que imprime.
-6. Regenerar el cliente (PR8) y cerrar con `npm run contract:check`.
+6. `npm run contract:generate && npm run contract:typecheck` y cerrar con
+   `npm run contract:check`. El cliente commiteado es parte del cambio, no un
+   artefacto que se genera después.
+7. Si la operation nueva trae coordenadas de entrada, montarla fuera de
+   `components.schemas` como `PresenceUpdate`: ver [Cliente TypeScript](#cliente-typescript-generado-commiteado-sin-runtime).
 
 ## Reglas de la casa
 
 - **`additionalProperties: false`** en todo DTO de respuesta. Un campo que no está
   declarado no viaja.
+- **El generado no se edita.** `generated/api.ts` y `event/sample-log.json` se
+  regeneran con `contract:generate` y `contract:event-log`; los gates comparan
+  bytes, así que una edición a mano no sobrevive ni al primer `contract:test`.
 - **Sprint por operation.** `x-implementation-sprint` ∈ {1,2,3}. Ninguna operation
   declara 0, 4 o 5.
 - **Errores en `application/problem+json`** (RFC 9457) con `code` del enum cerrado.
-  Entran en PR2; por eso `operation-4xx-response` está en `off` en `redocly.yaml`
-  y se reactiva con el catálogo.
-- **Nunca coordenadas.** Ningún response ni payload de evento puede alcanzar
-  `lat`/`lng`/`latitude`/`longitude` ni un par `[n, n]`. Los polígonos viven sólo
-  en `contract/catalog/zones.json`, fuera del spec y sin keys (ver
-  [Regiones y zonas](#regiones-y-zonas-la-geometría-existe-y-nunca-viaja)).
+  `operation-4xx-response` está activa en `redocly.yaml`, pero su severidad es
+  `warning`: el gate duro son los tests "toda operation declara ≥1 error 4xx/5xx" y
+  "ningún código no reservado queda huérfano".
+- **`x-error-code` es un string o una lista.** Un status puede volver con más de un
+  `code` (los dos del `streamTicket`, los dos del 422 de presencia) y `Problem.code`
+  es el discriminante. La lista es lo que permite que la regla de huérfanos vea
+  `TICKET_EXPIRED` y `ZONE_UNKNOWN` como usados de verdad.
+- **Nunca coordenadas a la salida.** Ningún response ni payload de evento puede
+  alcanzar `lat`/`lng`/`latitude`/`longitude` ni un par `[n, n]`. Los polígonos
+  viven sólo en `contract/catalog/zones.json`, y el punto privado de
+  `PUT /presence` vive fuera de `components.schemas` (ver
+  [Presencia y descubrimiento](#presencia-y-descubrimiento-la-coordenada-entra-no-sale)).
 - **Sin `/v1`.** El versionado vive en `info`, no en el path.
 - **`Page` es metadata, no wrapper.** `allOf` + `additionalProperties: false`
   bloquea campos hermanos: las proyecciones declaran sus campos planos.
 
 ## Límites conocidos
 
-- El cliente `generated/api.ts` es **type-only** y llega en PR8: S3 necesita igual
-  un wrapper `fetch` con selector mock/live que ningún generador produce.
+- El cliente `generated/api.ts` es **type-only**: S3 necesita igual un wrapper
+  `fetch` con selector mock/live que ningún generador produce. Los tipos están;
+  el transporte lo pone la app.
 - `contract/catalog/` no se sirve nunca a clientes: sólo se exponen proyecciones
   (`ZoneSummary`, DTOs de perfil).
-- Idempotencia de **emisión** de seeds es S0; la de **inserción** es Sprint 1
-  (claves naturales + `ON CONFLICT DO NOTHING`). PR7 lo documenta acá.
+- La idempotencia de **emisión** de seeds es S0; la de **inserción** es Sprint 1
+  (claves naturales + `ON CONFLICT DO NOTHING`). Ver [Seeds deterministas](#seeds-deterministas).
+- El log de eventos prueba paridad de **proyección** (SSE ≡ poll sobre el mismo
+  archivo). Que el server de S2 emita esos `seq` es su gate, no el de S0.

@@ -130,6 +130,79 @@ Tests del tooling Node (denylist del artefacto, allowlist acotada del loader de 
 npm run test:scripts
 ```
 
+### Modo live (backend local)
+
+**Resultado:** la misma demo con el descubrimiento del backend, sin cambiar el
+artefacto publicado. **Con API configurada la sesión arranca sola**: no hay
+switch Mock/Live. Sin API (ni `EXPO_PUBLIC_API_URL` ni `?api=`) la barra no se
+monta y el build queda igual que siempre: dataset del build, cero llamadas de red.
+Si la API falla, la app sigue con el dataset y muestra el aviso.
+
+```bash
+# 1. backend (otra terminal)
+cd backend && docker compose -f compose.yml -f compose.dev.yml up --build -d
+
+# 2. build web con el modo live habilitado
+cd demo/expo-demo
+EXPO_PUBLIC_API_URL=http://localhost:3000 EXPO_BASE_URL="" npx expo export --platform web --output-dir dist
+npm run serve:dist          # http://localhost:8081
+
+# 3. abrir http://localhost:8081 (la sesión live arranca sola)
+```
+
+| Pieza | Qué usa | Detalle |
+|---|---|---|
+| Base de la API | `?api=` > `localStorage` > `EXPO_PUBLIC_API_URL` | Un túnel cambia de URL sin rebuild |
+| Región | `EXPO_PUBLIC_DEMO_REGION` | Default `mx`. No hay selector de país |
+| Sesión | `POST /auth/demo-session` | Token **en memoria**; refresh = sesión nueva |
+| Presencia | `PUT /presence` cada 8 s | Punto del GPS o `demoZoneKey`; el TTL es 12 s |
+| Ubicación | `navigator.geolocation` (una vez) | Si se niega o no hay HTTPS, zona demo; "Usar mi ubicación" reintenta |
+| Descubrimiento | `GET /discovery` | Radio y filtros server-side; medidas `distanceM`/`bearingDeg` |
+| Actualización | `GET /events` (SSE, ticket) | Fallback a `GET /events/poll?cursor=` con dedupe por `seq` |
+| Selector de perfil | `GET /demo/profiles` | Muestra `inUse`; claim libre y takeover **confirmado** |
+| Falla | — | Si la API no responde, vuelve al dataset con un aviso visible |
+
+El modo live **no se publica**: `/expo/` sigue siendo el artefacto sin red. El puerto
+8081 está en la allowlist de CORS del backend (junto con 4173 y 8080 y los túneles
+de desarrollo, ver más abajo).
+
+#### Probar desde el móvil con un túnel (ngrok)
+
+Sirve para probar con la ubicación real del teléfono. El túnel de la **página** es
+el que tiene que entrar en CORS (ver `backend/README.md`): el navegador compara el
+origen de la página contra lo que declara la API.
+
+```bash
+# 1. backend en el compose (ya expone :3000 en el host)
+cd backend && docker compose -f compose.yml -f compose.dev.yml up --build -d
+
+# 2. túnel de la API (queda https://<algo>.ngrok-free.app → localhost:3000)
+ngrok http 3000
+
+# 3. build web que se sirve en 8081 y túnel de la página
+cd demo/expo-demo
+EXPO_PUBLIC_API_URL=https://<api>.ngrok-free.app EXPO_BASE_URL="" npx expo export --platform web --output-dir dist
+npm run serve:dist          # http://localhost:8081
+# en otra terminal:
+ngrok http 8081
+
+# 4. abrir en el móvil https://<pagina>.ngrok-free.app/?api=https://<api>.ngrok-free.app
+```
+
+`?api=` viaja en la URL de la página y queda guardado en `localStorage`, así que
+las siguientes visitas no necesitan la query. `?api=off` borra el override y
+vuelve a la base del build. Sólo se aceptan `http(s)://`: cualquier otra cosa se
+descarta en silencio.
+
+> El GPS sólo funciona en contexto seguro (HTTPS o `localhost`). Un túnel HTTPS
+> cumple; `http://192.168.x.x:8081` no, y ahí la app cae a la zona demo.
+
+Smoke real del flujo con el **mismo** cliente, sin navegador:
+
+```bash
+EXPO_PUBLIC_API_URL=http://localhost:3000 LIVE_SMOKE=1 npm --prefix demo/expo-demo run smoke:live
+```
+
 > **Git Bash / MSYS**: `EXPO_BASE_URL=/expo` y `--base-href "/flutter/"` se reescriben a
 > rutas de Windows. Prefijá el comando con `MSYS_NO_PATHCONV=1` (o usá PowerShell/cmd).
 > El export imprime `Using (experimental) base path: ...`; verificá que diga `/expo` y no

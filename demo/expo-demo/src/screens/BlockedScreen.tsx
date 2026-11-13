@@ -17,7 +17,7 @@ import { EmptyState } from '../components/EmptyState';
 export function BlockedScreen() {
   const { state, dispatch } = useDemo();
   const profiles = state.blocked.flatMap((id) => {
-    const profile = profileById(id);
+    const profile = profileById(id, state.catalog);
     return profile === null ? [] : [profile];
   });
 

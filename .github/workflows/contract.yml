@@ -47,10 +47,17 @@ jobs:
       - name: Install tooling
         run: npm ci
 
-      # validate → test → git diff --exit-code. El detalle vive en el script,
-      # no en el YAML: el workflow no duplica pasos del gate.
+      # validate → generate:check → seed:check → event-log:check → test → typecheck
+      # → git diff. El detalle vive en el script, no en el YAML: el workflow no
+      # duplica pasos del gate.
       - name: Contract gate
         run: npm run contract:check
+
+      # El gate de drift del cliente corre explícito además de dentro de
+      # contract:check: es el que rompe cuando alguien edita el generado a mano, y
+      # en el log de CI tiene que verse como paso propio.
+      - name: Client drift gate
+        run: npm run contract:generate:check
 
       # El contrato vive al lado del tooling de la demo: si este workflow corre,
       # el mock tiene que seguir verde.

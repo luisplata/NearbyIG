@@ -7,9 +7,14 @@
  * de `scripts/lib/events.mjs` son puras, así que SSE ≡ polling se prueba hoy y
  * obliga al server de S2, sin esperar a que exista.
  *
- * Válvula aplicada en este PR: el envelope, los 6 tipos y los payloads de S2
- * (`profile.moved`, `profile.presence`) entran acá; los cuatro payloads de S4/S5
- * los suma PR6 (design D7). El log sólo usa los dos tipos ya declarados.
+ * El archivo no se escribe a mano: lo deriva `scripts/event-log.mjs` del catálogo
+ * (task 5.6, cerrada en PR8). Los últimos dos casos lo atan al seed —bytes y
+ * valores— para que editar un perfil sin regenerar el log rompa el gate.
+ *
+ * Válvula aplicada en PR3: el envelope, los 6 tipos y los payloads de S2
+ * (`profile.moved`, `profile.presence`) entraron ahí; los cuatro payloads de S4/S5
+ * los sumó PR6 (design D7), así que la unión ya está completa y el log sigue usando
+ * sólo los dos tipos que S2 emite.
  */
 
 import assert from 'node:assert/strict';
@@ -24,9 +29,14 @@ import {
   toPollPage,
   toSseFrames,
 } from '../scripts/lib/events.mjs';
+import { computeEventLog } from '../scripts/event-log.mjs';
 import { listOperations, loadSpec } from '../scripts/lib/spec.mjs';
 
-const LOG = JSON.parse(readFileSync(new URL('../event/sample-log.json', import.meta.url), 'utf8'));
+const LOG_URL = new URL('../event/sample-log.json', import.meta.url);
+const LOG = JSON.parse(readFileSync(LOG_URL, 'utf8'));
+const CATALOG = ['mx', 'co'].flatMap((regionKey) =>
+  JSON.parse(readFileSync(new URL(`../catalog/profiles.${regionKey}.json`, import.meta.url), 'utf8')),
+);
 const SPEC = loadSpec().spec;
 const REGIONS = ['mx', 'co'];
 
@@ -42,6 +52,10 @@ const ENVELOPE_TYPES = [
 const PAYLOAD_SCHEMA = {
   'profile.moved': 'ProfileMovedPayload',
   'profile.presence': 'ProfilePresencePayload',
+  'ping.received': 'PingReceivedPayload',
+  'match.created': 'MatchCreatedPayload',
+  'message.created': 'MessageCreatedPayload',
+  'typing.started': 'TypingStartedPayload',
 };
 const COORDINATE_KEY = /^(?:lat|lng|lon|latitude|longitude)$/i;
 const RFC3339_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -113,8 +127,35 @@ test('todo evento cumple el envelope y su payload, sin coordenadas', () => {
   }
 
   const used = [...new Set(LOG.map((event) => event.type))].sort();
-  assert.deepEqual(used, Object.keys(PAYLOAD_SCHEMA).sort(), 'el log sólo usa los tipos implementados en S2');
-  assert.equal(SPEC.components.schemas.EventPayload.oneOf.length, 2, 'PR6 suma los payloads de S4/S5');
+  assert.deepEqual(used, ['profile.moved', 'profile.presence'], 'el log sólo usa los tipos que emite S2');
+  assert.equal(
+    SPEC.components.schemas.EventPayload.oneOf.length,
+    Object.keys(PAYLOAD_SCHEMA).length,
+    'la unión cubre los seis tipos del enum: S4/S5 agregan campos, no uniones',
+  );
+});
+
+test('los seis payloads cierran y ninguno lleva coordenadas', () => {
+  for (const [type, name] of Object.entries(PAYLOAD_SCHEMA)) {
+    const schema = SPEC.components.schemas[name];
+
+    assert.ok(schema, `${type}: falta ${name} en components.schemas`);
+    assert.equal(schema.type, 'object', `${type}: el payload es un objeto`);
+    assert.equal(schema.additionalProperties, false, `${type}: el payload tiene que cerrar`);
+    assert.ok((schema.required ?? []).length > 0, `${type}: un payload sin required acepta {}`);
+
+    for (const field of Object.keys(schema.properties ?? {})) {
+      assert.ok(!COORDINATE_KEY.test(field), `${type}: el payload expone ${field}`);
+    }
+
+    // Un payload de S4/S5 que todavía no se emite tampoco puede arrastrar la
+    // geometría que el envelope nunca lleva.
+    assert.deepEqual(
+      Object.keys(schema.properties ?? {}).filter((field) => /^(?:polygon|center|geometry)$/i.test(field)),
+      [],
+      `${type}: el payload nombra geometría`,
+    );
+  }
 });
 
 test('seq es monotónico por región y occurredAt no ordena', () => {
@@ -249,4 +290,43 @@ test('el contrato declara SSE y polling como dos vistas del mismo envelope', () 
   const envelope = SPEC.components.schemas.EventEnvelope;
   assert.equal(envelope.additionalProperties, false);
   assert.deepEqual([...envelope.required].sort(), ENVELOPE_KEYS);
+});
+
+test('el log commiteado es el derivado del catálogo, byte a byte (task 5.6)', () => {
+  const derived = computeEventLog();
+  const committed = readFileSync(LOG_URL, 'utf8').replace(/\r\n/g, '\n');
+
+  assert.equal(
+    committed,
+    derived.text,
+    'el log no es el derivado del catálogo: corré `npm run contract:event-log` y commiteá el resultado',
+  );
+  assert.equal(derived.log.length, 40, 'la agenda sigue emitiendo 40 entradas');
+  assert.equal(derived.contractId, SPEC.info['x-contract-id'], 'el log no declara el contrato vigente');
+});
+
+test('los valores de cada evento salen del perfil que nombran', () => {
+  const byId = new Map(CATALOG.map((profile) => [profile.profileId, profile]));
+
+  // El log no es un fixture suelto: cubre los 20 perfiles del catálogo.
+  assert.deepEqual(
+    [...new Set(LOG.map((event) => event.payload.profileId))].sort(),
+    [...byId.keys()].sort(),
+    'el log tiene que referenciar todos los perfiles del catálogo',
+  );
+
+  for (const event of LOG) {
+    const profile = byId.get(event.payload.profileId);
+    assert.ok(profile, `${event.id}: ${event.payload.profileId} no está en el catálogo`);
+    assert.equal(event.id.startsWith(`${profile.regionKey}:`), true, `${event.id}: perfil de otra región`);
+
+    if (event.type === 'profile.moved') {
+      assert.equal(event.payload.distanceM, profile.distanceM, `${event.id}: distanceM inventado`);
+      assert.equal(event.payload.bearingDeg, profile.bearingDeg, `${event.id}: bearingDeg inventado`);
+      continue;
+    }
+
+    assert.equal(event.type, 'profile.presence', `${event.id}: tipo fuera de la agenda`);
+    assert.equal(event.payload.online, profile.online, `${event.id}: online inventado`);
+  }
 });

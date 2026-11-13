@@ -1,0 +1,81 @@
+# Stack de la demo: PostGIS + migraciones/seed one-shot + API.
+#
+#   cp .env.example .env
+#   docker compose up --build -d
+#
+# Producción/local "serio": imagen multi-stage, usuario no-root, sin bind mounts.
+# Para desarrollar con watch y debug, sumá `compose.dev.yml`:
+#   docker compose -f compose.yml -f compose.dev.yml up --build -d
+#
+# Nada de secretos reales acá: los valores de abajo son defaults de desarrollo y
+# se pueden pisar desde `.env` (ignorado por git).
+name: nearbyig
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nearbyig}
+      POSTGRES_USER: ${POSTGRES_USER:-nearbyig}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nearbyig}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `-h 127.0.0.1` a propósito: durante la inicialización de la imagen,
+      # Postgres escucha sólo por socket UNIX y un `pg_isready` sin host da
+      # "healthy" antes de que el puerto TCP esté abierto.
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  # One-shot: aplica migraciones y seeds y termina. Si falla, `api` no arranca
+  # (`condition: service_completed_successfully`), así nunca hay API contra un
+  # esquema a medio migrar.
+  migrate:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      target: runtime
+    image: nearbyig-api:local
+    command: ['sh', '-c', 'node scripts/migrate.mjs && node scripts/seed.mjs']
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-nearbyig}:${POSTGRES_PASSWORD:-nearbyig}@db:5432/${POSTGRES_DB:-nearbyig}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      target: runtime
+    image: nearbyig-api:local
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-nearbyig}:${POSTGRES_PASSWORD:-nearbyig}@db:5432/${POSTGRES_DB:-nearbyig}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-jwt-secret-change-me}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-7200}
+      DEFAULT_REGION_KEY: ${DEFAULT_REGION_KEY:-mx}
+    ports:
+      - '${PORT:-3000}:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/health/ready >/dev/null 2>&1 || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pgdata:

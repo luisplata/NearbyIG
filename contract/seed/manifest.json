@@ -1,0 +1,32 @@
+{
+  "contractId": "7203b8216b58",
+  "files": [
+    {
+      "path": "catalog/regions.json",
+      "rows": 2,
+      "sha256": "19007590ab23d7419fa3d77f763ab71058dbe2abf66fe40088188d4a4d51ebf3"
+    },
+    {
+      "path": "catalog/zones.json",
+      "rows": 2,
+      "sha256": "b9b69604bce315af18aa9c8a81cab3b2f40196354b02e29d3f6e6195c91f1ab5"
+    },
+    {
+      "path": "catalog/profiles.mx.json",
+      "rows": 10,
+      "sha256": "4d27629ab6141b2aa2105edac7946fdb2ce7a5fd6ddfd336699d2135590ee219"
+    },
+    {
+      "path": "catalog/profiles.co.json",
+      "rows": 10,
+      "sha256": "61ab943115e59b3bc86093350ac83d81fef50fa24050be9f44a43b490d01fe13"
+    }
+  ],
+  "seedId": "seed-19573897bae5",
+  "seedVersion": 1,
+  "sources": {
+    "fixtures": {
+      "sha256": "b6524cbb841b207cc135bd0537807fc9801a30ee244ecd012beaffad10274405"
+    }
+  }
+}

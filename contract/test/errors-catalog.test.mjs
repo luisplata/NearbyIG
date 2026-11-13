@@ -1,22 +1,23 @@
 /**
  * Catálogo de errores ↔ responses reales del contrato.
  *
- * Hoy (superficie congelada S1–S3) se exige:
+ * Se exige:
  *  - cada `ErrorCode` tiene un status HTTP 4xx/5xx en `x-status`, y el mapa y el
  *    enum listan exactamente los mismos códigos;
  *  - `x-reserved` sólo marca códigos que ninguna operation usa, y son los cuatro
  *    de S4/S5;
  *  - ninguna response usa un código ausente del enum;
  *  - todo 4xx/5xx responde `application/problem+json` con `Problem`, declara su
- *    `x-error-code` y el status coincide con `x-status`.
+ *    `x-error-code` y el status coincide con `x-status`;
+ *  - **ningún código no reservado queda huérfano**: cada uno lo usa al menos una
+ *    operation.
  *
- * Lo que NO se exige todavía, y es deliberado: la regla de huérfanos ("todo
- * código no reservado lo usa al menos una operation"). Con la superficie
- * congelada en S1–S3 no hay paths de ping, match ni chat, así que esos códigos
- * no pueden usarse aunque la spec los declare. La regla no está mal, está
- * adelantada: se activa en PR6, cuando presence y discovery cierren el uso de
- * todo lo que S1–S3 sí puede ejercer. Los cuatro de S4/S5 quedan en `x-reserved`
- * justamente para que esa regla pueda distinguirlos.
+ * La última regla se activó en PR6, cuando presence y discovery cerraron el uso
+ * de todo lo que S1–S3 puede ejercer (`RATE_LIMITED`, `PROFILE_NOT_FOUND`,
+ * `PRESENCE_STALE`, `ZONE_UNKNOWN`, `NOT_IMPLEMENTED` e `INTERNAL`). Antes era
+ * insatisfacible: con la superficie congelada no hay paths de ping, match ni
+ * chat, así que esos códigos no podían usarse. Los cuatro de S4/S5 siguen en
+ * `x-reserved` justamente para que esta regla los distinga de un olvido.
  */
 
 import assert from 'node:assert/strict';
@@ -51,14 +52,23 @@ for (const operation of operations) {
   }
 }
 
+/**
+ * Códigos de una response. `x-error-code` es un string o una lista: un status
+ * puede volver con más de un `code` (los tres 401 de credencial, los dos 422 de
+ * `PUT /presence`) y `Problem.code` es el discriminante. La lista no es azúcar:
+ * sin ella la regla de huérfanos no puede ver `TICKET_EXPIRED` ni `ZONE_UNKNOWN`,
+ * que sí existen en operations reales.
+ */
+const codesOf = (response) => [].concat(response['x-error-code'] ?? []);
+
 /** Código → operations que lo usan, para nombrar al culpable en el mensaje. */
 function codeUsers() {
   const users = new Map();
   for (const { operation, httpStatus, response } of errorResponses) {
-    const code = response['x-error-code'];
-    if (typeof code !== 'string') continue;
     const where = `${label(operation)} ${httpStatus}`;
-    users.set(code, [...(users.get(code) ?? []), where]);
+    for (const code of codesOf(response).filter((entry) => typeof entry === 'string')) {
+      users.set(code, [...(users.get(code) ?? []), where]);
+    }
   }
   return users;
 }
@@ -112,21 +122,45 @@ test('ninguna response usa un código ausente del enum', () => {
 
   const unknown = [];
   for (const { operation, httpStatus, response } of errorResponses) {
-    const code = response['x-error-code'];
-    if (typeof code !== 'string') {
+    const codes = codesOf(response);
+    if (codes.length === 0) {
       unknown.push(`${label(operation)} ${httpStatus}: falta x-error-code`);
-    } else if (!errorCode.enum.includes(code)) {
-      unknown.push(`${label(operation)} ${httpStatus}: "${code}" no está en ErrorCode`);
+      continue;
+    }
+    assert.equal(
+      new Set(codes).size,
+      codes.length,
+      `${label(operation)} ${httpStatus}: un código repetido en x-error-code`,
+    );
+    for (const code of codes) {
+      if (typeof code !== 'string' || !errorCode.enum.includes(code)) {
+        unknown.push(`${label(operation)} ${httpStatus}: "${code}" no está en ErrorCode`);
+      }
     }
   }
 
   assert.deepEqual(unknown, [], 'códigos fuera del catálogo: agregalos a schemas/errors.yaml o corregí la response');
 });
 
+test('ningún código no reservado queda huérfano', () => {
+  const users = codeUsers();
+  const orphan = errorCode.enum.filter((code) => !RESERVED[code] && !users.has(code));
+
+  assert.deepEqual(
+    orphan,
+    [],
+    `códigos sin operation: ${orphan.join(', ')} — usalos en alguna response o marcalos en x-reserved`,
+  );
+
+  // Y la otra mitad: reservado = sin uso. Si S4 cablea un path y el código sigue
+  // marcado, la reserva miente.
+  const reservedInUse = Object.keys(RESERVED).filter((code) => users.has(code));
+  assert.deepEqual(reservedInUse, [], 'un código reservado ya tiene operation: sacalo de x-reserved');
+});
+
 test('todo 4xx/5xx responde Problem y su status coincide con x-status', () => {
   for (const { operation, httpStatus, response } of errorResponses) {
     const where = `${label(operation)} ${httpStatus}`;
-    const code = response['x-error-code'];
 
     assert.deepEqual(
       Object.keys(response.content ?? {}),
@@ -139,7 +173,9 @@ test('todo 4xx/5xx responde Problem y su status coincide con x-status', () => {
       PROBLEM_FIELDS,
       `${where}: el body de error no es Problem`,
     );
-    assert.equal(STATUS_BY_CODE[code], httpStatus, `${where}: ${code} es ${STATUS_BY_CODE[code]} en x-status`);
+    for (const code of codesOf(response)) {
+      assert.equal(STATUS_BY_CODE[code], httpStatus, `${where}: ${code} es ${STATUS_BY_CODE[code]} en x-status`);
+    }
   }
 });
 

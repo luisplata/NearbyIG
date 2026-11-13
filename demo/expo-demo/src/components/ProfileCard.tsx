@@ -1,7 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
-import type { Profile } from '../generated/fixtures';
 import { formatDistance } from '../state/format';
 import type { AvatarRenderState } from '../state/types';
 import { colors, fontFamily, fontSize, radii, space } from '../theme/theme';
@@ -10,6 +9,7 @@ import { Avatar } from './Avatar';
 import { OnlineDot, VerifiedBadge } from './Badges';
 import { Icon } from './Icon';
 import { PressableRow } from './PressableRow';
+import type { UiProfile } from '../state/types';
 
 /**
  * Tarjeta de perfil de la lista. El label accesible expone nombre y distancia
@@ -20,7 +20,7 @@ export function ProfileCard({
   renderState,
   onTap,
 }: {
-  profile: Profile;
+  profile: UiProfile;
   renderState: AvatarRenderState;
   onTap: () => void;
 }) {

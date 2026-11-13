@@ -17,11 +17,22 @@
     "contract:validate": "node contract/scripts/validate-spec.mjs",
     "contract:test": "node --test \"contract/test/*.test.mjs\"",
     "contract:docs": "node scripts/build-contract-docs.mjs",
-    "contract:check": "npm run contract:validate && npm run contract:test && git diff --exit-code"
+    "contract:seed": "node contract/scripts/seed.mjs",
+    "contract:seed:check": "node contract/scripts/seed.mjs --check",
+    "contract:seed:dry-run": "node contract/scripts/seed.mjs --dry-run",
+    "contract:event-log": "node contract/scripts/event-log.mjs",
+    "contract:event-log:check": "node contract/scripts/event-log.mjs --check",
+    "contract:generate": "node contract/scripts/generate-client.mjs",
+    "contract:generate:check": "node contract/scripts/generate-client.mjs --check",
+    "contract:typecheck": "tsc -p contract/tsconfig.json",
+    "contract:gates": "node contract/scripts/gates.mjs",
+    "contract:check": "npm run contract:validate && npm run contract:generate:check && npm run contract:seed:check && npm run contract:event-log:check && npm run contract:test && npm run contract:typecheck && git diff --exit-code"
   },
   "devDependencies": {
     "@redocly/cli": "2.78.0",
     "@resvg/resvg-js": "2.6.2",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
     "yaml": "2.9.1"
   }
 }

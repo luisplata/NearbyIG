@@ -1,28 +1,36 @@
 import { fixtures } from '../generated/fixtures';
-import type { Profile } from '../generated/fixtures';
 
-import type { AvatarRenderState, DemoState } from './types';
+import type { AvatarRenderState, DemoState, UiProfile } from './types';
 
-/** Perfil por `id`, o `null` si no existe en el dataset. */
-export function profileById(id: string | null): Profile | null {
+/**
+ * Perfil por `id`, o `null` si no existe en el catálogo activo.
+ *
+ * El segundo parámetro es el dataset (`state.catalog`): el build lo deja por
+ * defecto y el modo live pasa el catálogo del backend. Sin default, cada
+ * llamada de una pantalla tendría que conocer el origen.
+ */
+export function profileById(
+  id: string | null,
+  catalog: readonly UiProfile[] = fixtures.profiles,
+): UiProfile | null {
   if (id === null) {
     return null;
   }
-  return fixtures.profiles.find((profile) => profile.id === id) ?? null;
+  return catalog.find((profile) => profile.id === id) ?? null;
 }
 
 /**
  * Perfiles visibles: sin bloqueados, dentro del radio, con los filtros activos
  * y ordenados por distancia ascendente (empatan por `id`).
  */
-export function visibleProfiles(state: DemoState): Profile[] {
+export function visibleProfiles(state: DemoState): UiProfile[] {
   // Sin filtro explícito de intención se muestran los 10 perfiles del dataset
   // (CONTRACT.md §9, punto 2). La intención propia actúa como filtro por defecto
   // sólo cuando el usuario la elige (SET_SELF_INTENTION).
   const intentions = state.filters.intentions;
   const gender = state.filters.gender;
-  const result: Profile[] = [];
-  for (const profile of fixtures.profiles) {
+  const result: UiProfile[] = [];
+  for (const profile of state.catalog) {
     if (state.blocked.includes(profile.id)) {
       continue;
     }
@@ -112,7 +120,7 @@ export type DotPosition = { x: number; y: number };
  * Posición normalizada (0..1) de un perfil en radar y mapa: proyección
  * compartida del contrato (state-machine.md §6), sin azar.
  */
-export function projectProfile(profile: Profile, radiusM: number): DotPosition {
+export function projectProfile(profile: UiProfile, radiusM: number): DotPosition {
   const ratio = radiusM <= 0 ? 1 : Math.min(profile.distanceM / radiusM, 1);
   const r = 0.42 * ratio;
   const radians = (profile.bearingDeg * Math.PI) / 180;

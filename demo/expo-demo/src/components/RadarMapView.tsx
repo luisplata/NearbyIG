@@ -4,10 +4,11 @@ import { Animated, Easing, StyleSheet, Text, View, type LayoutChangeEvent } from
 import Svg, { Path } from 'react-native-svg';
 
 import { fmt } from '../generated/copy';
-import type { Profile } from '../generated/fixtures';
 import { useReducedMotion } from '../hooks/useReducedMotion';
+import type { LngLat } from '../map/basemap';
 import { MapBasemap } from '../map/MapBasemap';
 import { showsRealTiles, type MapPhase } from '../map/mapStatus';
+import type { UiProfile } from '../state/types';
 import { colors, fontSize, fontFamily, lineHeight, mapScrim, radii, space } from '../theme/theme';
 
 import { Chip } from './Chip';
@@ -29,11 +30,14 @@ import { RadarSvg, sweepWedgePath } from './RadarSvg';
 export function RadarMapView({
   profiles,
   radiusM,
+  center,
   onOpen,
 }: {
-  profiles: Profile[];
+  profiles: UiProfile[];
   radiusM: number;
-  onOpen: (profile: Profile) => void;
+  /** Centro del basemap: la zona de la región activa. */
+  center: LngLat;
+  onOpen: (profile: UiProfile) => void;
 }) {
   const reduced = useReducedMotion();
   const spin = useRef(new Animated.Value(0)).current;
@@ -96,7 +100,7 @@ export function RadarMapView({
       <View style={side > 0 ? { width: side, height: side } : styles.hidden}>
         <MapCanvas />
 
-        <MapBasemap side={side} radiusM={radiusM} onPhaseChange={setPhase} />
+        <MapBasemap side={side} radiusM={radiusM} center={center} onPhaseChange={setPhase} />
 
         <View style={[StyleSheet.absoluteFill]} pointerEvents="none" {...decorative}>
           <RadarSvg />

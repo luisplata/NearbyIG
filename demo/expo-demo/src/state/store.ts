@@ -1,6 +1,6 @@
 import type { DemoAction } from './actions';
 import { initialState, reduce } from './reducer';
-import type { DemoEffect, DemoState } from './types';
+import type { DemoEffect, DemoSource, DemoState, UiProfile } from './types';
 import { effectTimerKey } from './types';
 
 /**
@@ -17,6 +17,15 @@ export type DemoStore = {
   cancelTimers(): void;
   dispose(): void;
   pendingTimers(): number;
+  /**
+   * Cambia el dataset activo sin pasar por el reducer.
+   *
+   * No es una acción de la máquina de estados: el catálogo no es estado de
+   * usuario (el dataset nunca lo fue, se importaba). El modo live lo reemplaza con
+   * cada foto de `/discovery`; `RESET` lo conserva. `DemoAction` sigue teniendo
+   * las 27 acciones del contrato y el golden de paridad no cambia.
+   */
+  setCatalog(catalog: readonly UiProfile[], source: DemoSource): void;
 };
 
 export function createDemoStore(initial: DemoState = initialState()): DemoStore {
@@ -82,5 +91,15 @@ export function createDemoStore(initial: DemoState = initialState()): DemoStore 
       cancelTimers();
     },
     pendingTimers: () => timers.size,
+    setCatalog: (catalog, source) => {
+      if (disposed) {
+        return;
+      }
+      if (state.catalog === catalog && state.source === source) {
+        return;
+      }
+      state = { ...state, catalog, source };
+      notify();
+    },
   };
 }

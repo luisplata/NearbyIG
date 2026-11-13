@@ -1,0 +1,20 @@
+# Contexto del build = raíz del repo. Se excluye todo salvo lo que la imagen
+# necesita: app compilada, SQL y el catálogo congelado del contrato.
+# BuildKit lee `<Dockerfile>.dockerignore` cuando el Dockerfile se pasa con `-f`.
+**
+!backend
+!backend/package.json
+!backend/package-lock.json
+!backend/tsconfig.json
+!backend/tsconfig.build.json
+!backend/src
+!backend/src/**
+!backend/sql
+!backend/sql/**
+!backend/scripts
+!backend/scripts/**
+!contract
+!contract/catalog
+!contract/catalog/**
+!contract/seed
+!contract/seed/**

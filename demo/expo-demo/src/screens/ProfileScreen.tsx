@@ -22,7 +22,7 @@ import { Chip } from '../components/Chip';
  */
 export function ProfileScreen() {
   const { state, dispatch } = useDemo();
-  const profile = profileById(state.profileId);
+  const profile = profileById(state.profileId, state.catalog);
   if (profile === null) {
     return null;
   }

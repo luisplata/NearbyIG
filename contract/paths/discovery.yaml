@@ -1,0 +1,90 @@
+# Descubrimiento (Sprint 3): quién está cerca de la sesión.
+#
+# Read-only y sin paginación: el catálogo tiene 10 perfiles por región, así que
+# una página es el resultado entero. Si S3 necesita más, se agrega cursor; hoy
+# inventarlo obligaría al cliente a paginar un array de 10.
+#
+# Los parámetros son el mismo vocabulario que `DiscoveryQuery`
+# (`schemas/discovery.yaml`), que es el objeto que consume el cliente generado.
+# Un test exige que las dos listas coincidan: nombre, tipo, borde, `default` y
+# `enum`.
+#
+# Geometría: el radio se mide desde la presencia de la sesión (`PUT /presence`) y
+# la respuesta no transporta el punto. `501 NOT_IMPLEMENTED` es el estado honesto
+# de esta operation en S1/S2: el path ya existe en el contrato y su implementación
+# llega en S3. Así `x-implementation-sprint` es accionable en vez de decorativo.
+
+discovery:
+  get:
+    operationId: listDiscovery
+    summary: Descubre perfiles cerca de la sesión
+    description: |
+      Perfiles de la región de la sesión que caen dentro de `radiusM` de la
+      presencia registrada, ordenados por `distanceM` ascendente y desempatados
+      por `profileId`.
+
+      Exclusiones, todas server-side: el propio perfil, los bloqueados, los
+      pausados y los perfiles de otra región. No hay parámetro para pedir "todos":
+      el aislamiento regional no se negocia con un query.
+
+      `distanceM` y `bearingDeg` los calcula el server desde la presencia y se
+      redondean al metro y al grado, half-up. El cliente no recalcula: dos
+      clientes con la misma sesión ven el mismo entero.
+
+      Sin filtros devuelve la región entera dentro del radio. `radiusM` fuera de
+      200–5000 es 422, no un clamp.
+
+      En S1 y S2 el server responde 501 `NOT_IMPLEMENTED`: la operation existe en
+      el contrato y se implementa en S3. El path existe, la implementación no.
+    tags:
+      - discovery
+    parameters:
+      - name: radiusM
+        in: query
+        required: false
+        description: Radio en metros desde la presencia de la sesión (200–5000).
+        schema:
+          type: integer
+          minimum: 200
+          maximum: 5000
+          default: 5000
+      - name: intention
+        in: query
+        required: false
+        description: Filtra por intención del perfil.
+        schema:
+          $ref: '../schemas/common.yaml#/Intention'
+      - name: gender
+        in: query
+        required: false
+        description: Filtra por género del perfil.
+        schema:
+          $ref: '../schemas/common.yaml#/Gender'
+      - name: verified
+        in: query
+        required: false
+        description: Sólo perfiles verificados cuando es `true`.
+        schema:
+          type: boolean
+      - name: online
+        in: query
+        required: false
+        description: Sólo perfiles online cuando es `true`.
+        schema:
+          type: boolean
+    responses:
+      '200':
+        description: Perfiles dentro del radio, en orden de distancia.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/discovery.yaml#/DiscoveryResult'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '429':
+        $ref: '../openapi.yaml#/components/responses/RateLimited'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+      '501':
+        $ref: '../openapi.yaml#/components/responses/NotImplemented'
+    x-implementation-sprint: 3
