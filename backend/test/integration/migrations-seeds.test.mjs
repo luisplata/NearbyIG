@@ -128,7 +128,7 @@ describe('migraciones y seeds', () => {
       client.query("SELECT key, value FROM demo_meta WHERE key IN ('seed_id', 'contract_id') ORDER BY key"),
     );
     const meta = Object.fromEntries(rows.map((row) => [row.key, row.value]));
-    assert.equal(meta.contract_id, 'c15b856f71cc');
-    assert.equal(meta.seed_id, 'seed-e13de7fd90c1');
+    assert.equal(meta.contract_id, '7203b8216b58');
+    assert.equal(meta.seed_id, 'seed-19573897bae5');
   });
 });

@@ -78,6 +78,16 @@ export async function openSession(body) {
   return api('/auth/demo-session', { method: 'POST', body: body ?? {} });
 }
 
+/**
+ * `POST /auth/takeover` — desalojo explícito del slot.
+ *
+ * El body se manda tal cual (no se rellena): un takeover sin slot es un caso de
+ * validación que los tests tienen que poder provocar.
+ */
+export async function takeover(token, body) {
+  return api('/auth/takeover', { method: 'POST', token, body });
+}
+
 export async function logout(token) {
   return api('/auth/logout', { method: 'POST', token });
 }
@@ -122,6 +132,21 @@ export async function sessionRow(sessionId) {
     const { rows } = await client.query('SELECT * FROM sessions WHERE session_id = $1', [sessionId]);
     return rows[0];
   });
+}
+
+/**
+ * `session_id` de un JWT de sesión, sin verificarlo.
+ *
+ * Los tests miran la fila de la sesión para probar el desalojo (`revoked_at`) y
+ * los tickets; el `sid` está en el token y decodificarlo evita adivinar por
+ * `region_key`/`demo_slot` cuál fila es de quién. No se verifica la firma porque
+ * el token lo emitió el server: acá no se está probando la firma.
+ */
+export function sessionIdOf(token) {
+  const payload = token.split('.')[1];
+  const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  if (typeof claims.sid !== 'string') throw new Error('el token no lleva `sid`');
+  return claims.sid;
 }
 
 export async function streamTicketsOf(sessionId) {
@@ -251,6 +276,7 @@ export const PROFILE_FIELDS = [
   'demoSlot',
   'distanceM',
   'gender',
+  'inUse',
   'initials',
   'instagramHandle',
   'intention',

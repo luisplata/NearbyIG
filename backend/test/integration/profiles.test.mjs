@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import {
+  activeSlots,
   api,
   assertStackUp,
   deleteSessionsCreatedSince,
   listProfiles,
+  logout,
   openSession,
   PROFILE_FIELDS,
   snapshotSessionIds,
@@ -111,11 +113,41 @@ describe('GET /demo/profiles', () => {
       assert.deepEqual(Object.keys(profile).sort(), PROFILE_FIELDS, profile.profileId);
       assert.equal(typeof profile.verified, 'boolean');
       assert.equal(typeof profile.online, 'boolean');
+      assert.equal(typeof profile.inUse, 'boolean');
       assert.equal(Number.isInteger(profile.distanceM), true);
       assert.equal(Number.isInteger(profile.bearingDeg), true);
       assert.ok(profile.distanceM >= 200 && profile.distanceM <= 5000);
       assert.ok(profile.bearingDeg >= 0 && profile.bearingDeg <= 359);
     }
+  });
+
+  test('inUse marca el slot que ocupa la sesión, y logout lo libera', async () => {
+    // Dos sesiones: una observa (su token sigue vivo) y otra es la que se cierra.
+    const observer = await openSession({ regionKey: 'mx' });
+    const subject = await openSession({ regionKey: 'mx' });
+    assert.equal(observer.status, 201, JSON.stringify(observer.body));
+    assert.equal(subject.status, 201, JSON.stringify(subject.body));
+    const slot = subject.body.demoSlot;
+
+    const before = await listProfiles(observer.body.token, 'mx');
+    assert.equal(before.status, 200);
+    const slotsInUse = before.body.profiles
+      .filter((profile) => profile.inUse)
+      .map((profile) => profile.demoSlot);
+    assert.ok(slotsInUse.includes(slot), `el slot ${slot} tiene que salir inUse`);
+    assert.deepEqual(
+      [...slotsInUse].sort((left, right) => left - right),
+      await activeSlots('mx'),
+      'inUse tiene que ser exactamente el conjunto de slots vivos del índice',
+    );
+
+    assert.equal((await logout(subject.body.token)).status, 204);
+    const after = await listProfiles(observer.body.token, 'mx');
+    assert.equal(after.status, 200);
+    const stillInUse = after.body.profiles
+      .filter((profile) => profile.inUse)
+      .map((profile) => profile.demoSlot);
+    assert.equal(stillInUse.includes(slot), false, `el slot ${slot} se liberó y no puede seguir inUse`);
   });
 
   test('las dos regiones no se mezclan', async () => {
