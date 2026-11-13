@@ -8,11 +8,14 @@ export function ToggleRow({
   value,
   onChange,
   subtitle,
+  disabled = false,
 }: {
   label: string;
   value: boolean;
   onChange: (value: boolean) => void;
   subtitle?: string;
+  /** Deshabilitado mientras una action está en vuelo o el overlay lo impide. */
+  disabled?: boolean;
 }) {
   return (
     <View style={styles.row}>
@@ -22,6 +25,8 @@ export function ToggleRow({
       </View>
       <Switch
         accessibilityLabel={label}
+        accessibilityState={{ disabled }}
+        disabled={disabled}
         value={value}
         onValueChange={onChange}
         trackColor={{ false: colors.surfaceAlt, true: colors.accent }}

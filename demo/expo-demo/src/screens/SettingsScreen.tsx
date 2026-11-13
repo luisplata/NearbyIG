@@ -1,10 +1,14 @@
+import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
 import { fixtures } from '../generated/fixtures';
 import { toSelfView } from '../live/adapter';
 import { useLive } from '../live/LiveProvider';
+import { liveText } from '../live/liveCopy';
 import { prefsCopy, prefsText } from '../live/prefsCopy';
+import { safetyCopy, safetyText } from '../live/safetyCopy';
+import { useGhost } from '../live/useGhost';
 import { useDemo } from '../state/DemoProvider';
 import { usePreferences } from '../state/PreferencesProvider';
 import { colors, fontFamily, fontSize, radii, space, text } from '../theme/theme';
@@ -36,6 +40,11 @@ export function SettingsScreen() {
   const { state, dispatch } = useDemo();
   const live = useLive();
   const prefs = usePreferences();
+  const ghost = useGhost();
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const liveMode = state.source === 'live' && live.enabled && live.state.session !== null;
   const selfView = state.source === 'live' ? toSelfView(live.state.self) : null;
   const self = fixtures.self;
   const nickname = selfView?.nickname ?? self.nickname;
@@ -46,6 +55,28 @@ export function SettingsScreen() {
       ? selfView.instagramHandle
       : self.instagramHandle;
   const intention = selfView?.intention ?? state.selfIntention;
+
+  /**
+   * Reset **propio**: cierra esta sesión y borra lo privado propio en el
+   * backend. No es el reset global (`/demo/reset`, que borra toda la demo) y no
+   * toca el catálogo. Al volver, el controlador deja el sheet de zona abierto.
+   */
+  const resetSelf = async (): Promise<void> => {
+    setResetBusy(true);
+    setResetError(null);
+    const result = await live.resetSelf();
+    setResetBusy(false);
+    if (!result.ok) {
+      setResetError(result.code);
+      return;
+    }
+    setConfirmReset(false);
+    // La sesión ya no existe: el fantasma local y el overlay tampoco.
+    if (state.ghost) {
+      dispatch({ type: 'TOGGLE_GHOST' });
+    }
+    dispatch({ type: 'CLOSE_OVERLAY' });
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
@@ -100,10 +131,22 @@ export function SettingsScreen() {
 
       <ToggleRow
         label={fmt('settings.ghost')}
-        value={state.ghost}
-        subtitle={state.ghost ? fmt('settings.ghostOn') : undefined}
-        onChange={() => dispatch({ type: 'TOGGLE_GHOST' })}
+        value={ghost.checked}
+        disabled={ghost.disabled}
+        subtitle={
+          ghost.checked
+            ? ghost.banner === 'live'
+              ? safetyText('ghostLiveOn')
+              : fmt('settings.ghostOn')
+            : undefined
+        }
+        onChange={ghost.toggle}
       />
+      {ghost.error === null ? null : (
+        <Text style={[text.small, styles.error]}>
+          {safetyText('ghostError', { code: ghost.error })}
+        </Text>
+      )}
 
       {prefs.botCount === 0 ? null : (
         <ToggleRow
@@ -134,6 +177,52 @@ export function SettingsScreen() {
         <Button label={prefsCopy.reset} variant="outline" fullWidth onPress={prefs.reset} />
         <Text style={[text.small, styles.resetHint]}>{prefsCopy.resetHint}</Text>
       </View>
+
+      {liveMode ? (
+        <View style={styles.reset}>
+          {confirmReset ? (
+            <>
+              <Text style={[text.small, styles.resetHint]}>{safetyCopy.resetSelfConfirm}</Text>
+              <View style={styles.confirmRow}>
+                <View style={styles.action}>
+                  <Button
+                    label={fmt('common.confirm')}
+                    variant="danger"
+                    fullWidth
+                    disabled={resetBusy}
+                    onPress={() => void resetSelf()}
+                  />
+                </View>
+                <View style={styles.action}>
+                  <Button
+                    label={liveText('cancel')}
+                    variant="outline"
+                    fullWidth
+                    disabled={resetBusy}
+                    onPress={() => {
+                      setConfirmReset(false);
+                      setResetError(null);
+                    }}
+                  />
+                </View>
+              </View>
+            </>
+          ) : (
+            <Button
+              label={safetyCopy.resetSelf}
+              variant="outline"
+              fullWidth
+              onPress={() => setConfirmReset(true)}
+            />
+          )}
+          <Text style={[text.small, styles.resetHint]}>{safetyCopy.resetSelfHint}</Text>
+          {resetError === null ? null : (
+            <Text style={[text.small, styles.error]}>
+              {safetyText('resetSelfError', { code: resetError })}
+            </Text>
+          )}
+        </View>
+      ) : null}
 
       <View style={styles.reset}>
         <Button
@@ -231,5 +320,15 @@ const styles = StyleSheet.create({
   },
   resetHint: {
     color: colors.muted,
+  },
+  error: {
+    color: colors.danger,
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    gap: space[1],
+  },
+  action: {
+    flex: 1,
   },
 });

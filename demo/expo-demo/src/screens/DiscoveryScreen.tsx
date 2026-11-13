@@ -29,10 +29,11 @@ import { discoveryLayout } from './discoveryBody';
  * la misma composición que `radar`.
  */
 export function DiscoveryScreen() {
-  const { state, dispatch } = useDemo();
+  const { state, dispatch, store } = useDemo();
   const live = useLive();
   const prefs = usePreferences();
   const profiles = useMemo(() => visibleProfiles(state), [state]);
+  const liveMode = state.source === 'live' && live.enabled && live.state.session !== null;
   /**
    * Geografía del basemap: el punto del GPS manda (vive sólo en memoria), y sin
    * punto el centroide de la zona de la sesión. Nunca una ciudad por defecto:
@@ -49,6 +50,28 @@ export function DiscoveryScreen() {
 
   const onOpen = (profile: UiProfile): void => {
     dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: profile.id });
+  };
+
+  /**
+   * Bloqueo rápido desde la tarjeta. En dataset es la action del guion; en live
+   * el server bloquea (y canoniza bots al dueño) y la próxima foto de discovery
+   * saca la fila. El toast es el mismo host para los dos modos.
+   */
+  const onBlock = (profile: UiProfile): void => {
+    if (!liveMode) {
+      dispatch({ type: 'BLOCK_PROFILE', profileId: profile.id });
+      return;
+    }
+    void live.block(profile.id).then((result) => {
+      if (result.ok) {
+        store.pushToast('safety.blocked');
+      }
+      // Un fallo deja el `blockError` en el controlador; la tarjeta no se mueve.
+    });
+  };
+
+  const onReport = (profile: UiProfile): void => {
+    dispatch({ type: 'OPEN_OVERLAY', overlay: 'safety', profileId: profile.id });
   };
 
   const onNav = (item: NavItem): void => {
@@ -128,6 +151,8 @@ export function DiscoveryScreen() {
               profiles={profiles}
               onOpen={onOpen}
               onClearFilters={() => dispatch({ type: 'CLEAR_FILTERS' })}
+              onBlock={onBlock}
+              onReport={onReport}
             />
           </>
         )}

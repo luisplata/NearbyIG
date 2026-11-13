@@ -120,15 +120,24 @@ describe('badge de pings y notificaciones', () => {
     expect(pingsBadgeCount({ ...state, incomingPings: ['p01', 'p02'] }, 0)).toBe(2);
   });
 
-  it('la campana suma notificaciones sin leer + pings pendientes live', () => {
-    const state = liveState({
-      notifications: [
-        { id: 'n1', kind: 'match', profileId: 'mx-p02', read: false },
-        { id: 'n2', kind: 'ping', profileId: 'mx-p03', read: true },
-      ],
-    });
-    expect(bellBadgeCount(state, 2)).toBe(3);
-    // Sin sesión live no se suma nada: el número es el del guion.
+  it('la campana en live es el unreadCount de notificaciones del server', () => {
+    const state = liveState();
+    // En live manda el número del server: no se suma el guion ni los pings.
+    expect(bellBadgeCount(state, 2)).toBe(2);
+    expect(bellBadgeCount(state, 0)).toBe(0);
+    // Sin sesión live el número es el del guion (comportamiento de dataset).
     expect(bellBadgeCount(initialState(), 2)).toBe(0);
+    expect(
+      bellBadgeCount(
+        {
+          ...initialState(),
+          notifications: [
+            { id: 'n1', kind: 'match', profileId: 'p01', read: false },
+            { id: 'n2', kind: 'ping', profileId: 'p02', read: true },
+          ],
+        },
+        7,
+      ),
+    ).toBe(1);
   });
 });

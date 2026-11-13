@@ -29,6 +29,8 @@
  * **sólo** la base de la API y no la zona.
  */
 
+import type { Visibility } from './types';
+
 /** Clave del override persistido. Sólo guarda la base: nunca una coordenada. */
 export const API_STORAGE_KEY = 'nearbyig.api';
 
@@ -43,6 +45,17 @@ export const ZONE_STORAGE_KEY = 'nearbyig.demoZone';
  * viviendo en memoria y el token no se persiste.
  */
 export const PREFERENCES_STORAGE_KEY = 'nearbyig.preferences';
+
+/**
+ * Clave de la visibilidad elegida (`visible` / `ghost`).
+ *
+ * Es una preferencia, pero vive en su propia clave y no dentro del JSON de
+ * `nearbyig.preferences` por una razón concreta: la visibilidad es estado
+ * *del server* por sesión (una sesión nueva nace `visible`), así que la
+ * preferencia se reaplica en el primer `PUT /presence` y no forma parte de la
+ * hidratación del reducer. Guarda una palabra del enum, nunca una coordenada.
+ */
+export const VISIBILITY_STORAGE_KEY = 'nearbyig.visibility';
 
 export type LiveSettings = {
   /** Base de la API sin barra final. Puede ser relativa (mismo origen). */
@@ -268,6 +281,38 @@ export function clearStoredPreferences(target: PreferenceStore | null = storage(
     target?.removeItem(PREFERENCES_STORAGE_KEY);
   } catch {
     // Igual que arriba: no hay nada que limpiar si no hay storage.
+  }
+}
+
+/**
+ * Visibilidad persistida. Sólo acepta `visible` o `ghost`: cualquier otra cosa
+ * se descarta y se arranca visible, que es el default del server.
+ */
+export function readStoredVisibility(target: PreferenceStore | null = storage()): Visibility {
+  try {
+    const raw = target?.getItem(VISIBILITY_STORAGE_KEY) ?? null;
+    return raw === 'ghost' ? 'ghost' : 'visible';
+  } catch {
+    return 'visible';
+  }
+}
+
+export function writeStoredVisibility(
+  value: Visibility,
+  target: PreferenceStore | null = storage(),
+): void {
+  try {
+    target?.setItem(VISIBILITY_STORAGE_KEY, value);
+  } catch {
+    // Sin storage la elección vive lo que dura esta carga: no es un error.
+  }
+}
+
+export function clearStoredVisibility(target: PreferenceStore | null = storage()): void {
+  try {
+    target?.removeItem(VISIBILITY_STORAGE_KEY);
+  } catch {
+    // Lo mismo: si no hay storage no hay nada que borrar.
   }
 }
 

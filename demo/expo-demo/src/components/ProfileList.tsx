@@ -17,11 +17,15 @@ export function ProfileList({
   profiles,
   onOpen,
   onClearFilters,
+  onBlock,
+  onReport,
 }: {
   state: DemoState;
   profiles: UiProfile[];
   onOpen: (profile: UiProfile) => void;
   onClearFilters: () => void;
+  onBlock?: (profile: UiProfile) => void;
+  onReport?: (profile: UiProfile) => void;
 }) {
   if (profiles.length === 0) {
     return (
@@ -41,6 +45,8 @@ export function ProfileList({
           profile={profile}
           renderState={avatarState(state, profile.id)}
           onTap={() => onOpen(profile)}
+          onBlock={onBlock === undefined ? undefined : () => onBlock(profile)}
+          onReport={onReport === undefined ? undefined : () => onReport(profile)}
         />
       ))}
     </ScrollView>

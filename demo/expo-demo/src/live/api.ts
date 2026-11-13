@@ -1,16 +1,23 @@
 import type {
+  LiveBlock,
+  LiveBlockItem,
   LiveEventsPage,
   LiveMatch,
+  LiveNotification,
+  LiveNotificationKind,
   LivePing,
   LivePingItem,
   LivePingPeer,
   LiveProfileRow,
+  LiveReportReceipt,
   LiveSession,
   PingBox,
   PingStatus,
+  ReportReason,
   SourceType,
+  Visibility,
 } from './types';
-import { isPingStatus } from './types';
+import { isLiveNotificationKind, isPingStatus, isReportReason, isVisibility } from './types';
 
 /**
  * Cliente de la API del backend de la demo. Sólo las operations que el contrato
@@ -72,9 +79,17 @@ export type PresenceState = {
   regionKey: string;
   zoneKey: string | null;
   online: boolean;
+  /** Vigente en el server tras el `PUT`: `visible` o `ghost`. */
+  visibility: Visibility;
   fallbackRequired: boolean;
   /** Status HTTP del `PUT /presence`; el debug visible lo muestra tal cual. */
   status: number;
+};
+
+/** Resultado de `POST /notifications/read`. */
+export type ReadNotificationsResult = {
+  marked: number;
+  unreadCount: number;
 };
 
 export type LiveApi = {
@@ -84,8 +99,13 @@ export type LiveApi = {
   claimSlot(regionKey: string, demoSlot: number): Promise<LiveSession>;
   takeover(regionKey: string, demoSlot: number): Promise<LiveSession>;
   logout(): Promise<void>;
-  /** `PUT /presence`: punto privado o zona demo, nunca los dos. */
-  presence(target: PresenceTarget): Promise<PresenceState>;
+  /**
+   * `PUT /presence`: punto privado o zona demo, nunca los dos.
+   *
+   * `visibility` es opcional **a propósito**: omitirla conserva la vigente, y
+   * por eso el latido de posición no saca a nadie de ghost.
+   */
+  presence(target: PresenceTarget, visibility?: Visibility): Promise<PresenceState>;
   listProfiles(regionKey: string): Promise<LiveProfileRow[]>;
   discovery(query: DiscoveryQuery): Promise<LiveProfileRow[]>;
   streamTicket(): Promise<string>;
@@ -99,6 +119,23 @@ export type LiveApi = {
   listPings(box: PingBox): Promise<LivePingItem[]>;
   acceptPing(pingId: string): Promise<LiveMatch>;
   rejectPing(pingId: string): Promise<void>;
+  /** `GET /blocks`: los bloqueos propios con el otro ya proyectado. */
+  listBlocks(): Promise<LiveBlockItem[]>;
+  /** `POST /blocks`: idempotente; devuelve el bloqueo canonizado. */
+  createBlock(profileId: string): Promise<LiveBlock>;
+  /** `DELETE /blocks/{profileId}`: 204 aunque el par no estuviera bloqueado. */
+  deleteBlock(profileId: string): Promise<void>;
+  /** `POST /reports`: 202 con el acuse, sin identidad del reportado. */
+  createReport(profileId: string, reason: ReportReason): Promise<LiveReportReceipt>;
+  /** `GET /notifications`: lista de hasta 100 y el total de no leídas. */
+  listNotifications(): Promise<{ notifications: LiveNotification[]; unreadCount: number }>;
+  /** `POST /notifications/read`: todas si se omite `notificationIds`. */
+  readNotifications(notificationIds?: readonly string[]): Promise<ReadNotificationsResult>;
+  /**
+   * `POST /demo/reset/self`: cierra la propia sesión y borra lo privado propio.
+   * Está fuera del contrato (como el reset global) y es idempotente.
+   */
+  resetSelf(): Promise<void>;
   /** URL del stream con el ticket en la query (EventSource no manda headers). */
   streamUrl(ticket: string): string;
 };
@@ -287,6 +324,113 @@ function readMatch(payload: unknown): LiveMatch {
   };
 }
 
+function readNullableString(record: Record<string, unknown>, field: string): string | null {
+  const value = record[field];
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/** `Block`: `profileId` canonizado + fecha. Sin `profileId` la fila se descarta. */
+function readBlock(payload: unknown): LiveBlock | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const profileId = readString(record, 'profileId');
+  return profileId === ''
+    ? null
+    : { profileId, createdAt: readString(record, 'createdAt') };
+}
+
+function readBlockItem(payload: unknown): LiveBlockItem | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const block = readBlock(record['block']);
+  const peer = readPingPeer(record['peer']);
+  return block === null || peer === null ? null : { block, peer };
+}
+
+function readBlockItems(payload: unknown): LiveBlockItem[] {
+  const record = (payload ?? {}) as Record<string, unknown>;
+  const list = record['blocks'];
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  const items: LiveBlockItem[] = [];
+  for (const item of list) {
+    const parsed = readBlockItem(item);
+    if (parsed !== null) {
+      items.push(parsed);
+    }
+  }
+  return items;
+}
+
+function readReportReceipt(payload: unknown): LiveReportReceipt {
+  const record = (payload ?? {}) as Record<string, unknown>;
+  return { reportId: readString(record, 'reportId'), createdAt: readString(record, 'createdAt') };
+}
+
+/**
+ * `NotificationItem`. Sin `kind` conocido o sin peer no se dibuja: la campana
+ * prefiere una fila menos a un icono sin sentido.
+ */
+function readNotification(payload: unknown): LiveNotification | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const id = readString(record, 'id');
+  const kind = record['kind'];
+  const peer = readPingPeer(record['peer']);
+  if (id === '' || !isLiveNotificationKind(kind) || peer === null) {
+    return null;
+  }
+  return {
+    id,
+    kind: kind as LiveNotificationKind,
+    createdAt: readString(record, 'createdAt'),
+    readAt: readNullableString(record, 'readAt'),
+    peer,
+    pingId: readNullableString(record, 'pingId'),
+    matchId: readNullableString(record, 'matchId'),
+    messageId: readNullableString(record, 'messageId'),
+  };
+}
+
+function readNotificationList(payload: unknown): { notifications: LiveNotification[]; unreadCount: number } {
+  const record = (payload ?? {}) as Record<string, unknown>;
+  const list = record['notifications'];
+  const notifications: LiveNotification[] = [];
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      const parsed = readNotification(item);
+      if (parsed !== null) {
+        notifications.push(parsed);
+      }
+    }
+  }
+  const unread = record['unreadCount'];
+  return {
+    notifications,
+    unreadCount:
+      typeof unread === 'number' && Number.isFinite(unread) && unread >= 0
+        ? unread
+        : notifications.filter((notification) => notification.readAt === null).length,
+  };
+}
+
+function readReadResult(payload: unknown, fallbackUnread: number): ReadNotificationsResult {
+  const record = (payload ?? {}) as Record<string, unknown>;
+  const marked = record['marked'];
+  const unread = record['unreadCount'];
+  return {
+    marked: typeof marked === 'number' ? marked : 0,
+    unreadCount: typeof unread === 'number' ? unread : fallbackUnread,
+  };
+}
+
 /**
  * `GET /me` puede devolver el `ProfileSummary` pelado o envuelto en `profile`.
  * Se aceptan las dos formas y cualquier otra cosa cae al fallback del catálogo.
@@ -403,16 +547,20 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
         token = null;
       }
     },
-    presence: async (target) => {
-      const body =
+    presence: async (target, visibility) => {
+      const base =
         'point' in target ? { point: { lat: target.point.lat, lng: target.point.lng } } : target;
+      // La clave se omite cuando no hay elección: el server conserva la vigente.
+      const body = visibility === undefined ? base : { ...base, visibility };
       const response = await request('/presence', { method: 'PUT', body });
       const payload = response.payload as Record<string, unknown> | null;
       const zoneKey = payload?.['zoneKey'];
+      const serverVisibility = payload?.['visibility'];
       return {
         regionKey: readString(payload ?? {}, 'regionKey'),
         zoneKey: typeof zoneKey === 'string' ? zoneKey : null,
         online: readBool(payload ?? {}, 'online'),
+        visibility: isVisibility(serverVisibility) ? serverVisibility : 'visible',
         fallbackRequired: readBool(payload ?? {}, 'fallbackRequired'),
         status: response.status,
       };
@@ -488,6 +636,43 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
     },
     rejectPing: async (pingId) => {
       await request(`/pings/${encodeURIComponent(pingId)}/reject`, { method: 'POST' });
+    },
+    listBlocks: async () => readBlockItems((await request('/blocks')).payload),
+    createBlock: async (profileId) => {
+      const response = await request('/blocks', { method: 'POST', body: { profileId } });
+      const block = readBlock(response.payload);
+      if (block === null) {
+        throw new LiveApiError(
+          response.status,
+          'INVALID_BLOCK',
+          'El bloqueo no vino con la forma esperada.',
+        );
+      }
+      return block;
+    },
+    deleteBlock: async (profileId) => {
+      await request(`/blocks/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
+    },
+    createReport: async (profileId, reason) => {
+      const response = await request('/reports', {
+        method: 'POST',
+        body: { profileId, reason },
+      });
+      return readReportReceipt(response.payload);
+    },
+    listNotifications: async () =>
+      readNotificationList((await request('/notifications')).payload),
+    readNotifications: async (notificationIds) => {
+      const response = await request(
+        '/notifications/read',
+        notificationIds === undefined
+          ? { method: 'POST' }
+          : { method: 'POST', body: { notificationIds: [...notificationIds] } },
+      );
+      return readReadResult(response.payload, 0);
+    },
+    resetSelf: async () => {
+      await request('/demo/reset/self', { method: 'POST' });
     },
     streamUrl: (ticket) => `${baseUrl}/events${queryString({ ticket })}`,
   };

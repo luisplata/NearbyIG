@@ -82,12 +82,19 @@ export function pingsBadgeCount(state: DemoState, livePending: number): number {
 }
 
 /**
- * Badge de la campana: notificaciones del guion sin leer + pings pendientes de
- * la sesión live. Es lo que responde a "no veo nada en notificaciones": mientras
- * el ping esté pendiente, la campana lo cuenta.
+ * Badge de la campana: **notificaciones sin leer**.
+ *
+ * En live el número es el `unreadCount` de `GET /notifications` (contado por el
+ * server sobre todo el perfil, no sólo la página). En dataset sigue siendo el
+ * guion (`unreadCount(state)`), que es el comportamiento de siempre: sin sesión
+ * no hay backend que contar.
+ *
+ * Antes el modo live contaba los pings pendientes: un match o un mensaje no
+ * movían la campana. Ahora cada aviso persistido suma, y `POST
+ * /notifications/read` la apaga.
  */
-export function bellBadgeCount(state: DemoState, livePending: number): number {
-  return unreadCount(state) + (state.source === 'live' ? livePending : 0);
+export function bellBadgeCount(state: DemoState, liveUnread: number): number {
+  return state.source === 'live' ? liveUnread : unreadCount(state);
 }
 
 /** Ping disponible: sin pausa, visible, no bloqueado, no enviado ni matcheado. */

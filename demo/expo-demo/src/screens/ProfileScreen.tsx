@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
 import { useLive } from '../live/LiveProvider';
 import { pingErrorKey, pingForPeer, pingSendBlock } from '../live/pings';
 import { pingText } from '../live/pingsCopy';
+import { isBlockedPeer, safetyErrorKey } from '../live/safety';
+import { safetyCopy, safetyText } from '../live/safetyCopy';
 import { useDemo } from '../state/DemoProvider';
 import { formatDistance } from '../state/format';
 import {
@@ -13,6 +15,7 @@ import {
   pingBlockedReason,
   profileById,
 } from '../state/selectors';
+import type { UiProfile } from '../state/types';
 import { colors, fontSize, space, text } from '../theme/theme';
 
 import { Avatar } from '../components/Avatar';
@@ -32,11 +35,24 @@ import { Chip } from '../components/Chip';
  * "algo salió mal".
  */
 export function ProfileScreen() {
-  const { state, dispatch } = useDemo();
+  const { state, dispatch, store } = useDemo();
   const live = useLive();
-  const profile = profileById(state.profileId, state.catalog);
+  const current = profileById(state.profileId, state.catalog);
+  /**
+   * Última foto buena del perfil. Bloquear en live saca la fila de discovery en
+   * el acto; sin esto el overlay quedaría en blanco justo cuando el usuario tiene
+   * que ver "Bloqueado" y poder desbloquear.
+   */
+  const cached = useRef<UiProfile | null>(null);
+  if (current !== null) {
+    cached.current = current;
+  }
+  const profile = current ?? cached.current;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [blockNote, setBlockNote] = useState<string | null>(null);
+  const [blockError, setBlockError] = useState<string | null>(null);
   if (profile === null) {
     return null;
   }
@@ -45,6 +61,9 @@ export function ProfileScreen() {
   const livePing = liveMode ? pingForPeer(live.pings.sent, profile.id) : null;
   const liveBlock = pingSendBlock(livePing);
   const guest = liveMode && live.state.session?.sourceType !== 'human';
+  const blocked = liveMode
+    ? isBlockedPeer(live.blocks, live.state.blockAliases, profile.id)
+    : state.blocked.includes(profile.id);
   const blockedReason = pingBlockedReason(state, profile.id);
   const alreadySent = state.pingsSent.includes(profile.id);
   const matched = state.matches.includes(profile.id);
@@ -61,6 +80,38 @@ export function ProfileScreen() {
     if (!result.ok) {
       setError(pingText(pingErrorKey(result.code), { code: result.code ?? '' }));
     }
+  };
+
+  /**
+   * Bloquear/desbloquear, según el modo. En live el server es la autoridad y
+   * canoniza un bot a su dueño: el mapa de alias del controlador permite que
+   * esta misma tarjeta muestre "Bloqueado" aunque el server haya guardado al
+   * dueño. En dataset se mantiene la action del guion.
+   */
+  const toggleBlock = async (): Promise<void> => {
+    if (blockBusy) {
+      return;
+    }
+    setBlockError(null);
+    if (!liveMode) {
+      dispatch({ type: blocked ? 'UNBLOCK_PROFILE' : 'BLOCK_PROFILE', profileId: profile.id });
+      return;
+    }
+    setBlockBusy(true);
+    const result = blocked
+      ? await live.unblock(profile.id)
+      : await live.block(profile.id);
+    setBlockBusy(false);
+    if (!result.ok) {
+      setBlockError(result.code);
+      return;
+    }
+    setBlockNote(
+      !blocked && result.profileId !== null && result.profileId !== profile.id
+        ? safetyText('blockBotOwner', { owner: result.profileId })
+        : null,
+    );
+    store.pushToast(blocked ? 'safety.unblocked' : 'safety.blocked');
   };
 
   return (
@@ -149,7 +200,7 @@ export function ProfileScreen() {
       <View style={styles.actionsRow}>
         <View style={styles.action}>
           <Button
-            label={fmt('profile.report')}
+            label={safetyCopy.report}
             variant="outline"
             fullWidth
             onPress={() =>
@@ -159,13 +210,23 @@ export function ProfileScreen() {
         </View>
         <View style={styles.action}>
           <Button
-            label={fmt('profile.block')}
-            variant="danger"
+            label={blocked ? fmt('safety.unblock') : safetyCopy.block}
+            variant={blocked ? 'outline' : 'danger'}
             fullWidth
-            onPress={() => dispatch({ type: 'BLOCK_PROFILE', profileId: profile.id })}
+            disabled={blockBusy}
+            onPress={() => void toggleBlock()}
           />
         </View>
       </View>
+
+      {blockNote === null ? null : (
+        <Text style={[text.small, styles.match]}>{blockNote}</Text>
+      )}
+      {blockError === null ? null : (
+        <Text style={[text.small, styles.error]}>
+          {safetyText(safetyErrorKey(blockError), { code: blockError })}
+        </Text>
+      )}
 
       <Text style={[text.small, styles.hint]}>{fmt('safety.blockedHint')}</Text>
     </ScrollView>

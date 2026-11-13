@@ -16,20 +16,26 @@ import type { DemoStore } from '../state/store';
 import {
   readRuntimeLiveSettings,
   readRuntimeZone,
+  readStoredVisibility,
+  writeStoredVisibility,
   writeStoredZone,
   type LiveSettings,
 } from './config';
 import {
   createLiveController,
+  type BlockResult,
   type EventSourceLike,
   type LiveActionResult,
   type LiveController,
+  type MarkReadResult,
   type PingResult,
 } from './controller';
 import { requestBrowserPoint } from './geolocation';
+import { toBlockRows, type BlockRow } from './safety';
+import { toNotificationRows, type NotificationRow } from './notifications';
 import { pendingCount, toPingRows } from './pings';
 import type { PingRow } from './pings';
-import { emptyLiveState, type LiveState } from './types';
+import { emptyLiveState, type LiveState, type ReportReason, type Visibility } from './types';
 
 /**
  * Puente entre el controlador live (puro) y React.
@@ -71,6 +77,26 @@ export type LiveBinding = {
   sendPing: (targetProfileId: string) => Promise<PingResult>;
   acceptPing: (pingId: string) => Promise<PingResult>;
   rejectPing: (pingId: string) => Promise<PingResult>;
+  /** Visibilidad vigente en el server (`ghost` = online pero invisible). */
+  visibility: Visibility;
+  setVisibility: (visibility: Visibility) => Promise<LiveActionResult>;
+  /** Bloqueos propios ya adaptados, con el otro proyectado. */
+  blocks: BlockRow[];
+  block: (profileId: string) => Promise<BlockResult>;
+  unblock: (profileId: string) => Promise<BlockResult>;
+  /** Reportes enviados en esta sesión (acuse local, el contrato no los lista). */
+  reported: string[];
+  report: (profileId: string, reason: ReportReason) => Promise<LiveActionResult>;
+  blockError: string | null;
+  reportError: string | null;
+  /** Campana real (`GET /notifications`) ya adaptada. */
+  notifications: NotificationRow[];
+  unreadCount: number;
+  notificationError: string | null;
+  refreshNotifications: () => Promise<void>;
+  markNotificationsRead: (notificationIds?: readonly string[]) => Promise<MarkReadResult>;
+  /** Reset propio (`POST /demo/reset/self`): cierra la sesión y limpia lo propio. */
+  resetSelf: () => Promise<LiveActionResult>;
 };
 
 const LiveContext = createContext<LiveBinding | null>(null);
@@ -116,11 +142,20 @@ export function LiveProvider({
    */
   const [initialZone] = useState<string | null>(() => readRuntimeZone());
 
+  /**
+   * Visibilidad persistida. Es la elección del usuario, no el estado del server:
+   * viaja al controlador para reaplicarla en el primer `PUT /presence` de la
+   * sesión, porque una sesión nueva nace `visible`.
+   */
+  const [initialVisibility] = useState<Visibility>(() => readStoredVisibility());
+
   const [controller] = useState<LiveController>(() =>
     createLiveController({
       settings,
       initialZoneKey: initialZone,
+      initialVisibility,
       onZoneChange: writeStoredZone,
+      onVisibilityChange: writeStoredVisibility,
       createEventSource: createEventSource ?? defaultEventSource,
       requestPoint: requestBrowserPoint,
       // El usuario puede copiar estos logs cuando algo no cuadra. Sin coordenadas.
@@ -215,6 +250,35 @@ export function LiveProvider({
   const rejectPing = useCallback(async (pingId: string) => controller.rejectPing(pingId), [
     controller,
   ]);
+  const setVisibility = useCallback(
+    async (visibility: Visibility) => controller.setVisibility(visibility),
+    [controller],
+  );
+  const block = useCallback(async (profileId: string) => controller.block(profileId), [
+    controller,
+  ]);
+  const unblock = useCallback(async (profileId: string) => controller.unblock(profileId), [
+    controller,
+  ]);
+  const report = useCallback(
+    async (profileId: string, reason: ReportReason) => controller.report(profileId, reason),
+    [controller],
+  );
+  const refreshNotifications = useCallback(async () => {
+    await controller.refreshNotifications();
+  }, [controller]);
+  const markNotificationsRead = useCallback(
+    async (notificationIds?: readonly string[]) =>
+      controller.markNotificationsRead(notificationIds),
+    [controller],
+  );
+  const resetSelf = useCallback(async () => controller.resetSelf(), [controller]);
+
+  const blocks = useMemo(() => toBlockRows(live.blocks), [live.blocks]);
+  const notifications = useMemo(
+    () => toNotificationRows(live.notifications),
+    [live.notifications],
+  );
 
   /**
    * Bandejas adaptadas. Se memoiza por referencia de `state.pings` /
@@ -249,6 +313,21 @@ export function LiveProvider({
         sendPing,
         acceptPing,
         rejectPing,
+        visibility: live.visibility,
+        setVisibility,
+        blocks,
+        block,
+        unblock,
+        reported: live.reported,
+        report,
+        blockError: live.blockError,
+        reportError: live.reportError,
+        notifications,
+        unreadCount: live.unreadCount,
+        notificationError: live.notificationError,
+        refreshNotifications,
+        markNotificationsRead,
+        resetSelf,
       }}
     >
       {children}

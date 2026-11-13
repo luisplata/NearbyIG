@@ -113,6 +113,99 @@ export type LiveMatch = {
 /** Lado de la bandeja. El contrato lo exige explícito: no hay default. */
 export type PingBox = 'inbox' | 'sent';
 
+/**
+ * `Visibility` del contrato (v0.5): la sesión está online y visible, o online
+ * pero invisible para los demás.
+ *
+ * No es lo mismo que no tener presencia: `DELETE /presence` apaga la sesión para
+ * todos (incluido el dueño, que ya no tiene origen para descubrir); `ghost`
+ * mantiene la sesión viendo y esconde al humano y a sus bots de los demás.
+ */
+export type Visibility = 'visible' | 'ghost';
+
+const VISIBILITIES: readonly Visibility[] = ['visible', 'ghost'];
+
+export function isVisibility(value: unknown): value is Visibility {
+  return typeof value === 'string' && VISIBILITIES.includes(value as Visibility);
+}
+
+/** `ReportReason` del contrato: cinco valores, sin texto libre. */
+export type ReportReason = 'spam' | 'harassment' | 'inappropriate' | 'impersonation' | 'other';
+
+export const REPORT_REASONS: readonly ReportReason[] = [
+  'spam',
+  'harassment',
+  'inappropriate',
+  'impersonation',
+  'other',
+];
+
+export function isReportReason(value: unknown): value is ReportReason {
+  return typeof value === 'string' && REPORT_REASONS.includes(value as ReportReason);
+}
+
+/** `Block`: un bloqueo propio, con el `profileId` ya canonizado al humano. */
+export type LiveBlock = {
+  profileId: string;
+  createdAt: string;
+};
+
+/** `BlockListItem`: el bloqueo y la identidad del otro (`PingPeer`). */
+export type LiveBlockItem = {
+  block: LiveBlock;
+  peer: LivePingPeer;
+};
+
+/**
+ * `ReportReceipt`: sólo el acuse (id y fecha).
+ *
+ * El contrato no repite el perfil reportado ni el motivo: un acuse con esa
+ * información sería una lectura de PII por cada reporte.
+ */
+export type LiveReportReceipt = {
+  reportId: string;
+  createdAt: string;
+};
+
+/** `NotificationKind`: los tres hechos que generan un aviso persistido. */
+export type LiveNotificationKind = 'ping.received' | 'match.created' | 'message.created';
+
+const NOTIFICATION_KINDS: readonly LiveNotificationKind[] = [
+  'ping.received',
+  'match.created',
+  'message.created',
+];
+
+export function isLiveNotificationKind(value: unknown): value is LiveNotificationKind {
+  return (
+    typeof value === 'string' &&
+    NOTIFICATION_KINDS.includes(value as LiveNotificationKind)
+  );
+}
+
+/**
+ * `NotificationItem`: aviso persistido con la proyección del otro.
+ *
+ * `readAt === null` es la única autoridad de "no leída" (no hay `unread` que
+ * pueda contradecir la fecha) y las tres referencias son opcionales por tipo.
+ */
+export type LiveNotification = {
+  id: string;
+  kind: LiveNotificationKind;
+  createdAt: string;
+  readAt: string | null;
+  peer: LivePingPeer;
+  pingId: string | null;
+  matchId: string | null;
+  messageId: string | null;
+};
+
+/** `NotificationList`: hasta 100 items y el total de no leídas del perfil. */
+export type LiveNotificationList = {
+  notifications: LiveNotification[];
+  unreadCount: number;
+};
+
 /** De dónde salió el perfil propio que muestra el tab Perfil. */
 export type LiveSelfSource = 'me' | 'catalog' | null;
 
@@ -249,6 +342,36 @@ export type LiveState = {
   /** Perfil propio de la sesión (`GET /me`, o su fallback del catálogo). */
   self: LiveProfileRow | null;
   selfSource: LiveSelfSource;
+  /**
+   * Visibilidad que el server tiene para esta sesión. Es estado de la sesión, no
+   * una preferencia: una sesión nueva arranca `visible` y el cliente reaplica la
+   * elección persistida al abrirla.
+   */
+  visibility: Visibility;
+  /** Bloqueos propios (`GET /blocks`), con el otro ya proyectado. */
+  blocks: LiveBlockItem[];
+  /** Cuándo se leyó la lista de bloqueos. `null` = todavía no hubo una foto. */
+  blocksAt: number | null;
+  /** `Problem.code` del último bloqueo/desbloqueo fallido. */
+  blockError: string | null;
+  /**
+   * `profileId` pedido → `profileId` canonizado por el server. Bloquear un bot
+   * bloquea a su dueño; el mapa permite que la tarjeta del bot también muestre
+   * "Bloqueado" sin repetir la regla de nombres.
+   */
+  blockAliases: Record<string, string>;
+  /** Perfiles reportados en esta sesión: el acuse local para no repetir el envío. */
+  reported: string[];
+  /** `Problem.code` del último reporte fallido. */
+  reportError: string | null;
+  /** `GET /notifications`: la campana real de la sesión. */
+  notifications: LiveNotification[];
+  /** Total de no leídas del perfil, según el server (no sólo la página). */
+  unreadCount: number;
+  /** Cuándo se leyó la campana. `null` = todavía no hubo una foto. */
+  notificationsAt: number | null;
+  /** `Problem.code` del último `POST /notifications/read` fallido. */
+  notificationError: string | null;
   lastSeq: number;
   lastEventAt: number | null;
   /** Código del último error del server (`Problem.code`). */
@@ -274,6 +397,17 @@ export function emptyLiveState(): LiveState {
     pingError: null,
     self: null,
     selfSource: null,
+    visibility: 'visible',
+    blocks: [],
+    blocksAt: null,
+    blockError: null,
+    blockAliases: {},
+    reported: [],
+    reportError: null,
+    notifications: [],
+    unreadCount: 0,
+    notificationsAt: null,
+    notificationError: null,
     lastSeq: 0,
     lastEventAt: null,
     error: null,

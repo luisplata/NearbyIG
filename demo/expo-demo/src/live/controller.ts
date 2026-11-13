@@ -24,6 +24,8 @@ import {
   type LiveNotice,
   type LiveState,
   type PingStatus,
+  type ReportReason,
+  type Visibility,
   type ZonePromptCause,
 } from './types';
 import { zoneForPoint } from './zones';
@@ -99,7 +101,25 @@ export type PingResult = {
   matchId: string | null;
 };
 
+/**
+ * Resultado de bloquear. `profileId` es el canonizado que devolvió el server:
+ * bloquear un bot devuelve a su dueño, y la UI lo usa para decir qué pasó.
+ */
+export type BlockResult = {
+  ok: boolean;
+  code: string | null;
+  profileId: string | null;
+};
+
+/** Resultado de `POST /notifications/read`. */
+export type MarkReadResult = {
+  ok: boolean;
+  code: string | null;
+  marked: number;
+};
+
 const PING_OK = { ok: true, code: null } as const;
+const ACTION_OK = { ok: true, code: null } as const;
 
 export type LiveControllerPorts = {
   /** `null` = modo live no configurado en este build. */
@@ -114,6 +134,13 @@ export type LiveControllerPorts = {
   requestPoint?: () => Promise<GeoResult>;
   /** Zona persistida de una visita anterior. `null` = todavía no eligió. */
   initialZoneKey?: string | null;
+  /**
+   * Visibilidad persistida de una visita anterior. La preferencia se reaplica
+   * al abrir la sesión: una sesión nueva nace `visible` en el server.
+   */
+  initialVisibility?: Visibility;
+  /** Persiste la visibilidad elegida (`visible`/`ghost`, nunca otra cosa). */
+  onVisibilityChange?: (visibility: Visibility) => void;
   /** Persiste la zona elegida o resuelta por GPS (`cdmx`/`bogota`, nunca un punto). */
   onZoneChange?: (zoneKey: string) => void;
   /**
@@ -157,6 +184,29 @@ export type LiveController = {
   acceptPing(pingId: string): Promise<PingResult>;
   /** `POST /pings/{id}/reject`: sin match, la fila queda `rejected`. */
   rejectPing(pingId: string): Promise<PingResult>;
+  /**
+   * Cambia la visibilidad propia. En `ghost` la sesión sigue online y viendo,
+   * pero el humano y sus bots desaparecen del descubrimiento ajeno. Persiste la
+   * elección vía `onVisibilityChange`; los latidos posteriores no la repiten.
+   */
+  setVisibility(visibility: Visibility): Promise<LiveActionResult>;
+  /** `GET /blocks`: la lista propia, con el otro proyectado. */
+  refreshBlocks(): Promise<void>;
+  /** `POST /blocks`: idempotente, canoniza bots al dueño. */
+  block(profileId: string): Promise<BlockResult>;
+  /** `DELETE /blocks/{profileId}`: idempotente en el resultado. */
+  unblock(profileId: string): Promise<BlockResult>;
+  /** `POST /reports`: registra la señal y devuelve el acuse. No bloquea. */
+  report(profileId: string, reason: ReportReason): Promise<LiveActionResult>;
+  /** `GET /notifications` + `unreadCount`. La llama el stream y la pantalla. */
+  refreshNotifications(): Promise<void>;
+  /** `POST /notifications/read`: todas si se omite `notificationIds`. */
+  markNotificationsRead(notificationIds?: readonly string[]): Promise<MarkReadResult>;
+  /**
+   * `POST /demo/reset/self`: cierra la sesión propia, limpia lo privado propio y
+   * deja la UI en el sheet de zona. No toca el reset global ni el catálogo.
+   */
+  resetSelf(): Promise<LiveActionResult>;
   setFilters(filters: DiscoveryFilters): void;
   /** El gesto "Usar mi ubicación": un solo pedido, sin seguimiento. */
   requestLocation(): Promise<void>;
@@ -195,6 +245,12 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   const listeners = new Set<() => void>();
   /** Zona demo en uso. Es la que define la región de la sesión. */
   let zone: string | null = ports.initialZoneKey ?? null;
+  /**
+   * Elección de visibilidad que sobrevive a la sesión. El estado del server
+   * (`state.visibility`) es la verdad vigente; esto es lo que se reaplica al
+   * abrir una sesión nueva, porque el server arranca en `visible`.
+   */
+  let preferredVisibility: Visibility = ports.initialVisibility ?? 'visible';
   /** Lo que se repite en cada latido: el punto (si se pudo) o la zona demo. */
   let presence: PresenceTarget | null = null;
   let cursor: string | null = null;
@@ -299,28 +355,32 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   const registerPresence = async (
     target: PresenceTarget,
     zoneKey: string,
+    visibility?: Visibility,
   ): Promise<LiveLocation> => {
     if (api === null) {
       return 'demo';
     }
-    const result = await api.presence(target);
+    const result = await api.presence(target, visibility);
     diagnose({
       presenceStatus: result.status,
       presenceZoneKey: result.zoneKey,
       fallbackRequired: result.fallbackRequired,
     });
+    set({ visibility: result.visibility });
     log(
-      `[geo] presence=${result.status} region=${result.regionKey} zone=${result.zoneKey ?? 'none'} fallback=${result.fallbackRequired}`,
+      `[geo] presence=${result.status} region=${result.regionKey} zone=${result.zoneKey ?? 'none'} visibility=${result.visibility} fallback=${result.fallbackRequired}`,
     );
     if ('point' in target && result.fallbackRequired) {
-      const fallback = await api.presence({ demoZoneKey: zoneKey });
+      // La visibilidad vigente se conserva: el fallback sólo corrige la zona.
+      const fallback = await api.presence({ demoZoneKey: zoneKey }, visibility);
       diagnose({
         presenceStatus: fallback.status,
         presenceZoneKey: fallback.zoneKey,
         fallbackRequired: fallback.fallbackRequired,
       });
+      set({ visibility: fallback.visibility });
       log(
-        `[geo] presence=${fallback.status} region=${fallback.regionKey} zone=${fallback.zoneKey ?? 'none'} fallback=${fallback.fallbackRequired}`,
+        `[geo] presence=${fallback.status} region=${fallback.regionKey} zone=${fallback.zoneKey ?? 'none'} visibility=${fallback.visibility} fallback=${fallback.fallbackRequired}`,
       );
       presence = { demoZoneKey: zoneKey };
       set({ notice: 'outside-zone', zonePrompt: 'outside-zone', point: null });
@@ -390,6 +450,17 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       pingError: null,
       self: null,
       selfSource: null,
+      visibility: 'visible',
+      blocks: [],
+      blocksAt: null,
+      blockError: null,
+      blockAliases: {},
+      reported: [],
+      reportError: null,
+      notifications: [],
+      unreadCount: 0,
+      notificationsAt: null,
+      notificationError: null,
     });
     emitDataset();
     if (api !== null && state.session !== null) {
@@ -422,6 +493,17 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       pingError: null,
       self: null,
       selfSource: null,
+      visibility: 'visible',
+      blocks: [],
+      blocksAt: null,
+      blockError: null,
+      blockAliases: {},
+      reported: [],
+      reportError: null,
+      notifications: [],
+      unreadCount: 0,
+      notificationsAt: null,
+      notificationError: null,
       lastSeq: 0,
       lastEventAt: null,
       location: null,
@@ -452,9 +534,21 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       scheduleReseed();
     }
     // Un ping o un match del stream no esperan al próximo tick de la bandeja: se
-    // piden en el acto. El dedupe por peer evita que esto duplique el toast.
+    // piden en el acto. El dedupe por peer evita que esto duplique el toast. La
+    // campana se refresca con los mismos eventos: no tiene polling propio para
+    // no sumar requests al rate limit del backend.
     if (events.some((event) => event.type === 'ping.received' || event.type === 'match.created')) {
       void refreshPings();
+    }
+    if (
+      events.some(
+        (event) =>
+          event.type === 'ping.received' ||
+          event.type === 'match.created' ||
+          event.type === 'message.created',
+      )
+    ) {
+      void refreshNotifications();
     }
   };
 
@@ -660,6 +754,160 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     void refreshPings();
   };
 
+  const safeCode = (error: unknown): string =>
+    error instanceof LiveApiError ? error.code : 'NETWORK';
+
+  /**
+   * Foto de los bloqueos propios. Accesoria como la bandeja: un 500 acá no puede
+   * tumbar una sesión que está sirviendo descubrimiento.
+   */
+  const refreshBlocks = async (): Promise<void> => {
+    if (api === null || state.session === null) {
+      return;
+    }
+    try {
+      const blocks = await api.listBlocks();
+      const canonical = new Set(blocks.map((item) => item.block.profileId));
+      // Un alias sólo vale mientras su dueño siga bloqueado: si se desbloqueó
+      // desde otra pestaña, la próxima foto lo descarta.
+      const aliases: Record<string, string> = {};
+      for (const [requested, owner] of Object.entries(state.blockAliases)) {
+        if (canonical.has(owner)) {
+          aliases[requested] = owner;
+        }
+      }
+      set({ blocks, blocksAt: Date.now(), blockError: null, blockAliases: aliases });
+    } catch (error) {
+      log(`[block] lista sin respuesta status=${error instanceof LiveApiError ? error.status : 'network'}`);
+    }
+  };
+
+  const block = async (profileId: string): Promise<BlockResult> => {
+    if (api === null || state.session === null) {
+      return { ok: false, code: 'NO_SESSION', profileId: null };
+    }
+    try {
+      const created = await api.createBlock(profileId);
+      const aliases =
+        created.profileId === profileId
+          ? state.blockAliases
+          : { ...state.blockAliases, [profileId]: created.profileId };
+      set({ blockAliases: aliases, blockError: null });
+      // El bloqueo cambia discovery, la bandeja y la lista: se refrescan juntos.
+      await Promise.all([refreshBlocks(), refreshDiscovery(), refreshPings()]);
+      return { ...ACTION_OK, profileId: created.profileId };
+    } catch (error) {
+      const code = safeCode(error);
+      set({ blockError: code });
+      return { ok: false, code, profileId: null };
+    }
+  };
+
+  const unblock = async (profileId: string): Promise<BlockResult> => {
+    if (api === null || state.session === null) {
+      return { ok: false, code: 'NO_SESSION', profileId: null };
+    }
+    try {
+      await api.deleteBlock(profileId);
+      set({ blockError: null });
+      await Promise.all([refreshBlocks(), refreshDiscovery()]);
+      return { ...ACTION_OK, profileId };
+    } catch (error) {
+      const code = safeCode(error);
+      set({ blockError: code });
+      return { ok: false, code, profileId: null };
+    }
+  };
+
+  /**
+   * Reporte: registra la señal y nada más. No bloquea, no cambia discovery y no
+   * devuelve identidad del reportado. Se recuerda el `profileId` pedido para que
+   * la hoja muestre el acuse y no deje repetir el envío en esta sesión.
+   */
+  const report = async (
+    profileId: string,
+    reason: ReportReason,
+  ): Promise<LiveActionResult> => {
+    if (api === null || state.session === null) {
+      return { ok: false, code: 'NO_SESSION' };
+    }
+    try {
+      await api.createReport(profileId, reason);
+      const reported = state.reported.includes(profileId)
+        ? state.reported
+        : [...state.reported, profileId];
+      set({ reported, reportError: null });
+      return ACTION_OK;
+    } catch (error) {
+      const code = safeCode(error);
+      set({ reportError: code });
+      return { ok: false, code };
+    }
+  };
+
+  /**
+   * Campana real. Sin polling propio: se refresca en el arranque, ante los
+   * eventos del stream y cuando la pantalla lo pide. Tres requests cada 5 s
+   * pasarían el rate limit del backend.
+   */
+  const refreshNotifications = async (): Promise<void> => {
+    if (api === null || state.session === null) {
+      return;
+    }
+    try {
+      const { notifications, unreadCount } = await api.listNotifications();
+      set({
+        notifications,
+        unreadCount,
+        notificationsAt: Date.now(),
+        notificationError: null,
+      });
+    } catch (error) {
+      log(
+        `[notif] campana sin respuesta status=${error instanceof LiveApiError ? error.status : 'network'}`,
+      );
+    }
+  };
+
+  const markNotificationsRead = async (
+    notificationIds?: readonly string[],
+  ): Promise<MarkReadResult> => {
+    if (api === null || state.session === null) {
+      return { ok: false, code: 'NO_SESSION', marked: 0 };
+    }
+    try {
+      const result = await api.readNotifications(notificationIds);
+      set({ unreadCount: result.unreadCount, notificationError: null });
+      await refreshNotifications();
+      return { ok: true, code: null, marked: result.marked };
+    } catch (error) {
+      const code = safeCode(error);
+      set({ notificationError: code });
+      await refreshNotifications();
+      return { ok: false, code, marked: 0 };
+    }
+  };
+
+  /**
+   * **El latido no manda `visibility` a propósito.** Omitir el campo conserva
+   * la vigente, así que estar en ghost sobrevive a cada `PUT /presence` de
+   * posición. Sólo un cambio explícito del usuario la toca.
+   */
+  const setVisibility = async (next: Visibility): Promise<LiveActionResult> => {
+    if (api === null || state.session === null || presence === null) {
+      return { ok: false, code: 'NO_SESSION' };
+    }
+    try {
+      const result = await api.presence(presence, next);
+      preferredVisibility = result.visibility;
+      set({ visibility: result.visibility, error: null });
+      ports.onVisibilityChange?.(result.visibility);
+      return ACTION_OK;
+    } catch (error) {
+      return { ok: false, code: safeCode(error) };
+    }
+  };
+
   /**
    * Perfil propio de la sesión: `GET /me` y, si esa operation todavía no existe
    * (404), la fila del catálogo con el mismo `profileId`. El fallback es
@@ -700,12 +948,21 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     stopPolling();
     closeStream();
     set({ session, transport: 'none', self: null, selfSource: null, pings: [], sentPings: [], pingsAt: null });
+    if (api !== null && presence !== null) {
+      // Una sesión nueva (claim/takeover) nace visible y sin presencia viva: se
+      // re-registra en el acto y, si el usuario estaba en ghost, se reaplica.
+      await api
+        .presence(presence, preferredVisibility === 'ghost' ? 'ghost' : undefined)
+        .catch(() => undefined);
+    }
     await refreshRows();
     await refreshDiscovery();
     await loadSelf();
     await connectStream();
     startHeartbeat();
     startPingPoll();
+    void refreshBlocks();
+    void refreshNotifications();
   };
 
   /**
@@ -752,7 +1009,10 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     );
     try {
       const target: PresenceTarget = geoPoint === null ? { demoZoneKey: zoneKey } : { point: geoPoint };
-      const location = await registerPresence(target, zoneKey);
+      // Una sesión nueva nace `visible`: la elección persistida se reaplica acá,
+      // en el primer `PUT`. Los latidos posteriores la omiten.
+      const initialVisibility = preferredVisibility === 'ghost' ? 'ghost' : undefined;
+      const location = await registerPresence(target, zoneKey, initialVisibility);
       set({ location, point: location === 'gps' ? geoPoint : null });
       await refreshDiscovery();
     } catch (error) {
@@ -763,8 +1023,10 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     startHeartbeat();
     startPingPoll();
     // El perfil propio no bloquea el arranque: llega un instante después y la UI
-    // ya está dibujando el catálogo.
+    // ya está dibujando el catálogo. La campana y los bloqueos, tampoco.
     void refreshRows().then(loadSelf);
+    void refreshBlocks();
+    void refreshNotifications();
     return true;
   };
 
@@ -975,6 +1237,42 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
         await refreshPings();
         return failure;
       }
+    },
+    setVisibility,
+    refreshBlocks,
+    block,
+    unblock,
+    report,
+    refreshNotifications,
+    markNotificationsRead,
+    resetSelf: async () => {
+      if (api === null) {
+        return { ok: false, code: 'NO_API' };
+      }
+      if (state.session === null) {
+        return { ok: false, code: 'NO_SESSION' };
+      }
+      try {
+        await api.resetSelf();
+      } catch (error) {
+        return { ok: false, code: safeCode(error) };
+      }
+      // La sesión ya no existe en el server: se limpia el borde local y se
+      // vuelve a preguntar la zona. El catálogo del build sigue intacto.
+      await closeSession(true);
+      zone = null;
+      preferredVisibility = 'visible';
+      api.setToken(null);
+      ports.onVisibilityChange?.('visible');
+      set({
+        status: 'needs-zone',
+        transport: 'none',
+        zonePrompt: 'initial',
+        notice: null,
+        error: null,
+      });
+      emitDataset();
+      return ACTION_OK;
     },
     setFilters: (next) => {
       const nextKey = JSON.stringify(queryFor(next));

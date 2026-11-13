@@ -14,9 +14,10 @@ import { SimSheet } from './components/SimSheet';
 import { ToastHost } from './components/ToastHost';
 import { VisibilitySwitch } from './components/VisibilitySwitch';
 import { ZoneSheet } from './components/ZoneSheet';
-import { ghostSwitch } from './components/visibilityModel';
 import { fmt } from './generated/copy';
 import { LiveProvider, useLive } from './live/LiveProvider';
+import { safetyText } from './live/safetyCopy';
+import { useGhost } from './live/useGhost';
 import { AboutScreen } from './screens/AboutScreen';
 import { BlockedScreen } from './screens/BlockedScreen';
 import { ChatScreen } from './screens/ChatScreen';
@@ -81,10 +82,13 @@ function DemoShell() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const overlayProfile = profileById(state.profileId, state.catalog);
   const celebration = profileById(state.matchCelebration, state.catalog);
-  const ghost = ghostSwitch(state);
+  const ghost = useGhost();
   const zonePrompt = live.state.zonePrompt;
-  /** Campana: notificaciones del guion + pings pendientes de la sesión live. */
-  const bell = bellBadgeCount(state, live.pings.pending);
+  /**
+   * Campana: `unreadCount` de `/notifications` en live. En dataset sigue siendo
+   * el guion (notificaciones sin leer), que es el comportamiento de siempre.
+   */
+  const bell = bellBadgeCount(state, live.unreadCount);
 
   const closeSheet = (): void => setSimOpen(false);
   const openSheet = (): void => setSimOpen(true);
@@ -104,6 +108,8 @@ function DemoShell() {
   const openNotifications = (): void => {
     dispatch({ type: 'OPEN_OVERLAY', overlay: 'notifications' });
     dispatch({ type: 'MARK_NOTIFICATIONS_READ' });
+    // El dataset se marca solo al abrir (F-6); el live no: sus avisos los apaga
+    // el usuario con "Marcar todas como leídas". La pantalla pide su foto fresca.
   };
 
   return (
@@ -127,7 +133,7 @@ function DemoShell() {
             <VisibilitySwitch
               checked={ghost.checked}
               disabled={ghost.disabled}
-              onToggle={() => dispatch({ type: 'TOGGLE_GHOST' })}
+              onToggle={ghost.toggle}
             />
             <View>
               <IconButton
@@ -146,7 +152,21 @@ function DemoShell() {
             </View>
           </View>
 
-          {state.ghost ? <GhostBanner onDisable={() => dispatch({ type: 'TOGGLE_GHOST' })} /> : null}
+          {ghost.banner === null ? null : (
+            <GhostBanner
+              onDisable={ghost.toggle}
+              message={
+                ghost.banner === 'live'
+                  ? safetyText('ghostLiveOn')
+                  : fmt('settings.ghostOn')
+              }
+            />
+          )}
+          {ghost.error === null ? null : (
+            <Text style={[text.small, styles.ghostError]}>
+              {safetyText('ghostError', { code: ghost.error })}
+            </Text>
+          )}
 
           <LiveBar onOpenProfiles={() => setPickerOpen(true)} />
 
@@ -286,6 +306,11 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.regular,
     fontSize: fontSize[0],
     color: colors.muted,
+  },
+  ghostError: {
+    color: colors.danger,
+    paddingHorizontal: space[2],
+    paddingBottom: 4,
   },
   stack: {
     flex: 1,

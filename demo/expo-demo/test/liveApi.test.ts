@@ -194,6 +194,7 @@ describe('presencia', () => {
       regionKey: 'mx',
       zoneKey: 'cdmx',
       online: true,
+      visibility: 'visible',
       fallbackRequired: false,
       status: 200,
     });

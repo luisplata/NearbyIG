@@ -6,15 +6,20 @@ import { colors, fontSize, space } from '../theme/theme';
 import { Icon } from './Icon';
 
 /**
- * Banner persistente del modo fantasma/pausa (F-8): el perfil propio sale del
- * descubrimiento y los pings quedan deshabilitados.
+ * Banner persistente del modo fantasma/pausa (F-8).
+ *
+ * En dataset el texto es el del guion (`settings.ghostOn`, "pausa activa"). Con
+ * sesión live el aviso cambia: no es una pausa del cliente, es que el server te
+ * tiene invisible para los demás mientras vos seguís viendo. Por eso el copy
+ * entra por prop y no se reescribe el del catálogo congelado.
  */
-export function GhostBanner({ onDisable }: { onDisable: () => void }) {
+export function GhostBanner({ onDisable, message }: { onDisable: () => void; message?: string }) {
+  const text = message ?? fmt('settings.ghostOn');
   return (
     <View style={styles.banner} accessibilityLiveRegion="polite">
       <Icon name="eyeOff" size={16} color={colors.accent} />
       <Text numberOfLines={2} style={styles.text}>
-        {fmt('settings.ghostOn')}
+        {text}
       </Text>
       <Pressable
         accessibilityRole="button"

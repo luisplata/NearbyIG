@@ -9,42 +9,56 @@ import { Button } from './Button';
 import { PressableRow } from './PressableRow';
 
 /**
- * Hoja de reporte simulado (F-10). Los motivos salen del dataset; enviar sólo
- * produce un toast, no bloquea ni toca el dataset.
+ * Hoja de reporte. Los motivos entran por prop: el dataset usa su vocabulario
+ * simulado (`fixtures.reportReasons`) y el modo live, el enum del contrato
+ * (`spam | harassment | inappropriate | impersonation | other`). Enviar sólo
+ * llama al `onSubmit`: la hoja no sabe si el reporte viaja a un server o a un
+ * toast, y por eso los dos modos la comparten sin duplicar la lista.
  */
 export function ReportSheet({
   onSubmit,
   initialReason,
+  reasons,
+  note,
+  busy = false,
 }: {
   onSubmit: (reason: string) => void;
   initialReason?: string;
+  /** Opciones explícitas; sin esto se usa el vocabulario del dataset. */
+  reasons?: readonly { value: string; label: string }[];
+  /** Nota al pie; sin esto se usa la del dataset ("simulado"). */
+  note?: string;
+  busy?: boolean;
 }) {
   const [reason, setReason] = useState<string | null>(initialReason ?? null);
+  const options =
+    reasons ??
+    fixtures.reportReasons.map((value) => ({ value, label: fmt(`safety.reasons.${value}`) }));
 
   return (
     <View style={styles.wrap}>
       <Text style={[text.body, styles.label]}>{fmt('safety.reasons.title')}</Text>
       <ScrollView contentContainerStyle={styles.reasons}>
-        {fixtures.reportReasons.map((value) => (
+        {options.map((option) => (
           <PressableRow
-            key={value}
-            accessibilityLabel={fmt(`safety.reasons.${value}`)}
-            accessibilityState={{ selected: reason === value }}
-            onPress={() => setReason(value)}
+            key={option.value}
+            accessibilityLabel={option.label}
+            accessibilityState={{ selected: reason === option.value }}
+            onPress={() => setReason(option.value)}
             style={styles.reason}
           >
-            <View style={[styles.radio, reason === value && styles.radioSelected]}>
-              {reason === value ? <View style={styles.radioDot} /> : null}
+            <View style={[styles.radio, reason === option.value && styles.radioSelected]}>
+              {reason === option.value ? <View style={styles.radioDot} /> : null}
             </View>
-            <Text style={[text.body, styles.reasonText]}>{fmt(`safety.reasons.${value}`)}</Text>
+            <Text style={[text.body, styles.reasonText]}>{option.label}</Text>
           </PressableRow>
         ))}
       </ScrollView>
-      <Text style={[text.small, styles.note]}>{fmt('safety.reportNote')}</Text>
+      <Text style={[text.small, styles.note]}>{note ?? fmt('safety.reportNote')}</Text>
       <Button
         label={fmt('common.confirm')}
         fullWidth
-        disabled={reason === null}
+        disabled={busy || reason === null}
         onPress={() => {
           if (reason !== null) {
             onSubmit(reason);
