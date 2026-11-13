@@ -16,6 +16,7 @@
     "check": "node scripts/validate-fixtures.mjs && node scripts/sync-demo-assets.mjs && git diff --exit-code",
     "contract:validate": "node contract/scripts/validate-spec.mjs",
     "contract:test": "node --test \"contract/test/*.test.mjs\"",
+    "contract:docs": "node scripts/build-contract-docs.mjs",
     "contract:check": "npm run contract:validate && npm run contract:test && git diff --exit-code"
   },
   "devDependencies": {

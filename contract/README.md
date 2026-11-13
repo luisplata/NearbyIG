@@ -5,7 +5,9 @@ repo junto a `demo/` y `backend/`, y se escribe **antes** del server: Sprint 1 l
 consume y lo cumple, no lo define.
 
 Es un único documento OpenAPI `3.1.0` repartido en varios archivos. Nada acá se
-ejecuta en producción y nada acá toca la demo: `demo/` y `site/` quedan intactos.
+ejecuta en producción y nada acá toca la demo: `demo/` queda intacto. Lo único
+que sale de este directorio hacia el artefacto publicado es el doc HTML de
+`/contract/` (ver [Docs publicados](#docs-publicados)).
 
 | Sí hay | No hay (todavía) |
 |---|---|
@@ -26,6 +28,7 @@ pinneadas: `@redocly/cli` y `yaml`).
 |---|---|
 | `npm run contract:validate` | `redocly lint` + invariantes estructurales |
 | `npm run contract:test` | `node --test` sobre `contract/test/*.test.mjs` |
+| `npm run contract:docs` | genera el doc HTML estático en `contract/dist/` |
 | `npm run contract:check` | `contract:validate` → `contract:test` → `git diff --exit-code` |
 
 `contract:check` es el gate. Suma un guard por PR: seeds en PR7, `generate:check`
@@ -36,6 +39,42 @@ y PRs que toquen `contract/`, `package.json`, `package-lock.json` o el workflow.
 Permisos mínimos (`contents: read`) y `concurrency` por ref. El workflow de Pages
 (`pages.yml`) no se toca y sigue siendo el único que publica Pages; un test lo
 verifica en `scripts/lib/workflow.test.mjs`.
+
+## Docs publicados
+
+El mismo contrato, legible en el navegador:
+
+| Dónde | Qué |
+|---|---|
+| Local | `npm run contract:docs` → abrí `contract/dist/index.html` |
+| Pages | `/contract/` — `https://<owner>.github.io/<repo>/contract/`, o `/contract/` si es sitio de usuario |
+
+`contract/dist/` está ignorado por git: el doc se **regenera** en cada build de
+Pages y nunca se commitea. Lo escribe `scripts/build-contract-docs.mjs` con el
+`@redocly/cli` pinneado del `node_modules` (sin `npx`, sin red) y tres cosas que
+importan:
+
+| Pieza | Por qué |
+|---|---|
+| `--inlineBundle` | mete el bundle de Redoc **dentro** del HTML; sin eso el doc baja el JS de `cdn.redocly.com` en runtime |
+| `REDOCLY_TELEMETRY=off` | Redoc deja la telemetría prendida por default y manda trazas a `otel.cloud.redocly.com` |
+| `--openapi.router=hash` | deep links `#/operation/...`: el doc no depende del base path de Pages |
+
+El resultado es **un único HTML autocontenido** (~2.5 MB): no hay carpeta de
+assets ni rewrite por base path. El doc no entra en `contract:check`: no se
+revisa a mano, se regenera. Un cambio de prosa en el contrato es un cambio en
+`openapi.yaml`/`paths/`/`schemas/`, nunca en el HTML.
+
+`scripts/assemble-site.mjs` lo copia a `site/contract/` y lo audita antes del
+upload. El gate del doc es más fuerte que la allowlist de hosts del artefacto:
+
+| Regla | Cómo falla |
+|---|---|
+| existe `contract/index.html` cuando el artefacto es el de publicación (`--strict`) | exit 1 |
+| `contract/` tiene **un solo archivo** | exit 1 si aparece un hermano (`.yaml`, `.js`, `.map`) |
+| el doc no carga subrecursos (`src`/`href` en tags que cargan, `url(http…)`, `@import http…`) | exit 1 |
+| `disableTelemetry` en `true` | exit 1 (se generó sin el env) |
+| el HTML contiene el `x-contract-id` vigente | exit 1 (docs viejos: regenerá) |
 
 ## Estructura
 
