@@ -90,10 +90,14 @@ contract/
   paths/events.yaml         GET /events (SSE) y GET /events/poll (S2)
   paths/catalog.yaml        GET /demo/regions y GET /demo/zones (S2), sin geometría
   paths/profiles.yaml       GET /demo/profiles (S1), sin geometría
+  paths/presence.yaml       PUT y DELETE /presence (S2): la única entrada con coordenadas
+  paths/discovery.yaml      GET /discovery (S3): radio y filtros, sin geometría
   schemas/auth.yaml         DemoSession, DemoSessionRequest, StreamTicket
-  schemas/events.yaml       envelope, los 6 tipos, payloads S2, EventsPage
+  schemas/events.yaml       envelope, los 6 tipos, los 6 payloads, EventsPage
   schemas/region.yaml       Region, RegionList, ZoneSummary, ZoneList
   schemas/profile.yaml      ProfileSummary, ProfileList, SelfProfile
+  schemas/presence.yaml     PresenceUpdate (no montado), PrivatePoint (no montado), PresenceState
+  schemas/discovery.yaml    DiscoveryQuery, DiscoveryResult
   schemas/common.yaml       RegionKey, SourceType, Gender, Intention, KeyLabel, Page
   catalog/regions.json      dos regiones: mx, co (con defaultZoneKey)
   catalog/zones.json        geometría de CDMX y Bogotá: anillos [lng, lat]
@@ -110,6 +114,7 @@ contract/
   test/zones-geometry.test.mjs   anillos válidos + geometría inalcanzable desde el spec
   test/fixtures-parity.test.mjs  paridad campo a campo con fixtures (fixtures gana)
   test/seed-idempotent.test.mjs  doble emisión byte-idéntica + gate anti-drift
+  test/presence-discovery.test.mjs  punto o zona, fallback y el filtro de discovery
 ```
 
 ### Cómo se arma un path
@@ -315,8 +320,9 @@ dos son funciones puras del mismo archivo.
 | Ticket | `streamTicket` en query, **sólo** en `GET /events`: `EventSource` no manda headers |
 
 `contract/event/sample-log.json` es un fixture congelado (40 entradas: 24 `seq`
-de `mx`, 15 de `co` y un duplicado). Todavía no se regenera desde el catálogo: el
-generador y el test de bytes llegan con los perfiles (PR5).
+de `mx`, 15 de `co` y un duplicado). Todavía no se regenera desde el catálogo:
+el generador y el test de bytes son la tarea 5.6, que quedó abierta (el log se
+mantiene a mano y el test congela sus 40 entradas).
 
 ### Cómo agregar un tipo de evento
 
@@ -324,8 +330,50 @@ generador y el test de bytes llegan con los perfiles (PR5).
    sumalo ahí: el enum es el contrato con el cliente.
 2. Declarar `<Tipo>Payload` con `additionalProperties: false` — sin `lat`, `lng`,
    `latitude` ni `longitude`; distancia y rumbo van como `distanceM`/`bearingDeg`.
-3. Sumarlo al `oneOf` de `EventPayload`. El envelope **no** cambia.
+3. Sumarlo al `oneOf` de `EventPayload` y montarlo en `components.schemas`. El
+   envelope **no** cambia.
 4. Extender `PAYLOAD_SCHEMA` en `contract/test/events-contract.test.mjs`.
+
+## Presencia y descubrimiento: la coordenada entra, no sale
+
+`PUT /presence` es la **única** entrada del contrato que acepta coordenadas.
+`GET /discovery` mide desde esa presencia y devuelve perfiles, nunca el punto.
+
+| Pieza | Regla |
+|---|---|
+| `PUT /presence` | acepta `point` **o** `demoZoneKey`, exactamente uno; los dos o ninguno es 422 |
+| `point` | `lat` + `lng` en grados decimales; se redondea a 6 decimales antes de `ST_Covers` |
+| región y zona | el server las deriva con `ST_Covers` contra `catalog/zones.json`; el contrato describe el resultado, no el algoritmo |
+| fallback | punto fuera de todo polígono → 200 con `fallbackRequired: true` y `zoneKey: null`; **no** es un `Problem` |
+| `DELETE /presence` | 204, o 409 `PRESENCE_STALE` si no había presencia viva |
+| `GET /discovery` | `radiusM` 200–5000 (default 5000), `intention`, `gender`, `verified`, `online` |
+| fila del resultado | `ProfileSummary`: descubrir no agrega campos, mide |
+| distancia | `distanceM` y `bearingDeg` server-side, redondeados al metro y al grado (half-up) |
+| exclusiones | el propio perfil, los bloqueados, los pausados y los perfiles de otra región |
+| sin implementar | en S1/S2, `GET /discovery` responde 501 `NOT_IMPLEMENTED` |
+
+**Por qué el request no está en `components.schemas`.** `PresenceUpdate` y
+`PrivatePoint` viven en `schemas/presence.yaml` pero **no** se montan en
+`openapi.yaml`. Montarlos los metería en `components.schemas`, que es la
+superficie que `zones-geometry.test.mjs` recorre entera: el guard fallaría —con
+razón— al ver un `lat`. La frontera no es "no hay coordenadas en el repo", es
+"ninguna coordenada puede salir"; poner el punto del lado de la entrada y dejar
+`components` del lado de la salida es lo que hace que el guard siga cerrado sin
+excepciones. El `requestBody` lo referencia directo, que es donde se usa.
+
+**El 422 de presencia lleva dos `code`.** `VALIDATION_FAILED` si el body no trae
+exactamente uno de `point`/`demoZoneKey`, `ZONE_UNKNOWN` si la zona no existe en
+el catálogo. El status es uno y `Problem.code` discrimina; por eso `x-error-code`
+acepta una lista (ver [Reglas de la casa](#reglas-de-la-casa)).
+
+### Cómo agregar un filtro de descubrimiento
+
+1. Sumar la propiedad a `DiscoveryQuery` en `schemas/discovery.yaml`.
+2. Sumar el parámetro con el mismo nombre, tipo, borde, `default` y `enum` en
+   `paths/discovery.yaml`. El test falla si las dos listas difieren.
+3. `npm run contract:test`. Si el filtro necesita datos que `ProfileSummary` no
+   tiene, primero se agrega al dataset y al catálogo (no al response).
+
 
 ## `x-contract-id`
 
@@ -360,11 +408,17 @@ Consecuencias que importan al revisar:
   declara 0, 4 o 5.
 - **Errores en `application/problem+json`** (RFC 9457) con `code` del enum cerrado.
   `operation-4xx-response` está activa en `redocly.yaml`, pero su severidad es
-  `warning`: el gate duro es el test "toda operation declara ≥1 error 4xx/5xx".
-- **Nunca coordenadas.** Ningún response ni payload de evento puede alcanzar
-  `lat`/`lng`/`latitude`/`longitude` ni un par `[n, n]`. Los polígonos viven sólo
-  en `contract/catalog/zones.json`, fuera del spec y sin keys (ver
-  [Regiones y zonas](#regiones-y-zonas-la-geometría-existe-y-nunca-viaja)).
+  `warning`: el gate duro son los tests "toda operation declara ≥1 error 4xx/5xx" y
+  "ningún código no reservado queda huérfano".
+- **`x-error-code` es un string o una lista.** Un status puede volver con más de un
+  `code` (los dos del `streamTicket`, los dos del 422 de presencia) y `Problem.code`
+  es el discriminante. La lista es lo que permite que la regla de huérfanos vea
+  `TICKET_EXPIRED` y `ZONE_UNKNOWN` como usados de verdad.
+- **Nunca coordenadas a la salida.** Ningún response ni payload de evento puede
+  alcanzar `lat`/`lng`/`latitude`/`longitude` ni un par `[n, n]`. Los polígonos
+  viven sólo en `contract/catalog/zones.json`, y el punto privado de
+  `PUT /presence` vive fuera de `components.schemas` (ver
+  [Presencia y descubrimiento](#presencia-y-descubrimiento-la-coordenada-entra-no-sale)).
 - **Sin `/v1`.** El versionado vive en `info`, no en el path.
 - **`Page` es metadata, no wrapper.** `allOf` + `additionalProperties: false`
   bloquea campos hermanos: las proyecciones declaran sus campos planos.

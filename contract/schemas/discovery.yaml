@@ -1,0 +1,71 @@
+# Descubrimiento (Sprint 3): quién está cerca de la sesión.
+#
+# La fila del resultado **no** es un DTO nuevo: es `ProfileSummary`, la misma que
+# devuelve `GET /demo/profiles`. Descubrir no agrega campos, mide: `distanceM` y
+# `bearingDeg` los calcula el server desde la presencia de la sesión (`PUT /presence`)
+# y se redondean al metro y al grado, half-up, para que el mismo par
+# sesión↔perfil devuelva siempre el mismo entero.
+#
+# Sin coordenadas en ningún lado: la respuesta no lleva el punto de la sesión ni
+# el del perfil. `distanceM` + `bearingDeg` alcanzan para dibujar la lista y no
+# permiten reconstruir una ubicación.
+
+DiscoveryQuery:
+  type: object
+  additionalProperties: false
+  description: |
+    Filtros de `GET /discovery`, todos opcionales: sin filtros devuelve la región
+    entera que cae dentro del radio. Se declara acá como objeto (para el cliente
+    generado y para el contrato legible) **y** como parámetros de query en
+    `paths/discovery.yaml` (que es lo que OpenAPI necesita para validarlos). Un
+    test exige que las dos listas coincidan en nombre, tipo, borde, `default` y
+    `enum`: la copia que sobra es la que se desincroniza.
+
+    Los nombres son los del dataset (`intention`, no `intent`; `radiusM`, no
+    `distance`): un alias obliga al cliente a traducir y al server a mantener dos
+    vocabularios.
+  properties:
+    radiusM:
+      type: integer
+      minimum: 200
+      maximum: 5000
+      default: 5000
+      description: |
+        Radio en metros, medido desde la presencia de la sesión. El rango es el
+        del dataset (`distanceM` 200–5000) y el default cubre la demo entera.
+        Fuera de rango es 422 `VALIDATION_FAILED`, no un clamp silencioso.
+    intention:
+      $ref: './common.yaml#/Intention'
+    gender:
+      $ref: './common.yaml#/Gender'
+    verified:
+      type: boolean
+      description: Si se pide sólo perfiles verificados (`true`) o no se filtra (ausente).
+    online:
+      type: boolean
+      description: Si se pide sólo perfiles online (`true`) o no se filtra (ausente).
+
+DiscoveryResult:
+  type: object
+  additionalProperties: false
+  required:
+    - results
+  description: |
+    Respuesta de `GET /discovery`: los perfiles de la región de la sesión que
+    pasan los filtros, ordenados por `distanceM` ascendente (y por `profileId`
+    como desempate, para que dos filas equidistantes no cambien de orden).
+
+    La fila no agrega datos, mide: `distanceM` y `bearingDeg` vienen ya calculados
+    y redondeados por el server al metro y al grado (half-up), así el mismo par
+    sesión↔perfil devuelve siempre el mismo entero.
+
+    Exclusiones, todas server-side y ninguna representada en el contrato: el
+    propio perfil (no se descubre a sí mismo), los bloqueados, los pausados y los
+    perfiles de otra región. El resultado es un objeto con array adentro —mismo
+    idioma que `ProfileList`, `ZoneList` y `EventsPage`—, no un array pelado.
+  properties:
+    results:
+      type: array
+      maxItems: 10
+      items:
+        $ref: './profile.yaml#/ProfileSummary'

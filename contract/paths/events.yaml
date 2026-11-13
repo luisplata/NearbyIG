@@ -5,8 +5,9 @@
 # mandar headers, así que el ticket viaja en la query `ticket` (lo declara el
 # security scheme, no un parámetro suelto). Polling usa la sesión normal.
 #
-# Ninguna de las dos inventa códigos: 401/410/422 salen de
-# `openapi.yaml#/components/responses`.
+# Ninguna de las dos inventa códigos: 401/410/422/429 salen de
+# `openapi.yaml#/components/responses`. El 429 del polling es el límite de pedidos
+# de la ventana: es la operación que un cliente de fondo puede martillar.
 
 events:
   get:
@@ -50,7 +51,7 @@ events:
               type: string
               description: Secuencia de frames `id`/`event`/`data`, cada uno cerrado en línea vacía.
       '401':
-        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+        $ref: '../openapi.yaml#/components/responses/StreamTicketInvalid'
       '410':
         $ref: '../openapi.yaml#/components/responses/CursorExpired'
       '422':
@@ -100,4 +101,6 @@ events-poll:
         $ref: '../openapi.yaml#/components/responses/CursorExpired'
       '422':
         $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '429':
+        $ref: '../openapi.yaml#/components/responses/RateLimited'
     x-implementation-sprint: 2

@@ -16,9 +16,9 @@ EventType:
     - message.created
     - typing.started
   description: |
-    Nombre del evento, cerrado a estos seis. El enum entra completo ahora aunque
-    S2 sólo emita los dos primeros: S4/S5 agregan payloads, no renombran tipos, y
-    el cliente no cambia de unión.
+    Nombre del evento, cerrado a estos seis. El enum y los seis payloads entran
+    completos ahora aunque S2 sólo emita los dos primeros: S4/S5 agregan campos a
+    su payload, no tipos ni uniones nuevas, así que el cliente no cambia.
 
 EventEnvelope:
   type: object
@@ -56,13 +56,18 @@ EventEnvelope:
 
 EventPayload:
   description: |
-    Cuerpo por `type`. La unión crece con los cuatro payloads de S4/S5
-    (`ping.received`, `match.created`, `message.created`, `typing.started`), sin
-    tocar el envelope. Ningún payload lleva coordenadas: `profile.moved` usa
-    `distanceM`/`bearingDeg` como el resto del sistema.
+    Cuerpo por `type`. La unión cubre hoy los seis tipos del enum: los dos de S2
+    (`profile.moved`, `profile.presence`) y los cuatro de S4/S5, que se declaran
+    ahora para que el cliente no cambie de unión cuando S4 los emita. Ningún
+    payload lleva coordenadas: `profile.moved` usa `distanceM`/`bearingDeg` como el
+    resto del sistema.
   oneOf:
     - $ref: '#/ProfileMovedPayload'
     - $ref: '#/ProfilePresencePayload'
+    - $ref: '#/PingReceivedPayload'
+    - $ref: '#/MatchCreatedPayload'
+    - $ref: '#/MessageCreatedPayload'
+    - $ref: '#/TypingStartedPayload'
 
 ProfileMovedPayload:
   type: object
@@ -102,6 +107,91 @@ ProfilePresencePayload:
     online:
       type: boolean
       description: Nunca null.
+
+# Payloads de S4/S5. Se declaran en S0 —con el envelope y el enum— para que el
+# cliente tenga una sola unión desde el principio y S4 no renombre nada. El
+# contenido es el mínimo con el que la demo puede pintar el evento: S4 agrega
+# campos a su payload, que es un cambio de contrato revisable, no un tipo nuevo.
+
+PingReceivedPayload:
+  type: object
+  additionalProperties: false
+  required:
+    - pingId
+    - profileId
+    - expiresAt
+  description: |
+    Alguien hizo ping a la sesión. `expiresAt` es lo que hace que el ping se pueda
+    vencer (`PING_EXPIRED`): llega con el evento para que el cliente apague el
+    botón sin adivinar el TTL.
+  properties:
+    pingId:
+      type: string
+      minLength: 1
+      description: Id del ping, único por región.
+    profileId:
+      type: string
+      minLength: 1
+      description: Perfil que hizo el ping (la región la da el `id` del envelope).
+    expiresAt:
+      type: string
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$'
+      description: RFC 3339 UTC con milisegundos, igual que `occurredAt`.
+
+MatchCreatedPayload:
+  type: object
+  additionalProperties: false
+  required:
+    - matchId
+    - profileId
+  description: El ping fue aceptado y hay match. Sin coordenadas ni mensajes.
+  properties:
+    matchId:
+      type: string
+      minLength: 1
+      description: Id del match; es lo que referencian los mensajes.
+    profileId:
+      type: string
+      minLength: 1
+      description: La otra parte del match.
+
+MessageCreatedPayload:
+  type: object
+  additionalProperties: false
+  required:
+    - matchId
+    - messageId
+    - senderProfileId
+  description: |
+    Mensaje nuevo en un match. El cuerpo del mensaje no viaja acá a propósito: el
+    evento avisa que hay algo nuevo y el cliente lo pide con el `messageId`.
+  properties:
+    matchId:
+      type: string
+      minLength: 1
+    messageId:
+      type: string
+      minLength: 1
+    senderProfileId:
+      type: string
+      minLength: 1
+      description: Quién escribió; la sesión se reconoce por su propio `profileId`.
+
+TypingStartedPayload:
+  type: object
+  additionalProperties: false
+  required:
+    - matchId
+    - profileId
+  description: |
+    La otra parte está escribiendo. Efímero: no se persiste ni se replica.
+  properties:
+    matchId:
+      type: string
+      minLength: 1
+    profileId:
+      type: string
+      minLength: 1
 
 EventsPage:
   type: object

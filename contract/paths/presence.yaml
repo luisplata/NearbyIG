@@ -1,0 +1,93 @@
+# Presencia (Sprint 2): dónde está la sesión y en qué zona cae.
+#
+# `PUT /presence` es la **única** entrada del contrato que acepta coordenadas, y
+# no hay salida que las repita: `PresenceState` lleva `regionKey` y `zoneKey`, que
+# es la proyección que el server derivó con `ST_Covers` contra los polígonos de
+# `contract/catalog/zones.json`.
+#
+# El body vive en `schemas/presence.yaml` y **no** se monta en
+# `components.schemas`: `components` es la superficie que puede salir, y
+# `contract/test/zones-geometry.test.mjs` la recorre entera. Un `point` ahí
+# obligaría a abrirle un agujero al guard para que pase un `lat`; acá el guard
+# sigue cerrado y la coordenada queda donde corresponde, en la entrada.
+#
+# Las dos methods son un solo path item: `/presence` es una sola URL con dos
+# verbos. `PUT` la registra, `DELETE` la apaga.
+#
+# Errores: 401 de `demoSession`; 404 `PROFILE_NOT_FOUND` si el `profileId` de la
+# sesión ya no está en el catálogo (se regeneró el seed debajo de una sesión
+# viva); 422 `ZONE_UNKNOWN` si la `demoZoneKey` no existe —un body que no trae
+# exactamente uno de los dos caminos es 422 también, con `VALIDATION_FAILED`,
+# porque el status es uno y `Problem.code` es el discriminante—; 429
+# `RATE_LIMITED`; 500 `INTERNAL`; 409 `PRESENCE_STALE` al borrar sin presencia
+# viva.
+
+presence:
+  put:
+    operationId: updatePresence
+    summary: Registra la presencia de la sesión
+    description: |
+      Recibe **o** un `point` privado **o** una `demoZoneKey`, nunca los dos y
+      nunca ninguno. El server resuelve región y zona contra el catálogo y
+      devuelve `PresenceState`: `profileId`, `regionKey`, `zoneKey` y `online`.
+
+      Fuera de todo polígono no es un error: responde 200 con
+      `fallbackRequired: true` y `zoneKey: null`, y el cliente ofrece el selector
+      de zona demo. El fallback viaja en el body, no en un `Problem`.
+
+      El punto no se guarda ni se repite: entra, se resuelve y se descarta. Un
+      segundo `PUT` reemplaza la presencia anterior (no acumula).
+
+      `demoZoneKey` de otra región es 422 `ZONE_UNKNOWN`: para el cliente esa zona
+      no es una opción de esta sesión.
+    tags:
+      - presence
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/presence.yaml#/PresenceUpdate'
+    responses:
+      '200':
+        description: |
+          Presencia registrada. `zoneKey` es la zona derivada, o `null` con
+          `fallbackRequired: true` cuando el punto no cae en ninguna zona.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/presence.yaml#/PresenceState'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/ProfileNotFound'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/PresenceUnprocessable'
+      '429':
+        $ref: '../openapi.yaml#/components/responses/RateLimited'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 2
+
+  delete:
+    operationId: clearPresence
+    summary: Apaga la presencia de la sesión
+    description: |
+      La sesión deja de aparecer en el descubrimiento de los demás y `online` pasa
+      a `false` para quien la tenía en su lista, con un `profile.presence` por el
+      stream. No borra el perfil: `GET /demo/profiles` lo sigue devolviendo.
+
+      Es idempotente en el resultado pero no en el status: si no hay presencia
+      viva —porque ya se borró o porque venció— responde 409 `PRESENCE_STALE` en
+      vez de 204. El cliente que sale dos veces no debería inventar una sesión
+      nueva por un 204 fantasma.
+    tags:
+      - presence
+    responses:
+      '204':
+        description: Presencia apagada; no hay body.
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '409':
+        $ref: '../openapi.yaml#/components/responses/PresenceStale'
+    x-implementation-sprint: 2

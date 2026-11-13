@@ -15,6 +15,10 @@ const { raw, spec } = loadSpec();
  * Inventario congelado. Cada PR de la cadena agrega sus filas acá; ninguna se
  * borra ni se renombra. Si un PR agrega una operation sin tocar esta lista, el
  * test falla: el inventario no puede crecer en silencio.
+ *
+ * Con PR6 la lista está **completa**: es exactamente la tabla de la spec
+ * (S1–S3). De acá en adelante, una fila nueva es un cambio de superficie, no un
+ * PR de la cadena.
  */
 const EXPECTED_OPERATIONS = [
   'POST /auth/demo-session',
@@ -25,7 +29,13 @@ const EXPECTED_OPERATIONS = [
   'GET /demo/regions',
   'GET /demo/zones',
   'GET /demo/profiles',
+  'PUT /presence',
+  'DELETE /presence',
+  'GET /discovery',
 ];
+
+/** Paths que la superficie congelada S1–S3 deja afuera a propósito. */
+const FORBIDDEN_PATHS = /ping|match|chat|block|report|\/health/;
 
 const SUPPORTED_SPRINTS = [1, 2, 3];
 const operations = listOperations(spec);
@@ -89,6 +99,16 @@ test('el inventario de operations es exactamente el esperado', () => {
 test('ningún path lleva prefijo de versión', () => {
   for (const path of Object.keys(spec.paths ?? {})) {
     assert.ok(!path.startsWith('/v1'), `${path}: el versionado vive en info, no en el path`);
+  }
+});
+
+test('la superficie no incluye ping, match, chat, block, report ni health', () => {
+  for (const path of Object.keys(spec.paths ?? {})) {
+    assert.doesNotMatch(
+      path,
+      FORBIDDEN_PATHS,
+      `${path}: esa superficie no está congelada; entra cuando exista un diseño que la congele (S4/S5)`,
+    );
   }
 });
 

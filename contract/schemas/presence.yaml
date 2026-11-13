@@ -1,0 +1,158 @@
+# Presencia de la sesión: la única entrada del contrato que acepta coordenadas.
+#
+# El punto viaja en un solo sentido. `PUT /presence` lo recibe; ninguna response,
+# ningún payload de evento y ningún log lo devuelve. Por eso `PresenceUpdate` y
+# `PrivatePoint` **no** se montan en `openapi.yaml#/components.schemas`:
+# `components` es la superficie que puede salir, y `contract/test/zones-geometry.test.mjs`
+# la recorre entera. Montarlos obligaría a debilitar ese guard para dejar pasar un
+# `lat`; dejándolos acá como target de `$ref` del requestBody, el guard sigue
+# cerrado y la única coordenada del spec es una entrada.
+#
+# La región y la zona las deriva el server con `ST_Covers` contra los polígonos de
+# `contract/catalog/zones.json`. El contrato describe el resultado (`regionKey`,
+# `zoneKey`), nunca el algoritmo; por eso acá no hay polígonos ni centro.
+
+PresenceUpdate:
+  type: object
+  additionalProperties: false
+  description: |
+    Cuerpo de `PUT /presence`. Exactamente uno de los dos caminos:
+
+    - `point`: la posición privada de la sesión (geolocalización del navegador).
+    - `demoZoneKey`: la zona demo elegida a mano, para el flujo sin permiso de
+      ubicación.
+
+    Mandar los dos o ninguno es 422 `VALIDATION_FAILED`. El punto no se persiste
+    como coordenada ni se devuelve: el server lo resuelve contra el catálogo y
+    guarda `regionKey` + `zoneKey`.
+
+    El punto se redondea a 6 decimales antes de `ST_Covers`, igual que los
+    vértices del catálogo: dos pedidos con el mismo punto redondeado caen en la
+    misma zona.
+  properties:
+    point:
+      $ref: '#/PrivatePoint'
+    demoZoneKey:
+      type: string
+      pattern: '^[a-z][a-z0-9-]*$'
+      description: |
+        `zoneKey` del catálogo (`cdmx`, `bogota`). Tiene que existir y pertenecer a
+        la región de la sesión: si no existe es 422 `ZONE_UNKNOWN`, si existe pero
+        es de otra región es 422 `ZONE_UNKNOWN` también (para el cliente es el
+        mismo caso: esa zona no es una opción).
+      examples:
+        - cdmx
+
+  oneOf:
+    - required:
+        - point
+    - required:
+        - demoZoneKey
+
+PrivatePoint:
+  type: object
+  additionalProperties: false
+  required:
+    - lat
+    - lng
+  description: |
+    Punto privado de la sesión, en grados decimales WGS 84. Es la contraparte de
+    los vértices de `contract/catalog/zones.json`, que se guardan posicionales y
+    en orden `[lng, lat]`; acá las dos componentes llevan nombre para que el body
+    no dependa de una posición que nadie documenta.
+
+    `lat`/`lng` son las palabras del vocabulario geográfico a propósito: el guard
+    de geometría las reconoce como coordenada, y ése es justamente el punto —es un
+    schema de entrada, no de salida—. Cualquier otra forma (`x`/`y`, un string
+    `"lng,lat"`) sería un alias que esconde lo que viaja.
+  properties:
+    lat:
+      type: number
+      minimum: -90
+      maximum: 90
+      description: Latitud en grados decimales.
+      examples:
+        - 19.432608
+    lng:
+      type: number
+      minimum: -180
+      maximum: 180
+      description: Longitud en grados decimales.
+      examples:
+        - -99.133209
+
+PresenceState:
+  type: object
+  additionalProperties: false
+  required:
+    - profileId
+    - regionKey
+    - zoneKey
+    - online
+    - fallbackRequired
+  description: |
+    Respuesta de `PUT /presence`: la presencia **proyectada**, sin coordenadas.
+    `regionKey` y `zoneKey` son lo que el server derivó del punto o de la
+    `demoZoneKey`; el punto queda en el server y no se repite en ningún response.
+
+    `fallbackRequired` es el fallback del flujo, no un error: `true` cuando el
+    punto cayó fuera de todo polígono del catálogo y el server no pudo derivar
+    zona. En ese caso la presencia queda en la región de la sesión con
+    `zoneKey: null` y el cliente muestra el selector de zona demo. Por eso el
+    fallback viaja acá y **no** en el `Problem` de un 422: no falló el pedido,
+    falló la derivación, y el cliente tiene una acción concreta que ofrecer.
+
+    Invariante: `zoneKey == null` si y sólo si `fallbackRequired == true`.
+  properties:
+    profileId:
+      type: string
+      minLength: 1
+      description: |
+        Perfil de la sesión. Es `(regionKey, profileId)` la identidad global, así
+        que el par no se separa en ningún response.
+      examples:
+        - mx-p03
+    regionKey:
+      $ref: './common.yaml#/RegionKey'
+    zoneKey:
+      type:
+        - string
+        - 'null'
+      pattern: '^[a-z][a-z0-9-]*$'
+      description: |
+        Zona derivada, o `null` cuando `fallbackRequired` es `true`. Nunca es
+        `null` con un punto válido: si el punto cayó adentro de un polígono, hay
+        zona.
+      examples:
+        - cdmx
+    online:
+      type: boolean
+      description: |
+        Presencia activa de la sesión. Se apaga con `DELETE /presence`; los
+        cambios de presencia ajena llegan por `profile.presence`, no por acá.
+    fallbackRequired:
+      type: boolean
+      description: |
+        `true` = el punto no cae en ninguna zona del catálogo y el cliente tiene
+        que ofrecer el selector de zona. `false` = la zona se derivó.
+  allOf:
+    - if:
+        required:
+          - fallbackRequired
+        properties:
+          fallbackRequired:
+            const: true
+      then:
+        properties:
+          zoneKey:
+            type: 'null'
+    - if:
+        required:
+          - fallbackRequired
+        properties:
+          fallbackRequired:
+            const: false
+      then:
+        properties:
+          zoneKey:
+            type: string
