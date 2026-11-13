@@ -16,7 +16,7 @@ import { RadarCaption, RadarMapView } from '../components/RadarMapView';
 import { RadiusControl } from '../components/RadiusControl';
 import type { NavItem } from '../navigation/navItems';
 
-import { bodyFor } from './discoveryBody';
+import { discoveryLayout } from './discoveryBody';
 
 /**
  * Pantalla base: descubrimiento en lista o en la composición radar-sobre-mapa,
@@ -44,7 +44,7 @@ export function DiscoveryScreen() {
     dispatch({ type: 'SET_VIEW', view: item.view });
   };
 
-  const body = bodyFor(state.view);
+  const body = discoveryLayout(state.view, profiles.length);
 
   return (
     <View style={styles.root}>
@@ -81,17 +81,17 @@ export function DiscoveryScreen() {
       </View>
 
       <View style={styles.body}>
-        {profiles.length === 0 ? (
+        {body === 'radarMap' ? (
+          <>
+            <RadarMapView profiles={profiles} radiusM={state.filters.radiusM} onOpen={onOpen} />
+            <RadarCaption />
+          </>
+        ) : body === 'emptyList' ? (
           <EmptyState
             message={fmt('empty.filters')}
             actionLabel={fmt('empty.filtersCta')}
             onAction={() => dispatch({ type: 'CLEAR_FILTERS' })}
           />
-        ) : body === 'radarMap' ? (
-          <>
-            <RadarMapView profiles={profiles} radiusM={state.filters.radiusM} onOpen={onOpen} />
-            <RadarCaption />
-          </>
         ) : (
           <>
             <Text style={[text.small, styles.listHeading]}>{fmt('discovery.listHeading')}</Text>
