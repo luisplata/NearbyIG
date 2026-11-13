@@ -5,6 +5,7 @@ import {
   clearPresence,
   deleteSessionsCreatedSince,
   listDiscovery,
+  listProfiles,
   logout,
   openSession,
   PROFILE_FIELDS,
@@ -22,6 +23,11 @@ import {
  *  - **dos humanos en la misma región ven 5 perfiles**: 1 humano ajeno + 2 bots
  *    propios + 2 bots del otro. El negocio del plan (§4, §5) sólo cierra si el
  *    observador ve sus propios bots; el perfil propio sigue excluido;
+ *  - **los bots no repiten la identidad del dueño**: cada bot presta nombre,
+ *    iniciales, foto, estado, bio, intención, género y verificación de otro
+ *    perfil del catálogo de la región, elegido de forma determinista. El
+ *    `profileId` y el slot siguen siendo los del dueño, y la cara no cambia
+ *    entre dos lecturas seguidas;
  *  - `distanceM`/`bearingDeg` se miden **desde el observador** (no desde el ancla
  *    de la zona) y salen redondeados, enteros y dentro del rango del contrato;
  *  - filtros: radio, intención, género, verificado y online, uno por uno y
@@ -162,6 +168,57 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
     assert.ok(!ids(mirror).includes(neighbour.profileId));
   });
 
+  test('los bots prestan identidad: ni la del dueño ni la del gemelo, y es estable', async () => {
+    await renewScene();
+    const page = await waitForRows(observer.token, 5);
+    // El catálogo es la única fuente de identidad: el dueño del observador no
+    // está en su propia página, así que su fila se busca acá.
+    const catalog = (await listProfiles(observer.token, 'mx')).body.profiles;
+    const catalogById = Object.fromEntries(catalog.map((row) => [row.profileId, row]));
+
+    for (const owner of [observer, neighbour]) {
+      const botIds = [`${owner.profileId}-b1`, `${owner.profileId}-b2`];
+      const [first, second] = botIds.map((botId) => page.find((row) => row.profileId === botId));
+      assert.ok(first && second, `faltan los bots de ${owner.profileId}`);
+      const human = catalogById[owner.profileId];
+      assert.ok(human, `el catálogo no tiene al dueño ${owner.profileId}`);
+
+      // El bug que esto corrige: el radar mostraba a la misma persona tres veces.
+      for (const bot of [first, second]) {
+        assert.notEqual(bot.nickname, human.nickname, `${bot.profileId} repite el nombre de su dueño`);
+        assert.notEqual(bot.photoId, human.photoId, `${bot.profileId} repite la foto de su dueño`);
+      }
+      // Y los dos bots del mismo dueño tampoco son el mismo perfil.
+      assert.notEqual(first.nickname, second.nickname, `${owner.profileId}: los dos bots comparten nombre`);
+      assert.notEqual(first.photoId, second.photoId, `${owner.profileId}: los dos bots comparten foto`);
+
+      // La identidad prestada es la de un perfil real del catálogo de la región,
+      // y viaja entera: nombre, iniciales, foto, estado, bio, intención, género y
+      // verificación del donante, no una mezcla con la fila del dueño.
+      for (const bot of [first, second]) {
+        const donor = catalog.find((row) => row.nickname === bot.nickname && row.photoId === bot.photoId);
+        assert.ok(donor, `${bot.profileId}: "${bot.nickname}"/${bot.photoId} no está en el catálogo`);
+        for (const field of ['initials', 'statusKey', 'bioKey', 'instagramHandle', 'intention', 'gender', 'verified']) {
+          assert.equal(bot[field], donor[field], `${bot.profileId}: ${field} no es el del donante`);
+        }
+      }
+
+      // Lo que sigue siendo del dueño: la identidad estable y el slot.
+      for (const bot of [first, second]) {
+        assert.equal(bot.demoSlot, human.demoSlot, `${bot.profileId}: el slot dejó de ser el del dueño`);
+        assert.equal(bot.sourceType, 'bot');
+      }
+    }
+
+    // Determinismo: dos lecturas seguidas del mismo instante, misma cara.
+    const again = await rows(observer.token);
+    for (const bot of page.filter((row) => row.sourceType === 'bot')) {
+      const mirror = again.find((row) => row.profileId === bot.profileId);
+      assert.equal(mirror.nickname, bot.nickname, `${bot.profileId} cambió de nombre entre lecturas`);
+      assert.equal(mirror.photoId, bot.photoId, `${bot.profileId} cambió de foto entre lecturas`);
+    }
+  });
+
   test('distanceM/bearingDeg son relativos al observador, no al ancla de la zona', async () => {
     await renewScene();
     const page = await waitForRows(observer.token, 5);
@@ -257,26 +314,47 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
     const all = await waitForRows(observer.token, 5);
     const byId = Object.fromEntries(all.map((row) => [row.profileId, row]));
 
-    // El vecino es friendship/male/no verificado; el observador networking/female
-    // verificado. Los bots heredan la fila de su dueño.
+    // El humano ajeno es friendship/male/no verificado, pero **los bots ya no
+    // heredan su fila**: prestan la del perfil donante, así que la expectativa
+    // de cada filtro se deriva de la página (5 filas, sin tope) y no de "los
+    // bots del vecino son friendship/male". El filtro sigue siendo la
+    // intersección con el atributo proyectado.
+    const expected = (field, value) =>
+      all
+        .filter((row) => row[field] === value)
+        .map((row) => row.profileId)
+        .sort();
+
     const friendship = await rows(observer.token, { intention: 'friendship' });
     assert.deepEqual(
       ids(friendship).sort(),
-      [neighbour.profileId, `${neighbour.profileId}-b1`, `${neighbour.profileId}-b2`].sort(),
+      expected('intention', 'friendship'),
       'intention=friendship no filtró',
     );
-    assert.deepEqual(await rows(observer.token, { intention: 'activities' }), [], 'hay un perfil de activities');
+    assert.ok(friendship.every((row) => row.intention === 'friendship'));
+
+    const activities = await rows(observer.token, { intention: 'activities' });
+    assert.deepEqual(
+      ids(activities).sort(),
+      expected('intention', 'activities'),
+      'intention=activities no filtró',
+    );
 
     const male = await rows(observer.token, { gender: 'male' });
-    assert.deepEqual(ids(male).sort(), ids(friendship).sort(), 'gender=male no filtró');
+    assert.deepEqual(ids(male).sort(), expected('gender', 'male'), 'gender=male no filtró');
+    assert.ok(male.every((row) => row.gender === 'male'));
 
     const verified = await rows(observer.token, { verified: true });
-    assert.deepEqual(
-      ids(verified).sort(),
-      [`${observer.profileId}-b1`, `${observer.profileId}-b2`].sort(),
-      'verified=true no filtró',
-    );
+    assert.deepEqual(ids(verified).sort(), expected('verified', true), 'verified=true no filtró');
     assert.ok(verified.every((row) => row.verified === true));
+
+    // El filtro no mira la fila del dueño de los bots: el humano ajeno entra (o
+    // no) por su propio atributo, igual que cualquier bot por el del donante.
+    assert.equal(
+      ids(friendship).includes(neighbour.profileId),
+      byId[neighbour.profileId].intention === 'friendship',
+      'intention=friendship no coincide con la fila del vecino',
+    );
 
     // `false` no filtra: el contrato dice "sólo cuando es `true`".
     assert.equal((await rows(observer.token, { verified: false })).length, 5, 'verified=false filtró');
@@ -290,7 +368,14 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
       verified: true,
       online: true,
     });
-    assert.deepEqual(combined, [], 'la combinación no es intersección');
+    const both = all.filter(
+      (row) => row.intention === 'friendship' && row.gender === 'male' && row.verified,
+    );
+    assert.deepEqual(
+      ids(combined).sort(),
+      both.map((row) => row.profileId).sort(),
+      'la combinación no es intersección',
+    );
 
     const combined2 = await rows(observer.token, {
       intention: 'friendship',
