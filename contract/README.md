@@ -49,7 +49,7 @@ contract:validate      →  el spec es OpenAPI 3.1 y cumple sus invariantes
 contract:generate:check →  api.ts commiteado == regenerado (bytes)
 contract:seed:check    →  catálogo y manifest sin drift
 contract:event-log:check →  sample-log.json == derivado del catálogo
-contract:test          →  los casos de node:test (hoy 77)
+contract:test          →  los casos de node:test (hoy 85)
 contract:typecheck     →  el cliente compila en strict
 git diff --exit-code   →  red secundaria: nada quedó sin commitear
 ```
@@ -115,6 +115,8 @@ contract/
   paths/presence.yaml       PUT y DELETE /presence (S2): la única entrada con coordenadas
   paths/discovery.yaml      GET /discovery (S3): radio y filtros, sin geometría
   paths/pings.yaml          POST y GET /pings, accept y reject (S4)
+  paths/matches.yaml        GET /matches, mensajes y read (S4, delta v0.4)
+  paths/me.yaml             GET /me: el perfil de la propia sesión (delta v0.4)
   schemas/auth.yaml         DemoSession, DemoSessionRequest, TakeoverRequest, StreamTicket
   schemas/events.yaml       envelope, los 6 tipos, los 6 payloads, EventsPage
   schemas/region.yaml       Region, RegionList, ZoneSummary, ZoneList
@@ -122,6 +124,7 @@ contract/
   schemas/presence.yaml     PresenceUpdate (no montado), PrivatePoint (no montado), PresenceState
   schemas/discovery.yaml    DiscoveryQuery, DiscoveryResult
   schemas/pings.yaml        Ping, PingList (con PingPeer), PingCreate y Match
+  schemas/chat.yaml         Message, MessageCreate, MessagePage, MatchListItem y MatchList
   schemas/common.yaml       RegionKey, SourceType, Gender, Intention, KeyLabel, Page
   catalog/regions.json      dos regiones: mx, co (con defaultZoneKey)
   catalog/zones.json        geometría de CDMX y Bogotá: anillos [lng, lat]
@@ -145,6 +148,7 @@ contract/
   test/zones-geometry.test.mjs   anillos válidos + geometría inalcanzable desde el spec
   test/fixtures-parity.test.mjs  paridad campo a campo con fixtures (fixtures gana)
   test/seed-idempotent.test.mjs  doble emisión byte-idéntica + gate anti-drift
+  test/chat-contract.test.mjs   el delta v0.4: chat, idempotencia y SelfProfile
   test/presence-discovery.test.mjs  punto o zona, fallback y el filtro de discovery
   test/no-coordinates.test.mjs   walk de responses y eventos: ninguna coordenada sale
   test/client-drift.test.mjs     api.ts == regenerado, determinista y type-only
@@ -177,9 +181,10 @@ demo-session:
 ## Superficie congelada (S1–S4)
 
 Lo que está adentro es la superficie de la demo. Lo que está afuera se congela
-cuando exista un diseño que lo congele: chat, block, report y `/health` no tienen
-path. `matches` no es un path: el match se entrega en el `200` de aceptar y se
-descubre por `Ping.matchId` (ver [Pings y matches](#pings-y-matches-delta-v03)).
+cuando exista un diseño que lo congele: block, report y `/health` no tienen path.
+Desde v0.4 un match **sí** es un recurso: `GET /matches` es la bandeja y su
+conversación cuelga de `GET|POST /matches/{matchId}/messages` (ver
+[Chat (delta v0.4)](#chat-delta-v04)).
 
 | Operation | Sprint | Archivo | Entra en |
 |---|---:|---|---|
@@ -194,6 +199,10 @@ descubre por `Ping.matchId` (ver [Pings y matches](#pings-y-matches-delta-v03)).
 | `GET /discovery` | 3 | `paths/discovery.yaml` | PR6 |
 | `POST /pings`, `GET /pings` | 4 | `paths/pings.yaml` | **v0.3** |
 | `POST /pings/{pingId}/accept`, `POST /pings/{pingId}/reject` | 4 | `paths/pings.yaml` | **v0.3** |
+| `GET /matches` | 4 | `paths/matches.yaml` | **v0.4** |
+| `GET /matches/{matchId}/messages`, `POST /matches/{matchId}/messages` | 4 | `paths/matches.yaml` | **v0.4** |
+| `POST /matches/{matchId}/read` | 4 | `paths/matches.yaml` | **v0.4** |
+| `GET /me` | 4 | `paths/me.yaml` | **v0.4** |
 
 ## Ocupación y takeover (delta v0.2)
 
@@ -275,11 +284,12 @@ en direcciones opuestas no producen dos matches. La aplicación acepta el ping c
 un `UPDATE … WHERE status = 'pending'`, así que de dos aceptaciones simultáneas
 sólo una gana y la otra es 409.
 
-**Cómo ve el match el emisor.** No hay `GET /matches`: el `Match` viaja en el
-`200` de aceptar y `Ping.matchId` lo publica en la bandeja. `A` lo descubre
-poleando `GET /pings?box=sent` y viendo el ping en `accepted` con su `matchId`.
-Es el mínimo que permite mostrar "¡Match!" de los dos lados sin inventar
-superficie.
+**Cómo ve el match el emisor.** El `Match` viaja en el `200` de aceptar y
+`Ping.matchId` lo publica en la bandeja: `A` lo descubre poleando
+`GET /pings?box=sent` y viendo el ping en `accepted` con su `matchId`. Desde v0.4
+además lo ve en `GET /matches`, que es la bandeja de conversaciones; el
+`Ping.matchId` sigue siendo el camino más corto entre "aceptaron mi ping" y
+"abrime el chat".
 
 **`PingList` no es un array de `Ping`.** Cada fila es `PingListItem { ping,
 peer }`: el ping y el otro perfil (nickname, iniciales, foto, intención,
@@ -292,12 +302,68 @@ proyección de su dueño, igual que en `GET /discovery`.
 `PING_FORBIDDEN` (403), `PING_NOT_FOUND` (404) y `PING_RESOLVED` (409) porque
 son tres decisiones distintas del cliente: "no es tuyo", "no existe" y "ya está
 resuelto" no se pueden colapsar en un código sin que el cliente mienta.
-`MATCH_NOT_FOUND` y `CHAT_BLOCKED` siguen reservados para S5.
+`MATCH_NOT_FOUND` y `CHAT_BLOCKED` quedaron reservados para S5 hasta que v0.4
+les dio operation (ver [Chat](#chat-delta-v04)).
 
 **TTL.** Un ping pendiente vence a las 24 h (`expiresAt` en la fila). El
 vencimiento es perezoso: se aplica al leer la bandeja y al resolver, no con un
 cron. La demo no tiene volumen para un job de barrido y un ping vencido sólo
 importa cuando alguien lo mira.
+
+## Chat (delta v0.4)
+
+v0.3 entregó un match sin conversación. v0.4 cierra el flujo: la bandeja de
+matches, la conversación paginada, la escritura idempotente y el perfil propio
+que el tab Perfil necesita.
+
+| Operation | Sprint | Respuesta | Qué hace |
+|---|---:|---|---|
+| `GET /matches` | 4 | 200 `MatchList` | Bandas de conversaciones: el match, el peer del otro, `lastMessage` y `unreadCount` |
+| `GET /matches/{matchId}/messages` | 4 | 200 `MessagePage` | La conversación, cronológica, paginada con cursor opaco |
+| `POST /matches/{matchId}/messages` | 4 | 201 `Message` | Escribe; idempotente por `clientMessageId` |
+| `POST /matches/{matchId}/read` | 4 | 204 | Marca leídos los mensajes del otro lado |
+| `GET /me` | 4 | 200 `SelfProfile` | El perfil de la propia sesión, no el `self` del dataset |
+
+Reglas que el contrato fija y el server no reinterpreta:
+
+| Caso | Respuesta | Por qué |
+|---|---|---|
+| match inexistente en la región | 404 `MATCH_NOT_FOUND` | Un match no cruza regiones |
+| match de la región del que no sos parte | 403 `CHAT_BLOCKED` | El recurso existe; el derecho, no |
+| conversación cerrada (el otro lado ya no está) | 409 `MATCH_CLOSED` | La historia queda legible; escribir, no |
+| `body` vacío o con campos de más | 422 `VALIDATION_FAILED` | Es schema, no estado |
+| `matchId` o `cursor` malformado | 422 `VALIDATION_FAILED` | Mal escrito antes de faltar |
+| cuota de envíos agotada | 429 `RATE_LIMITED` | El body no se corrige, se espera |
+| `GET /me` sin perfil de catálogo (invitado) | 404 `PROFILE_NOT_FOUND` | No hay nickname que devolver sin inventarlo |
+
+**Por qué `Message.clientMessageId` vuelve en la response.** Es la clave que
+puso el cliente para reintentar sin duplicar: sin ella, un refresh de la lista no
+puede reconciliar el mensaje del server con la burbuja optimista que ya está en
+pantalla, y termina comparando por texto y hora. La idempotencia es por `(match,
+emisor)`: dos personas pueden usar el mismo valor en la misma conversación.
+
+**El cursor es opaco.** `nextCursor` no es un `seq` de evento ni un `createdAt`:
+es lo que el server necesite para no perder ni repetir filas cuando dos mensajes
+llegan en el mismo milisegundo, y el cliente lo devuelve tal cual. `hasMore`
+dice si quedó algo; una página vacía al final devuelve `nextCursor: null`.
+
+**El bot responde solo.** Si el otro lado de un match es un bot, el server agenda
+una respuesta a los ~2 s y emite `typing.started` en el acto. El cliente no
+simula nada y no hay timer duplicado: la espera es del server y la respuesta
+llega como `message.created` por el stream, igual que la de un humano.
+
+**Los eventos del chat son de los participantes.** `message.created` lleva
+`matchId`, no `profileId`, así que la visibilidad no puede ser la del resto del
+stream (humanos de la región + bots visibles): filtrar por región le mostraría a
+cualquiera las conversaciones ajenas. La regla es "soy uno de los dos lados de
+ese match", y el payload no lleva el texto: el evento avisa, la conversación se
+lee por HTTP.
+
+**Dos códigos dejan de estar reservados y entra uno.** `MATCH_NOT_FOUND` y
+`CHAT_BLOCKED` ya tienen operation, así que salen de `x-reserved`; se suma
+`MATCH_CLOSED` (409) porque "la conversación ya no acepta mensajes" no se podía
+expresar con los códigos existentes sin mentir. **Desde v0.4 no queda ningún
+código reservado**: el bloqueo de S5 reusará `CHAT_BLOCKED`.
 
 ## Regiones y zonas: la geometría existe y nunca viaja
 

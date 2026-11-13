@@ -9,12 +9,12 @@ openapi: 3.1.0
 
 info:
   title: NearbyIG API
-  version: 0.3.0
+  version: 0.4.0
   summary: Contrato congelado de la demo (S1–S4).
   description: |
     Contrato de la demo NearbyIG escrito a mano antes del server. La superficie
-    está congelada en S1–S4; chat, block, report y `/health` quedan fuera hasta
-    que exista un diseño que los congele (S5).
+    está congelada en S1–S4; block, report y `/health` quedan fuera hasta que
+    exista un diseño que los congele (S5).
 
     Cada operation declara `x-implementation-sprint` con el sprint que la
     implementa. Ninguna operation se implementa en Sprint 0: acá sólo se
@@ -39,10 +39,29 @@ info:
         `PING_RESOLVED`, que son las tres decisiones nuevas del cliente.
     Chat, block y report siguen fuera.
 
+    **v0.4 (delta sobre v0.3):** entra el chat, que es lo que le faltaba al
+    match para ser una conversación.
+      * `GET /matches` — la bandeja de matches con el otro perfil, el último
+        mensaje y `unreadCount`.
+      * `GET /matches/{matchId}/messages` — la conversación paginada con cursor
+        opaco, en orden cronológico.
+      * `POST /matches/{matchId}/messages` — escribir, idempotente por
+        `clientMessageId`. Si el otro lado es un bot, el bot responde solo.
+      * `POST /matches/{matchId}/read` — marcar leídos los mensajes del otro.
+      * `GET /me` — el perfil de la propia sesión (`SelfProfile`, que estaba
+        declarado desde S0 sin consumer).
+      * `Message`, `MessageCreate`, `MessagePage`, `MatchListItem` y `MatchList`.
+      * `MATCH_NOT_FOUND` y `CHAT_BLOCKED` salen de `x-reserved`; se suma
+        `MATCH_CLOSED` (409) para una conversación que ya no acepta mensajes. El
+        enum queda sin códigos reservados.
+      * `message.created` y `typing.started` dejan de ser payloads declarados sin
+        productor: el chat los emite en el stream existente.
+    Block y report siguen fuera.
+
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: '8f239137c03c'
+  x-contract-id: 'f6fc7983cefc'
 
 servers:
   - url: http://localhost:3000
@@ -94,6 +113,15 @@ tags:
       (`GET /pings?box=`) trae el ping y la proyección del otro perfil, sin
       coordenadas: quién fue, no dónde está. Un bot acepta solo, así la demo se
       siente viva sin que nadie mire la pantalla del bot.
+  - name: matches
+    description: |
+      El chat de S4. Un match es una conversación: `GET /matches` es la bandeja
+      (con el otro perfil, el último mensaje y `unreadCount`), `GET
+      /matches/{matchId}/messages` la conversación paginada y `POST
+      /matches/{matchId}/messages` la escritura idempotente por
+      `clientMessageId`. `POST /matches/{matchId}/read` apaga el badge. Si el otro
+      lado es un bot, responde solo. Sin coordenadas: un chat cuenta quién habló,
+      no dónde estaba.
 
 paths:
   /auth/demo-session:
@@ -124,6 +152,14 @@ paths:
     $ref: './paths/pings.yaml#/pings-accept'
   /pings/{pingId}/reject:
     $ref: './paths/pings.yaml#/pings-reject'
+  /matches:
+    $ref: './paths/matches.yaml#/matches'
+  /matches/{matchId}/messages:
+    $ref: './paths/matches.yaml#/matches-messages'
+  /matches/{matchId}/read:
+    $ref: './paths/matches.yaml#/matches-read'
+  /me:
+    $ref: './paths/me.yaml#/me'
 
 components:
   # Respuestas de error compartidas. Todas tienen la misma forma
@@ -362,6 +398,42 @@ components:
           schema:
             $ref: './schemas/errors.yaml#/Problem'
 
+    MatchNotFound:
+      description: |
+        El `matchId` del path no existe en la región de la sesión
+        (`MATCH_NOT_FOUND`). Un match de otra región es exactamente eso: no
+        existe para esta sesión. Un id malformado (no uuid) es 422
+        `VALIDATION_FAILED`, no un 404.
+      x-error-code: MATCH_NOT_FOUND
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    ChatBlocked:
+      description: |
+        El match existe en la región pero la sesión no es parte de él
+        (`CHAT_BLOCKED`). Es un 403 y no un 404: el recurso está, lo que falta es
+        el derecho a leer o escribir esa conversación. El mismo código es el que
+        S5 usará cuando el otro lado bloquee la conversación.
+      x-error-code: CHAT_BLOCKED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    MatchClosed:
+      description: |
+        La conversación no acepta mensajes nuevos (`MATCH_CLOSED`): el otro lado
+        ya no existe para la demo (un bot cuyo dueño se fue, un perfil regenerado
+        por un seed) o la conversación se cerró. Se puede leer —la historia queda
+        legible— y marcar leída; lo que no se puede es escribir.
+      x-error-code: MATCH_CLOSED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
   securitySchemes:
     demoSession:
       type: http
@@ -463,3 +535,13 @@ components:
       $ref: './schemas/pings.yaml#/PingList'
     Match:
       $ref: './schemas/pings.yaml#/Match'
+    Message:
+      $ref: './schemas/chat.yaml#/Message'
+    MessageCreate:
+      $ref: './schemas/chat.yaml#/MessageCreate'
+    MessagePage:
+      $ref: './schemas/chat.yaml#/MessagePage'
+    MatchListItem:
+      $ref: './schemas/chat.yaml#/MatchListItem'
+    MatchList:
+      $ref: './schemas/chat.yaml#/MatchList'

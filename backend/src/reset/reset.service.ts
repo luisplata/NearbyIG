@@ -16,14 +16,15 @@ import type { AuthContext, SourceType } from '../auth/session.types';
  *
  * Qué borra y qué no:
  *   * Borra `sessions` (invitados incluidos), `stream_tickets`, `bots`, `events`,
- *     `event_seq`, `pings` y `matches`: es el estado que ocupa slots, que
- *     sobrevive a un refresh, que hace que el stream de una corrida no se mezcle
- *     con el de la anterior y que deja la bandeja de pings vacía.
+ *     `event_seq`, `messages`, `match_reads`, `pings` y `matches`: es el estado
+ *     que ocupa slots, que sobrevive a un refresh, que hace que el stream de una
+ *     corrida no se mezcle con el de la anterior y que deja la bandeja de pings y
+ *     las conversaciones vacías.
  *   * **No** borra `regions`, `zones`, `profiles`, `presence` ni `demo_meta`: el
  *     catálogo lo escribe el seed y la presencia cae en cascada con la sesión.
  *     Los 10 slots quedan libres sólo porque no hay sesiones vivas.
- *   * Chat todavía no existe (S4+). Cuando exista, se suma acá: éste es el único
- *     punto de limpieza de datos de demo.
+ *   * Es el único punto de limpieza de datos de demo. Toda tabla nueva de estado
+ *     efímero se suma acá.
  */
 export interface ResetSelfResult {
   readonly scope: 'self';
@@ -123,7 +124,10 @@ export class ResetService {
       // que dejar la demo como recién migrada, con el stream vacío y el `seq` de
       // cada región volviendo a 1. La presencia cae en cascada con las sesiones.
       // Pings antes que matches: `pings.match_id` apunta a `matches`, así que
-      // las dos tablas no se pueden vaciar en cualquier orden.
+      // las dos tablas no se pueden vaciar en cualquier orden. El chat va antes
+      // por la misma razón: `messages` y `match_reads` cuelgan de un match.
+      const messages = await client.query('DELETE FROM messages');
+      const reads = await client.query('DELETE FROM match_reads');
       const pings = await client.query('DELETE FROM pings');
       const matches = await client.query('DELETE FROM matches');
       await client.query('DELETE FROM bots');
@@ -150,7 +154,7 @@ export class ResetService {
         })),
       };
       this.logger.log(
-        `reset global sessions=${result.sessionsDeleted} guests=${result.guestsDeleted} tickets=${result.ticketsDeleted} pings=${pings.rowCount ?? 0} matches=${matches.rowCount ?? 0}`,
+        `reset global sessions=${result.sessionsDeleted} guests=${result.guestsDeleted} tickets=${result.ticketsDeleted} pings=${pings.rowCount ?? 0} matches=${matches.rowCount ?? 0} messages=${messages.rowCount ?? 0} reads=${reads.rowCount ?? 0}`,
       );
       return result;
     } catch (error) {

@@ -22,6 +22,11 @@ const { raw, spec } = loadSpec();
  * `POST /auth/takeover` (desalojo explícito de un slot) junto con
  * `ProfileSummary.inUse`, porque la demo de Sprint 1 necesita mostrar "en uso" y
  * desalojar sin inventar superficie fuera del contrato.
+ *
+ * **v0.3** agrega las cuatro operations de pings (enviar, bandeja, accept y
+ * reject). **v0.4** agrega el chat que le faltaba al match —bandeja, conversación,
+ * envío y lectura— más `GET /me`, que le da consumer al `SelfProfile` declarado
+ * desde S0.
  */
 const EXPECTED_OPERATIONS = [
   'POST /auth/demo-session',
@@ -40,6 +45,11 @@ const EXPECTED_OPERATIONS = [
   'GET /pings',
   'POST /pings/{pingId}/accept',
   'POST /pings/{pingId}/reject',
+  'GET /matches',
+  'GET /matches/{matchId}/messages',
+  'POST /matches/{matchId}/messages',
+  'POST /matches/{matchId}/read',
+  'GET /me',
 ];
 
 /** Paths que la superficie congelada S1–S4 deja afuera a propósito. */

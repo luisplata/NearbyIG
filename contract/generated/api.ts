@@ -3,7 +3,7 @@
  *
  * Source: contract/openapi.yaml
  * Generator: openapi-typescript 7.13.0 (pinned exact in package.json)
- * Contract: x-contract-id 8f239137c03c
+ * Contract: x-contract-id f6fc7983cefc
  *
  * Type-only client: no runtime code and no imports. Regenerate with
  * `npm run contract:generate`. The drift gate is `npm run contract:generate:check`.
@@ -445,6 +445,164 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/matches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lista los matches de la sesión
+         * @description Los matches del perfil de la sesión —y sólo los suyos— con la proyección
+         *     del otro lado y el estado de la conversación. El más reciente primero.
+         *
+         *     Cada fila es `MatchListItem { match, peer, lastMessage, unreadCount }`: el
+         *     `peer` es el otro perfil (humano o bot, con la misma forma que la bandeja
+         *     de pings) y `unreadCount` cuenta los mensajes del otro lado posteriores a
+         *     tu última lectura. Un match recién aceptado viene con `lastMessage: null` y
+         *     `unreadCount: 0`.
+         *
+         *     **Sólo el perfil de la sesión.** Un match entre otro humano y un bot —aun
+         *     cuando el bot sea de tu propiedad— no es tuyo y no aparece: la lista es de
+         *     conversaciones propias, no del mundo visible.
+         *
+         *     Sin cursor: hasta los 100 matches más recientes (`maxItems`). La demo tiene
+         *     un match por par y no necesita paginar.
+         */
+        get: operations["listMatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/matches/{matchId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lee la conversación de un match
+         * @description Los mensajes del match, en orden **cronológico ascendente** (el más viejo
+         *     primero) y paginados con un cursor opaco.
+         *
+         *     **Quién puede leer.** Sólo los dos lados del match. Desde una sesión ajena
+         *     el match existe pero la conversación no es suya: `403 CHAT_BLOCKED`. Un
+         *     `matchId` de otra región es `404 MATCH_NOT_FOUND`.
+         *
+         *     **Paginación.** Sin `cursor` devuelve la primera página (hasta 100
+         *     mensajes). Con el `nextCursor` de la página anterior devuelve lo que sigue;
+         *     `null` y `hasMore: false` significan que la conversación se terminó. El
+         *     cursor es opaco: el cliente no lo parsea ni lo construye, sólo lo repite.
+         *
+         *     **Un match cerrado se puede leer.** La conversación vieja queda legible; lo
+         *     que no se puede es escribir (`409 MATCH_CLOSED`).
+         */
+        get: operations["listMessages"];
+        put?: never;
+        /**
+         * Envía un mensaje al match
+         * @description Escribe en la conversación del match como el perfil de la sesión y devuelve
+         *     el mensaje persistido con `201`.
+         *
+         *     **Idempotencia.** `clientMessageId` es la clave: es única por `(match,
+         *     emisor)`. Reintentar el mismo pedido devuelve **el mismo** `Message` —mismo
+         *     `id`, mismo `createdAt`— y no crea una segunda fila ni un segundo evento.
+         *     Es lo que hace que un doble toque o un reintento de red no dupliquen el
+         *     mensaje.
+         *
+         *     **Validación.** `body` vacío o sólo espacios, un `clientMessageId` ausente
+         *     o un campo de más es `422 VALIDATION_FAILED`. El server recorta los bordes
+         *     del texto antes de guardarlo.
+         *
+         *     **Un match cerrado no acepta mensajes.** Si el otro lado ya no existe (un
+         *     bot cuyo dueño se fue de la demo, un perfil regenerado), la conversación
+         *     queda legible pero escribir es `409 MATCH_CLOSED`.
+         *
+         *     **El bot responde solo.** Si el otro lado es un bot, el server agenda su
+         *     respuesta (~2 s) y emite `typing.started` y `message.created` en el stream.
+         *     El cliente no simula nada: el mismo camino sirve para humano y bot.
+         *
+         *     **Cuota.** Hay un tope de mensajes por ventana: superarlo es `429
+         *     RATE_LIMITED`.
+         */
+        post: operations["sendMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/matches/{matchId}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Marca leída la conversación
+         * @description Marca como leídos los mensajes **del otro lado** en este match. `204`, sin
+         *     body: no hay recurso nuevo que devolver y el efecto se lee en
+         *     `GET /matches`.
+         *
+         *     **Idempotente por resultado.** Repetirlo deja el mismo estado
+         *     (`unreadCount: 0`) y no es un error: marcar leído dos veces no miente sobre
+         *     nada, a diferencia de aceptar dos veces un ping.
+         *
+         *     **Un match cerrado se puede marcar leído.** El badge tiene que poder
+         *     apagarse aunque ya no se pueda responder.
+         */
+        post: operations["markMatchRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Devuelve el perfil de la propia sesión
+         * @description El perfil que encarna la sesión —el que el tab Perfil muestra como "yo"—
+         *     con la forma de `SelfProfile`: la identidad (`profileId`, `regionKey`,
+         *     `demoSlot`, `sourceType`) y la fila de display del catálogo (nickname,
+         *     iniciales, intención, foto, Instagram, clave de estado).
+         *
+         *     **No es el dataset.** El `self` de `fixtures.json` es el perfil de la demo
+         *     mock; acá sale la fila del catálogo que la sesión reclamó, así que dos
+         *     navegadores en slots distintos ven cada uno el suyo.
+         *
+         *     **Un invitado no tiene perfil.** Cuando los 10 slots están ocupados, la
+         *     sesión es de relleno: no existe fila de catálogo y el nickname, la foto y el
+         *     handle no se pueden inventar. La respuesta es `404 PROFILE_NOT_FOUND`, el
+         *     mismo código que un perfil borrado por un seed nuevo: la credencial sirve,
+         *     el recurso no está.
+         *
+         *     **Sin `distanceM`/`bearingDeg` ni `online`.** El perfil propio no se mide
+         *     contra sí mismo y la sesión está viva por definición.
+         */
+        get: operations["getSelfProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -614,7 +772,7 @@ export interface components {
             profileId: string;
         };
         /**
-         * @description Motivo del error, cerrado a estos 21 valores. `code` es el discriminante
+         * @description Motivo del error, cerrado a estos 22 valores. `code` es el discriminante
          *     estable: el cliente decide con él, nunca con `title` ni con `detail` (esos
          *     son texto para humanos, traducible y variable).
          *
@@ -623,7 +781,7 @@ export interface components {
          *     corresponde cada uno— vive en la spec del change.
          * @enum {string}
          */
-        ErrorCode: "UNAUTHENTICATED" | "TICKET_EXPIRED" | "TICKET_REUSED" | "REGION_MISMATCH" | "CHAT_BLOCKED" | "PING_FORBIDDEN" | "PROFILE_NOT_FOUND" | "MATCH_NOT_FOUND" | "PING_NOT_FOUND" | "PROFILE_IN_USE" | "PRESENCE_STALE" | "PING_DUPLICATE" | "PING_RESOLVED" | "CURSOR_EXPIRED" | "PING_EXPIRED" | "RATE_LIMITED" | "REGION_UNAVAILABLE" | "ZONE_UNKNOWN" | "VALIDATION_FAILED" | "INTERNAL" | "NOT_IMPLEMENTED";
+        ErrorCode: "UNAUTHENTICATED" | "TICKET_EXPIRED" | "TICKET_REUSED" | "REGION_MISMATCH" | "CHAT_BLOCKED" | "PING_FORBIDDEN" | "PROFILE_NOT_FOUND" | "MATCH_NOT_FOUND" | "PING_NOT_FOUND" | "PROFILE_IN_USE" | "PRESENCE_STALE" | "PING_DUPLICATE" | "PING_RESOLVED" | "MATCH_CLOSED" | "CURSOR_EXPIRED" | "PING_EXPIRED" | "RATE_LIMITED" | "REGION_UNAVAILABLE" | "ZONE_UNKNOWN" | "VALIDATION_FAILED" | "INTERNAL" | "NOT_IMPLEMENTED";
         /**
          * @description Cuerpo único de error, RFC 9457 (`application/problem+json`). Toda respuesta
          *     4xx/5xx del contrato devuelve exactamente esto: un shape cerrado, sin campos
@@ -1103,9 +1261,10 @@ export interface components {
          *     los dos lados reciben exactamente el mismo objeto y el cliente sabe cuál es
          *     el propio porque ya conoce su `profileId`.
          *
-         *     No hay `GET /matches` ni chat en esta versión: el `Match` se entrega en el
-         *     `200` de aceptar y el emisor lo descubre por `Ping.matchId`. La conversación
-         *     llega en S5.
+         *     El `Match` se entrega en el `200` de aceptar y el emisor lo descubre por
+         *     `Ping.matchId`. Desde v0.4 también es un recurso: `GET /matches` es la
+         *     bandeja de conversaciones y sus mensajes cuelgan de
+         *     `GET|POST /matches/{matchId}/messages` (ver `schemas/chat.yaml`).
          */
         Match: {
             /**
@@ -1123,6 +1282,149 @@ export interface components {
              * @description Cuándo se aceptó el ping que lo creó (RFC 3339 UTC con ms).
              */
             createdAt: string;
+        };
+        /**
+         * @description Un mensaje de la conversación de un match. Es lo que devuelve el `201` de
+         *     `POST /matches/{matchId}/messages` y lo que viaja en cada fila de
+         *     `MessagePage`.
+         *
+         *     **`clientMessageId` viaja de vuelta a propósito.** Es la clave que puso el
+         *     cliente para reintentar sin duplicar: sin ella en la respuesta, un refresh de
+         *     la lista no podría reconciliar el mensaje del server con la burbuja optimista
+         *     que el cliente ya tenía en pantalla, y terminaría comparando por texto y hora.
+         *
+         *     **El cuerpo viaja completo.** El evento `message.created` sólo lleva ids (el
+         *     cliente pide la página y la encuentra); el `Message` de esta response es el
+         *     contenido.
+         */
+        Message: {
+            /**
+             * Format: uuid
+             * @description Identidad del mensaje. Opaca para el cliente y estable.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description El match al que pertenece. Un mensaje nunca cambia de match.
+             */
+            matchId: string;
+            /**
+             * @description Quién escribió: el `profileId` del humano o el del bot (`<owner>-b1`). La
+             *     sesión se reconoce por su propio `profileId`; los mensajes del otro lado
+             *     son los que cuentan para `unreadCount`.
+             */
+            senderProfileId: string;
+            /**
+             * @description Clave de idempotencia del emisor. Es única **por match y por emisor**: dos
+             *     personas pueden usar el mismo valor en la misma conversación sin pisarse,
+             *     y reintentar el mismo `clientMessageId` devuelve este mensaje en vez de
+             *     crear otro.
+             * @example 0f9c2a7e-1b44-4a51-9d3e-m1
+             */
+            clientMessageId: string;
+            /**
+             * @description Texto del mensaje, ya recortado de espacios en los bordes por el server.
+             *     Vacío o sólo espacios es `422 VALIDATION_FAILED`: un mensaje sin cuerpo no
+             *     es un mensaje.
+             */
+            body: string;
+            /**
+             * Format: date-time
+             * @description Cuándo se aceptó el mensaje (RFC 3339 UTC con ms). El orden de la
+             *     conversación es el del server, no el del reloj del cliente.
+             */
+            createdAt: string;
+        };
+        /**
+         * @description Body de `POST /matches/{matchId}/messages`. Nombra al mensaje y nada más: el
+         *     emisor es la sesión y el `matchId` viene en el path.
+         *
+         *     **Idempotencia.** `clientMessageId` es la clave: el server la guarda única
+         *     por `(matchId, emisor)`. Reintentar el mismo pedido —un reintento de red, un
+         *     doble toque— devuelve **el mismo** `Message` con el mismo `id` y no crea una
+         *     segunda fila ni un segundo evento.
+         *
+         *     **Sin reply-to, sin adjuntos, sin emoji.** La demo no los dibuja; agregarlos
+         *     sin consumer sería superficie que nadie ejercita.
+         */
+        MessageCreate: {
+            /**
+             * @description Clave de idempotencia elegida por el cliente. Se recomienda un uuid por
+             *     mensaje; el server no la interpreta, sólo la compara.
+             */
+            clientMessageId: string;
+            /**
+             * @description Texto del mensaje. El server recorta los espacios de los bordes antes de
+             *     guardarlo: un body que queda vacío después del recorte es `422
+             *     VALIDATION_FAILED`.
+             */
+            body: string;
+        };
+        /**
+         * @description Una página de la conversación, en orden **cronológico ascendente** (el más
+         *     viejo primero): un chat se lee de arriba abajo y la demo pide la primera
+         *     página al abrir.
+         *
+         *     Tres campos planos —mismo idioma que `EventsPage`— porque `Page` es metadata
+         *     y `allOf` + `additionalProperties: false` bloquearía los hermanos.
+         *
+         *     **Cursor opaco.** `nextCursor` es un valor que el cliente no interpreta: lo
+         *     devuelve tal cual en `?cursor=` para pedir lo que sigue. No es un `seq` de
+         *     evento ni un `createdAt`: es lo que el server necesite para no perder ni
+         *     repetir mensajes cuando dos llegan en el mismo milisegundo.
+         */
+        MessagePage: {
+            /** @description Hasta 100 mensajes, del más viejo al más nuevo dentro de la página. */
+            messages: components["schemas"]["Message"][];
+            /**
+             * @description Cursor de la próxima página, o `null` si no queda nada después de esta.
+             *     Opaco: el cliente lo repite sin parsearlo. Una página vacía sobre el
+             *     final devuelve `null`, no el cursor recibido, porque no hay nada que
+             *     seguir leyendo.
+             */
+            nextCursor: string | null;
+            /** @description Si quedan mensajes después de esta página. */
+            hasMore: boolean;
+        };
+        /**
+         * @description Una fila de la bandeja de matches: el match, el otro perfil y el estado de la
+         *     conversación. Está anidado —como `PingListItem`— para que `Match` y `Message`
+         *     tengan un solo lugar donde declararse.
+         *
+         *     **`peer` es el otro lado, siempre.** El cliente no cruza el match contra
+         *     `/demo/profiles` (que no conoce a los bots) ni busca su propio perfil en una
+         *     lista: la fila ya trae a quién dibujar, igual que la bandeja de pings.
+         *
+         *     **`unreadCount` es del que mira.** Son los mensajes del otro lado posteriores
+         *     a su última lectura de este match; los propios nunca cuentan, aunque el
+         *     cliente no haya marcado leídos.
+         */
+        MatchListItem: {
+            match: components["schemas"]["Match"];
+            peer: components["schemas"]["PingPeer"];
+            /**
+             * @description El último mensaje de la conversación, o `null` si todavía no hay ninguno
+             *     (el match recién aceptado). Es lo que la lista muestra como preview.
+             */
+            lastMessage: components["schemas"]["Message"] | null;
+            /**
+             * @description Mensajes del otro lado que el perfil de la sesión no marcó como leídos.
+             *     Baja a `0` al hacer `POST /matches/{matchId}/read`; un mensaje nuevo del
+             *     otro lado lo vuelve a subir.
+             */
+            unreadCount: number;
+        };
+        /**
+         * @description Respuesta de `GET /matches`: objeto con array adentro —mismo idioma que
+         *     `PingList` y `ProfileList`—, no un array pelado.
+         *
+         *     Orden: el match más reciente primero (`createdAt` descendente), que es "lo
+         *     que necesita respuesta arriba". Sin cursor: la demo tiene un match por par y
+         *     el server corta en los 100 más recientes (`maxItems`). Cuando el volumen lo
+         *     pida, el cursor se agrega con la misma forma que `MessagePage`.
+         */
+        MatchList: {
+            matches: components["schemas"]["MatchListItem"][];
         };
         /**
          * @description Punto privado de la sesión, en grados decimales WGS 84. Es la contraparte de
@@ -1438,6 +1740,48 @@ export interface components {
             };
         };
         /**
+         * @description El `matchId` del path no existe en la región de la sesión
+         *     (`MATCH_NOT_FOUND`). Un match de otra región es exactamente eso: no
+         *     existe para esta sesión. Un id malformado (no uuid) es 422
+         *     `VALIDATION_FAILED`, no un 404.
+         */
+        MatchNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El match existe en la región pero la sesión no es parte de él
+         *     (`CHAT_BLOCKED`). Es un 403 y no un 404: el recurso está, lo que falta es
+         *     el derecho a leer o escribir esa conversación. El mismo código es el que
+         *     S5 usará cuando el otro lado bloquee la conversación.
+         */
+        ChatBlocked: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description La conversación no acepta mensajes nuevos (`MATCH_CLOSED`): el otro lado
+         *     ya no existe para la demo (un bot cuyo dueño se fue, un perfil regenerado
+         *     por un seed) o la conversación se cerró. Se puede leer —la historia queda
+         *     legible— y marcar leída; lo que no se puede es escribir.
+         */
+        MatchClosed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
          * @description El pedido choca con el estado del slot demo (`PROFILE_IN_USE`). En
          *     `POST /auth/demo-session` es un slot que ya ocupa otra sesión viva: el
          *     claim no desaloja, así que el cliente tiene que elegir otro o pedir el
@@ -1692,6 +2036,48 @@ export interface components {
          *     no-op silencioso; el cliente se entera y deja de reintentar.
          */
         "responses-PingResolved": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El match existe en la región pero la sesión no es parte de él
+         *     (`CHAT_BLOCKED`). Es un 403 y no un 404: el recurso está, lo que falta es
+         *     el derecho a leer o escribir esa conversación. El mismo código es el que
+         *     S5 usará cuando el otro lado bloquee la conversación.
+         */
+        "responses-ChatBlocked": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El `matchId` del path no existe en la región de la sesión
+         *     (`MATCH_NOT_FOUND`). Un match de otra región es exactamente eso: no
+         *     existe para esta sesión. Un id malformado (no uuid) es 422
+         *     `VALIDATION_FAILED`, no un 404.
+         */
+        "responses-MatchNotFound": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description La conversación no acepta mensajes nuevos (`MATCH_CLOSED`): el otro lado
+         *     ya no existe para la demo (un bot cuyo dueño se fue, un perfil regenerado
+         *     por un seed) o la conversación se cerró. Se puede leer —la historia queda
+         *     legible— y marcar leída; lo que no se puede es escribir.
+         */
+        "responses-MatchClosed": {
             headers: {
                 [name: string]: unknown;
             };
@@ -2155,6 +2541,149 @@ export interface operations {
             409: components["responses"]["responses-PingResolved"];
             410: components["responses"]["responses-PingExpired"];
             422: components["responses"]["responses-Unprocessable"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    listMatches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Los matches de la sesión, más reciente primero. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatchList"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    listMessages: {
+        parameters: {
+            query?: {
+                /**
+                 * @description `nextCursor` de la página anterior. Opaco: devolvelo tal cual. Vacío o
+                 *     ausente es la primera página; un valor que el server no emitió es `422
+                 *     VALIDATION_FAILED`.
+                 */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Id del match. Un id malformado es 422, no 404. */
+                matchId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una página de la conversación, del más viejo al más nuevo. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessagePage"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-ChatBlocked"];
+            404: components["responses"]["responses-MatchNotFound"];
+            422: components["responses"]["responses-Unprocessable"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    sendMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Id del match. Un id malformado es 422, no 404. */
+                matchId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageCreate"];
+            };
+        };
+        responses: {
+            /**
+             * @description Mensaje aceptado. Si ya existía uno con el mismo `clientMessageId` del
+             *     mismo emisor, es ese mismo mensaje, sin duplicar.
+             */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-ChatBlocked"];
+            404: components["responses"]["responses-MatchNotFound"];
+            409: components["responses"]["responses-MatchClosed"];
+            422: components["responses"]["responses-Unprocessable"];
+            429: components["responses"]["responses-RateLimited"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    markMatchRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Id del match. Un id malformado es 422, no 404. */
+                matchId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Leído. No hay body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-ChatBlocked"];
+            404: components["responses"]["responses-MatchNotFound"];
+            422: components["responses"]["responses-Unprocessable"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    getSelfProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description El perfil de la sesión. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelfProfile"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            404: components["responses"]["responses-ProfileNotFound"];
             500: components["responses"]["responses-Internal"];
         };
     };

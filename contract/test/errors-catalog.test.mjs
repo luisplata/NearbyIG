@@ -4,8 +4,9 @@
  * Se exige:
  *  - cada `ErrorCode` tiene un status HTTP 4xx/5xx en `x-status`, y el mapa y el
  *    enum listan exactamente los mismos códigos;
- *  - `x-reserved` sólo marca códigos que ninguna operation usa, y son los dos
- *    de S5;
+ *  - `x-reserved` sólo marca códigos que ninguna operation usa; desde v0.4 no
+ *    queda ninguno (el chat cableó los dos de S5 y el bloqueo reusará
+ *    `CHAT_BLOCKED`, no necesita código propio);
  *  - ninguna response usa un código ausente del enum;
  *  - todo 4xx/5xx responde `application/problem+json` con `Problem`, declara su
  *    `x-error-code` y el status coincide con `x-status`;
@@ -17,8 +18,8 @@
  * `PRESENCE_STALE`, `ZONE_UNKNOWN`, `NOT_IMPLEMENTED` e `INTERNAL`). v0.3 sumó
  * los pings y con ellos el uso real de `PING_DUPLICATE` y `PING_EXPIRED`, más
  * los tres códigos nuevos del flujo (`PING_FORBIDDEN`, `PING_NOT_FOUND`,
- * `PING_RESOLVED`). Los dos de S5 —chat y match como recurso— siguen en
- * `x-reserved` justamente para que esta regla los distinga de un olvido.
+ * `PING_RESOLVED`). v0.4 trajo el chat: `MATCH_NOT_FOUND` y `CHAT_BLOCKED` dejan
+ * de estar reservados porque tienen operation, y `MATCH_CLOSED` nace usándose.
  */
 
 import assert from 'node:assert/strict';
@@ -33,11 +34,11 @@ const STATUS_BY_CODE = errorCode?.['x-status'] ?? {};
 const RESERVED = errorCode?.['x-reserved'] ?? {};
 const PROBLEM_FIELDS = ['code', 'detail', 'requestId', 'status', 'title', 'type'];
 
-/** Códigos congelados en el contrato S1–S4. S5 los agrega y actualiza este número. */
-const EXPECTED_ENUM_SIZE = 21;
+/** Códigos congelados en el contrato S1–S4. v0.4 cierra el catálogo. */
+const EXPECTED_ENUM_SIZE = 22;
 
-/** Códigos reservados: existen para S5 y todavía no tienen operation en `paths/`. */
-const EXPECTED_RESERVED = ['CHAT_BLOCKED', 'MATCH_NOT_FOUND'];
+/** Códigos reservados: existen para una operation que todavía no está en `paths/`. */
+const EXPECTED_RESERVED = [];
 
 const operations = listOperations(spec);
 const label = ({ method, path }) => `${method.toUpperCase()} ${path}`;

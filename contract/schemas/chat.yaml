@@ -1,0 +1,221 @@
+# Chat (Sprint 4, delta v0.4): la conversación de un match.
+#
+# Un `Match` se abría en v0.3 y no tenía dónde escribir: la conversación llega
+# acá. Cinco piezas, una por idea:
+#
+#   1. `Message` — el mensaje persistido, con su emisor y su `clientMessageId`.
+#   2. `MessageCreate` — lo único que el cliente manda: su clave de idempotencia
+#      y el texto.
+#   3. `MessagePage` — la página cronológica de una conversación, con cursor.
+#   4. `MatchListItem` / `MatchList` — la bandeja de matches: el match, el otro
+#      perfil, el último mensaje y cuántos quedan sin leer.
+#
+# Reglas de la casa que este archivo respeta:
+#   * `additionalProperties: false` en todo DTO de respuesta.
+#   * Ninguna coordenada: un chat no sabe dónde está nadie.
+#   * Nada de `distanceM`/`bearingDeg`: la cercanía la resolvió `/discovery`
+#     antes del ping y no cambia lo que dice un mensaje.
+#
+# Lo que este archivo NO declara: `typing` como DTO de request. El evento
+# `typing.started` ya existe en `schemas/events.yaml` y en v0.4 lo emite el bot;
+# no hay operation de "estoy escribiendo" porque la demo no la necesita y una
+# operation sin consumer es superficie que nadie ejercita.
+
+Message:
+  type: object
+  additionalProperties: false
+  required:
+    - id
+    - matchId
+    - senderProfileId
+    - clientMessageId
+    - body
+    - createdAt
+  description: |
+    Un mensaje de la conversación de un match. Es lo que devuelve el `201` de
+    `POST /matches/{matchId}/messages` y lo que viaja en cada fila de
+    `MessagePage`.
+
+    **`clientMessageId` viaja de vuelta a propósito.** Es la clave que puso el
+    cliente para reintentar sin duplicar: sin ella en la respuesta, un refresh de
+    la lista no podría reconciliar el mensaje del server con la burbuja optimista
+    que el cliente ya tenía en pantalla, y terminaría comparando por texto y hora.
+
+    **El cuerpo viaja completo.** El evento `message.created` sólo lleva ids (el
+    cliente pide la página y la encuentra); el `Message` de esta response es el
+    contenido.
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Identidad del mensaje. Opaca para el cliente y estable.
+    matchId:
+      type: string
+      format: uuid
+      description: El match al que pertenece. Un mensaje nunca cambia de match.
+    senderProfileId:
+      type: string
+      minLength: 1
+      description: |
+        Quién escribió: el `profileId` del humano o el del bot (`<owner>-b1`). La
+        sesión se reconoce por su propio `profileId`; los mensajes del otro lado
+        son los que cuentan para `unreadCount`.
+    clientMessageId:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: |
+        Clave de idempotencia del emisor. Es única **por match y por emisor**: dos
+        personas pueden usar el mismo valor en la misma conversación sin pisarse,
+        y reintentar el mismo `clientMessageId` devuelve este mensaje en vez de
+        crear otro.
+      examples:
+        - '0f9c2a7e-1b44-4a51-9d3e-m1'
+    body:
+      type: string
+      minLength: 1
+      maxLength: 2000
+      description: |
+        Texto del mensaje, ya recortado de espacios en los bordes por el server.
+        Vacío o sólo espacios es `422 VALIDATION_FAILED`: un mensaje sin cuerpo no
+        es un mensaje.
+    createdAt:
+      type: string
+      format: date-time
+      description: |
+        Cuándo se aceptó el mensaje (RFC 3339 UTC con ms). El orden de la
+        conversación es el del server, no el del reloj del cliente.
+
+MessageCreate:
+  type: object
+  additionalProperties: false
+  required:
+    - clientMessageId
+    - body
+  description: |
+    Body de `POST /matches/{matchId}/messages`. Nombra al mensaje y nada más: el
+    emisor es la sesión y el `matchId` viene en el path.
+
+    **Idempotencia.** `clientMessageId` es la clave: el server la guarda única
+    por `(matchId, emisor)`. Reintentar el mismo pedido —un reintento de red, un
+    doble toque— devuelve **el mismo** `Message` con el mismo `id` y no crea una
+    segunda fila ni un segundo evento.
+
+    **Sin reply-to, sin adjuntos, sin emoji.** La demo no los dibuja; agregarlos
+    sin consumer sería superficie que nadie ejercita.
+  properties:
+    clientMessageId:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: |
+        Clave de idempotencia elegida por el cliente. Se recomienda un uuid por
+        mensaje; el server no la interpreta, sólo la compara.
+    body:
+      type: string
+      minLength: 1
+      maxLength: 2000
+      description: |
+        Texto del mensaje. El server recorta los espacios de los bordes antes de
+        guardarlo: un body que queda vacío después del recorte es `422
+        VALIDATION_FAILED`.
+
+MessagePage:
+  type: object
+  additionalProperties: false
+  required:
+    - messages
+    - nextCursor
+    - hasMore
+  description: |
+    Una página de la conversación, en orden **cronológico ascendente** (el más
+    viejo primero): un chat se lee de arriba abajo y la demo pide la primera
+    página al abrir.
+
+    Tres campos planos —mismo idioma que `EventsPage`— porque `Page` es metadata
+    y `allOf` + `additionalProperties: false` bloquearía los hermanos.
+
+    **Cursor opaco.** `nextCursor` es un valor que el cliente no interpreta: lo
+    devuelve tal cual en `?cursor=` para pedir lo que sigue. No es un `seq` de
+    evento ni un `createdAt`: es lo que el server necesite para no perder ni
+    repetir mensajes cuando dos llegan en el mismo milisegundo.
+  properties:
+    messages:
+      type: array
+      maxItems: 100
+      description: |
+        Hasta 100 mensajes, del más viejo al más nuevo dentro de la página.
+      items:
+        $ref: '#/Message'
+    nextCursor:
+      type:
+        - string
+        - 'null'
+      description: |
+        Cursor de la próxima página, o `null` si no queda nada después de esta.
+        Opaco: el cliente lo repite sin parsearlo. Una página vacía sobre el
+        final devuelve `null`, no el cursor recibido, porque no hay nada que
+        seguir leyendo.
+    hasMore:
+      type: boolean
+      description: Si quedan mensajes después de esta página.
+
+MatchListItem:
+  type: object
+  additionalProperties: false
+  required:
+    - match
+    - peer
+    - lastMessage
+    - unreadCount
+  description: |
+    Una fila de la bandeja de matches: el match, el otro perfil y el estado de la
+    conversación. Está anidado —como `PingListItem`— para que `Match` y `Message`
+    tengan un solo lugar donde declararse.
+
+    **`peer` es el otro lado, siempre.** El cliente no cruza el match contra
+    `/demo/profiles` (que no conoce a los bots) ni busca su propio perfil en una
+    lista: la fila ya trae a quién dibujar, igual que la bandeja de pings.
+
+    **`unreadCount` es del que mira.** Son los mensajes del otro lado posteriores
+    a su última lectura de este match; los propios nunca cuentan, aunque el
+    cliente no haya marcado leídos.
+  properties:
+    match:
+      $ref: './pings.yaml#/Match'
+    peer:
+      $ref: './pings.yaml#/PingPeer'
+    lastMessage:
+      oneOf:
+        - $ref: '#/Message'
+        - type: 'null'
+      description: |
+        El último mensaje de la conversación, o `null` si todavía no hay ninguno
+        (el match recién aceptado). Es lo que la lista muestra como preview.
+    unreadCount:
+      type: integer
+      minimum: 0
+      description: |
+        Mensajes del otro lado que el perfil de la sesión no marcó como leídos.
+        Baja a `0` al hacer `POST /matches/{matchId}/read`; un mensaje nuevo del
+        otro lado lo vuelve a subir.
+
+MatchList:
+  type: object
+  additionalProperties: false
+  required:
+    - matches
+  description: |
+    Respuesta de `GET /matches`: objeto con array adentro —mismo idioma que
+    `PingList` y `ProfileList`—, no un array pelado.
+
+    Orden: el match más reciente primero (`createdAt` descendente), que es "lo
+    que necesita respuesta arriba". Sin cursor: la demo tiene un match por par y
+    el server corta en los 100 más recientes (`maxItems`). Cuando el volumen lo
+    pida, el cursor se agrega con la misma forma que `MessagePage`.
+  properties:
+    matches:
+      type: array
+      maxItems: 100
+      items:
+        $ref: '#/MatchListItem'

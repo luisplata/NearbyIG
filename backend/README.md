@@ -20,7 +20,12 @@ implementa, no se renegocia.
 | Bots | listo (S2): 2 por humano vivo, 4 waypoints, ticker de 2 s, cap de 6 por observador |
 | CORS | listo (S3): allowlist configurable (`CORS_ALLOWED_ORIGINS`) + túneles de ngrok en desarrollo |
 | `POST /demo/reset`, `/demo/reset/self` | listo (fuera del contrato, §11 del plan) |
-| Migraciones + seeds idempotentes | listo (`001_init`, `002_presence`, `003_bots_events`) |
+| `GET /matches` | listo (S4, contrato v0.4): bandeja con peer, `lastMessage` y `unreadCount` |
+| `GET\|POST /matches/{matchId}/messages` | listo (v0.4): conversación paginada con cursor; escritura idempotente por `clientMessageId` |
+| `POST /matches/{matchId}/read` | listo (v0.4): marca leídos los del otro lado, `204` |
+| `GET /me` | listo (v0.4): `SelfProfile` de la sesión, no el `self` del dataset |
+| Bot del chat | listo (v0.4): responde a los ~2 s con texto fijo, emite `typing.started` y `message.created` |
+| Migraciones + seeds idempotentes | listo (`001_init` … `006_chat`) |
 
 ## Empezar desde cero
 
@@ -328,8 +333,8 @@ conjunto de perfiles visibles, que es lo que corrigió S3-A.
 ### Pings y matches (Sprint 4)
 
 El flujo de conexión mínimo: **enviar ping → ver la bandeja → aceptar o rechazar →
-match**. Sin chat (llega en S5) y sin `GET /matches`: el match viaja en el `200` de
-aceptar y `Ping.matchId` lo publica en la bandeja.
+match → chatear**. El match viaja en el `200` de aceptar y `Ping.matchId` lo
+publica en la bandeja; desde v0.4 también se llega por `GET /matches`.
 
 ```bash
 API=http://localhost:3000
@@ -376,6 +381,66 @@ la proyección de su dueño y se distingue por `sourceType`, igual que en discov
 catálogo: el reset global los vacía (pings primero, por la FK) y deja la bandeja
 como recién migrada. El reset propio **no** los toca: cerrar sesión no borra la
 bandeja de un perfil, que es lo mismo que pasa con los pings que ya recibió.
+
+### Chat: match → conversación (contrato v0.4)
+
+El match de arriba ya se puede chatear. `GET /matches` es la bandeja; el
+`matchId` de esa response (o el de `Ping.matchId`) abre la conversación.
+
+```bash
+API=http://localhost:3000
+# $TA, $TB y $MATCH vienen del flujo de pings
+
+# el perfil de la propia sesión (tab Perfil)
+curl -s $API/me -H "Authorization: Bearer $TA"
+
+# A escribe dos mensajes; la clave de idempotencia la elige el cliente
+curl -s -X POST $API/matches/$MATCH/messages -H "Authorization: Bearer $TA" \
+  -H 'content-type: application/json' -d '{"clientMessageId":"m-1","body":"hola"}'
+curl -s -X POST $API/matches/$MATCH/messages -H "Authorization: Bearer $TA" \
+  -H 'content-type: application/json' -d '{"clientMessageId":"m-2","body":"¿nos vemos?"}'
+
+# B ve el badge, lee la conversación y la marca leída
+curl -s $API/matches -H "Authorization: Bearer $TB"                    # unreadCount: 2
+curl -s "$API/matches/$MATCH/messages" -H "Authorization: Bearer $TB"  # cronológico
+curl -s -X POST $API/matches/$MATCH/read -H "Authorization: Bearer $TB"  # 204
+curl -s $API/matches -H "Authorization: Bearer $TB"                    # unreadCount: 0
+```
+
+| Regla | Cómo |
+|---|---|
+| idempotencia del envío | `UNIQUE (match_id, sender_profile_id, client_message_id)`; reintentar devuelve el mismo `Message` |
+| quién puede leer/escribir | sólo los dos lados del match; desde otra sesión, `403 CHAT_BLOCKED` |
+| match inexistente o de otra región | `404 MATCH_NOT_FOUND` (el 404 y el 403 no se colapsan) |
+| conversación cerrada | `409 MATCH_CLOSED` si el otro lado ya no se puede proyectar; la historia sigue legible |
+| orden y cursor | `message_seq` (identity) ordena y pagina; el cursor es base64url opaco para el cliente |
+| no leídos | watermark `match_reads.last_read_seq` por `(match, perfil)`; los propios nunca cuentan |
+| body | se recorta en los bordes; vacío o de más de 2000 es `422 VALIDATION_FAILED` |
+| cuota | 60 mensajes por minuto por perfil; después, `429 RATE_LIMITED` |
+| el bot contesta | un timer por match (~2 s); emite `typing.started` y después `message.created` |
+| stream | `message.created` y `typing.started` se filtran por **participante del match**, no por región |
+
+**Por qué el cursor no es `createdAt`.** Dos mensajes pueden caer en el mismo
+milisegundo; un cursor por tiempo pierde o repite filas. `message_seq` es un
+`IDENTITY` que ordena y desempata sin mirar el reloj.
+
+**Por qué el bot no contesta dos veces.** El timer vive en un `Map` por `matchId`:
+tres mensajes seguidos agendan **una** respuesta. El texto sale de una lista fija
+y se elige para no repetir la última línea del mismo bot; no hay LLM ni costo por
+mensaje, y dos corridas de la demo dicen lo mismo.
+
+**Por qué los eventos del chat no usan la visibilidad del resto del stream.** El
+resto del log se filtra por sujetos visibles (humanos de la región + bots
+visibles). Un `message.created` lleva `matchId` y no `profileId`; filtrar por
+región le mostraría a cualquiera las conversaciones ajenas. La regla es "soy uno
+de los dos lados de ese match", y el payload no lleva el texto: el evento avisa,
+la página de mensajes es la fuente del contenido.
+
+**Por qué `GET /me` existe.** `DemoSession` da `profileId` y `demoSlot`, pero no
+el nickname ni la foto: el tab Perfil mostraba el `self` del dataset, que es otra
+persona en cuanto alguien entra con otro slot. `SelfProfile` estaba declarado
+desde S0 sin consumer; ahora lo tiene. Un invitado no tiene fila de catálogo y
+recibe `404 PROFILE_NOT_FOUND`: inventarle un nombre sería mentir sobre quién es.
 
 ### CORS
 
@@ -463,6 +528,7 @@ Migraciones actuales:
 | 003 | `003_bots_events.sql` | `bots`, `bot_waypoints`, `event_seq`, `events` | dropea las 4 tablas; catálogo, sesiones y presencia intactas |
 | 004 | `004_bots_anchor.sql` | `bots.anchor` (ancla privada del loop) + vista `presence_anchors` (punto del dueño: GPS o centroide de su zona) | `DROP VIEW presence_anchors` + `DROP COLUMN bots.anchor`; los bots siguen y el ticker los vuelve a sembrar con el ancla de zona |
 | 005 | `005_pings.sql` | `pings` (un pendiente por par dirigido, TTL y estados) + `matches` (un match por par) | `DROP TABLE pings` y después `matches`; catálogo, sesiones, presencia y bots intactos |
+| 006 | `006_chat.sql` | `messages` (orden por `message_seq`, idempotencia por `(match, emisor, clientMessageId)`), `match_reads` (watermark de lectura), FK compuesta `(region_key, match_id)` y el CHECK de `events` ampliado a los dos tipos del chat | borra los eventos del chat, vuelve el CHECK a dos tipos, dropea `match_reads`, `messages` y el único agregado a `matches`; los matches de 005 quedan |
 
 `002` es aditiva y reversible sin pérdida: la única tabla nueva referencia a
 `sessions` y `zones` (no al revés), así que el `down` no desarma nada. Aplicar y
@@ -479,6 +545,14 @@ docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate
 `profiles`/`zones` (nunca al revés). Un `003` revertido deja `GET /events` sin
 esquema (500) hasta volver a aplicarlo; no hay datos de catálogo que se pierdan y
 el log de la demo no es histórico (la retención ya lo recorta).
+
+`006` es la primera que **amplía** una restricción existente: el `CHECK` de
+`events.event_type` pasa de dos tipos a cuatro (los dos del chat). Por eso el
+`down` borra primero los eventos del chat y recién después vuelve al `CHECK`
+viejo; si no, el `ALTER TABLE` falla con las filas nuevas adentro. Las tablas
+`messages` y `match_reads` se van después (la FK compuesta de `messages` cuelga
+del par `(region_key, match_id)` y `match_reads` de `matches`), y al final el
+único `(region_key, match_id)` que `006` le agregó a `matches`.
 
 `004` es aditiva pero **el orden del rollback importa**: el código que usa
 `presence_anchors` es el de este batch, así que revertir la migración con ese
@@ -564,6 +638,8 @@ guarda antes y las repone al terminar.
 | `bots-anchor.test.mjs` | ancla en la persona (GPS en el norte de Bogotá), `demoZoneKey` ⇒ centroide, reubicación por desplazamiento > 250 m, ruido de GPS que no recrea, borde del polígono sin recorte |
 | `discovery.test.mjs` | 5 perfiles (1 humano + 4 bots), medidas por observador vs ancla, radio, filtros y combinados, 422, ghost, región, cap de 6 y tope de 10 |
 | `pings.test.mjs` | 201 pendiente, inbox/sent con `peer`, `409 PING_DUPLICATE`, accept → un match por par, reject 204, bot que acepta solo, 403/404/410/422 y bandeja que sobrevive al logout |
+| `chat.test.mjs` | bandeja con `unreadCount` y preview, dos mensajes con orden y recorte, cursor de dos páginas, idempotencia por `clientMessageId` (y por emisor), read → 0, bot que contesta distinto cada vez, `message.created`/`typing.started` por SSE y el tercero que no ve la conversación ajena |
+| `me.test.mjs` | `SelfProfile` de la sesión (no el `self` del dataset), 10 campos sin medidas, dos slots distintos, `404 PROFILE_NOT_FOUND` y 401 |
 | `events.test.mjs` | ticket de un uso, `Last-Event-ID`, cursor y `limit` 422/410, página vacía, paridad SSE↔polling, `profile.presence`, dedupe |
 | `migrations-seeds.test.mjs` | idempotencia de migraciones y seeds, `ST_Covers` |
 
@@ -586,7 +662,12 @@ guarda antes y las repone al terminar.
 | `GET /pings?box=inbox\|sent` | Bearer | `paths/pings.yaml` | `PingList` (`{ping, peer}`) más nuevo primero; `422 VALIDATION_FAILED` sin `box` |
 | `POST /pings/{pingId}/accept` | Bearer | `paths/pings.yaml` | `200 Match`; `403 PING_FORBIDDEN`; `404 PING_NOT_FOUND`; `409 PING_RESOLVED`; `410 PING_EXPIRED` |
 | `POST /pings/{pingId}/reject` | Bearer | `paths/pings.yaml` | `204` sin cuerpo; mismas guardas que accept; nunca crea match |
-| `POST /demo/reset` | — | **no** | reset global: borra sesiones, invitados, bots, eventos, pings y matches; no el catálogo (§11) |
+| `GET /matches` | Bearer | `paths/matches.yaml` | `MatchList` más reciente primero; `peer` del otro, `lastMessage` y `unreadCount` |
+| `GET /matches/{matchId}/messages?cursor=` | Bearer | `paths/matches.yaml` | `MessagePage` cronológica, cursor opaco; `403 CHAT_BLOCKED`; `404 MATCH_NOT_FOUND`; `422` |
+| `POST /matches/{matchId}/messages` | Bearer | `paths/matches.yaml` | `201 Message`; idempotente por `clientMessageId`; `409 MATCH_CLOSED`; `429 RATE_LIMITED`; el bot contesta solo |
+| `POST /matches/{matchId}/read` | Bearer | `paths/matches.yaml` | `204` sin cuerpo; idempotente por resultado; baja el `unreadCount` |
+| `GET /me` | Bearer | `paths/me.yaml` | `200 SelfProfile` de la sesión; `404 PROFILE_NOT_FOUND` si es invitado |
+| `POST /demo/reset` | — | **no** | reset global: borra sesiones, invitados, bots, eventos, pings, matches, mensajes y acuses; no el catálogo (§11) |
 | `POST /demo/reset/self` | Bearer | **no** | reset de la propia sesión; idempotente |
 
 ### Takeover: por qué es otra operation

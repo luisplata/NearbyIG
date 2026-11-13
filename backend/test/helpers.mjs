@@ -346,9 +346,68 @@ export async function countMatchesOf(regionKey, firstProfileId, secondProfileId)
   });
 }
 
+/** `GET /matches` — la bandeja de matches del perfil de la sesión. */
+export async function listMatches(token) {
+  return api('/matches', { token });
+}
+
+/** `GET /matches/{matchId}/messages`. El cursor se manda tal cual (vacíos incluidos). */
+export async function listMessages(token, matchId, cursor) {
+  const query = cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`;
+  return api(`/matches/${encodeURIComponent(matchId)}/messages${query}`, { token });
+}
+
+/** `POST /matches/{matchId}/messages`. El body se manda tal cual. */
+export async function sendMessage(token, matchId, body) {
+  return api(`/matches/${encodeURIComponent(matchId)}/messages`, { method: 'POST', token, body });
+}
+
+/** `POST /matches/{matchId}/read` — marca leída la conversación (204). */
+export async function markMatchRead(token, matchId) {
+  return api(`/matches/${encodeURIComponent(matchId)}/read`, { method: 'POST', token });
+}
+
+/** `GET /me` — el perfil de la propia sesión. */
+export async function getMe(token) {
+  return api('/me', { token });
+}
+
+/** Filas de `messages` de un match, sin body ni identidad: sólo conteos y orden. */
+export async function messageRowsOf(matchId) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT message_seq::text AS seq, sender_profile_id, body
+         FROM messages
+        WHERE match_id = $1
+        ORDER BY message_seq`,
+      [matchId],
+    );
+    return rows.map((row) => ({ seq: Number(row.seq), sender: row.sender_profile_id, body: row.body }));
+  });
+}
+
+/**
+ * Inserta mensajes directo en la base, sin pasar por la API.
+ *
+ * Sirve para probar la paginación con más de una página sin mandar 100+ requests
+ * (que además chocarían con el rate limit del endpoint): el cursor tiene que
+ * moverse sobre filas que existen, no sobre filas que el test podría haber
+ * mandado más rápido.
+ */
+export async function insertMessages(matchId, regionKey, senderProfileId, bodies) {
+  await withDb(async (client) => {
+    for (const [index, body] of bodies.entries()) {
+      await client.query(
+        `INSERT INTO messages (region_key, match_id, sender_profile_id, client_message_id, body)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [regionKey, matchId, senderProfileId, `bulk-${index}`, body],
+      );
+    }
+  });
+}
+
 /** `id` del envelope → `seq`. Sólo para comparar, igual que hace el cliente. */
-export function seqOfId(id) {
-  const match = /^[a-z]{2}:([0-9]{12})$/.exec(id ?? '');
+export function seqOfId(id) {  const match = /^[a-z]{2}:([0-9]{12})$/.exec(id ?? '');
   if (match === null) throw new Error(`id de evento inesperado: ${JSON.stringify(id)}`);
   return Number(match[1]);
 }

@@ -51,6 +51,40 @@ export interface ProfileSummary {
   readonly bioKey: string;
 }
 
+/**
+ * `SelfProfile` de `contract/schemas/profile.yaml`: once campos, ni uno más.
+ *
+ * No lleva `distanceM`/`bearingDeg` (no hay distancia a sí mismo), `online` (la
+ * sesión está viva por construcción), `inUse` (es la propia), `gender`,
+ * `verified` ni `bioKey`: el dataset tampoco se los da al `self`.
+ */
+export interface SelfProfile {
+  readonly profileId: string;
+  readonly regionKey: string;
+  readonly demoSlot: number | null;
+  readonly sourceType: SourceType;
+  readonly nickname: string;
+  readonly initials: string;
+  readonly intention: string;
+  readonly photoId: string;
+  readonly instagramHandle: string;
+  readonly statusKey: string;
+}
+
+/** Fila de `profiles` para el perfil propio: la lista blanca de `SelfProfile`. */
+interface SelfProfileRow {
+  profile_id: string;
+  region_key: string;
+  demo_slot: number | null;
+  source_type: SourceType;
+  nickname: string;
+  initials: string;
+  intention: string;
+  photo_id: string;
+  instagram_handle: string;
+  status_key: string;
+}
+
 export function toProfileSummary(row: ProfileRow): ProfileSummary {
   return {
     profileId: row.profile_id,
@@ -105,5 +139,39 @@ export class ProfilesService {
     );
     this.logger.debug(`perfiles region=${regionKey} filas=${rows.length}`);
     return rows.map(toProfileSummary);
+  }
+
+  /**
+   * `GET /me` — el perfil de la propia sesión.
+   *
+   * Devuelve `undefined` cuando no hay fila: un invitado (los 10 slots ocupados)
+   * nunca tuvo perfil de catálogo y un seed regenerado puede haber borrado el que
+   * la sesión reclamó. En los dos casos el controller responde `404
+   * PROFILE_NOT_FOUND`: inventar un nickname para un invitado sería mentir sobre
+   * quién es.
+   */
+  async findSelf(regionKey: string, profileId: string): Promise<SelfProfile | undefined> {
+    const { rows } = await this.pool.query<SelfProfileRow>(
+      `SELECT p.profile_id, p.region_key, p.demo_slot, p.source_type, p.nickname,
+              p.initials, p.intention, p.photo_id, p.instagram_handle, p.status_key
+         FROM profiles p
+        WHERE p.region_key = $1
+          AND p.profile_id = $2`,
+      [regionKey, profileId],
+    );
+    const row = rows[0];
+    if (row === undefined) return undefined;
+    return {
+      profileId: row.profile_id,
+      regionKey: row.region_key,
+      demoSlot: row.demo_slot,
+      sourceType: row.source_type,
+      nickname: row.nickname,
+      initials: row.initials,
+      intention: row.intention,
+      photoId: row.photo_id,
+      instagramHandle: row.instagram_handle,
+      statusKey: row.status_key,
+    };
   }
 }

@@ -1,0 +1,228 @@
+# Matches y chat (Sprint 4, delta v0.4).
+#
+# Cuatro operations sobre el match que v0.3 ya creaba:
+#
+#   GET  /matches                          → 200 MatchList (bandeja con peer y unread)
+#   GET  /matches/{matchId}/messages       → 200 MessagePage (cronológico, con cursor)
+#   POST /matches/{matchId}/messages       → 201 Message (idempotente por clientMessageId)
+#   POST /matches/{matchId}/read           → 204 (marca leídos los del otro)
+#
+# Reglas que el contrato fija y el server no reinterpreta:
+#
+# | Caso | Respuesta | Por qué |
+# |---|---|---|
+# | match inexistente en la región | 404 MATCH_NOT_FOUND | Un match no cruza regiones |
+# | match del que no sos parte | 403 CHAT_BLOCKED | El recurso existe; el derecho, no |
+# | match cerrado (el otro lado ya no está) | 409 MATCH_CLOSED | La conversación queda legible pero no acepta más |
+# | body vacío, sin `clientMessageId` o con campos de más | 422 VALIDATION_FAILED | Es schema |
+# | `matchId`/`cursor` malformado | 422 VALIDATION_FAILED | Mal escrito antes de faltar |
+# | cuota de envíos agotada | 429 RATE_LIMITED | El body no se corrige, se espera |
+#
+# **El 404 y el 403 están separados a propósito.** Un match de otra región es
+# 404 (no existe para esta sesión); un match de tu región del que no sos parte es
+# 403 (existe, no es tuyo). Colapsarlos en 404 escondería el id ajeno, pero el
+# cliente perdería la diferencia entre "este chat ya no está" y "este chat no es
+# mío", que son dos mensajes distintos en pantalla.
+#
+# **Sin coordenadas.** Ninguna response de este archivo lleva `lat`/`lng` ni
+# `distanceM`/`bearingDeg`: un chat cuenta quién habló, no dónde estaba.
+
+matches:
+  get:
+    operationId: listMatches
+    summary: Lista los matches de la sesión
+    description: |
+      Los matches del perfil de la sesión —y sólo los suyos— con la proyección
+      del otro lado y el estado de la conversación. El más reciente primero.
+
+      Cada fila es `MatchListItem { match, peer, lastMessage, unreadCount }`: el
+      `peer` es el otro perfil (humano o bot, con la misma forma que la bandeja
+      de pings) y `unreadCount` cuenta los mensajes del otro lado posteriores a
+      tu última lectura. Un match recién aceptado viene con `lastMessage: null` y
+      `unreadCount: 0`.
+
+      **Sólo el perfil de la sesión.** Un match entre otro humano y un bot —aun
+      cuando el bot sea de tu propiedad— no es tuyo y no aparece: la lista es de
+      conversaciones propias, no del mundo visible.
+
+      Sin cursor: hasta los 100 matches más recientes (`maxItems`). La demo tiene
+      un match por par y no necesita paginar.
+    tags:
+      - matches
+    responses:
+      '200':
+        description: Los matches de la sesión, más reciente primero.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/chat.yaml#/MatchList'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 4
+
+matches-messages:
+  get:
+    operationId: listMessages
+    summary: Lee la conversación de un match
+    description: |
+      Los mensajes del match, en orden **cronológico ascendente** (el más viejo
+      primero) y paginados con un cursor opaco.
+
+      **Quién puede leer.** Sólo los dos lados del match. Desde una sesión ajena
+      el match existe pero la conversación no es suya: `403 CHAT_BLOCKED`. Un
+      `matchId` de otra región es `404 MATCH_NOT_FOUND`.
+
+      **Paginación.** Sin `cursor` devuelve la primera página (hasta 100
+      mensajes). Con el `nextCursor` de la página anterior devuelve lo que sigue;
+      `null` y `hasMore: false` significan que la conversación se terminó. El
+      cursor es opaco: el cliente no lo parsea ni lo construye, sólo lo repite.
+
+      **Un match cerrado se puede leer.** La conversación vieja queda legible; lo
+      que no se puede es escribir (`409 MATCH_CLOSED`).
+    tags:
+      - matches
+    parameters:
+      - name: matchId
+        in: path
+        required: true
+        description: Id del match. Un id malformado es 422, no 404.
+        schema:
+          type: string
+          format: uuid
+      - name: cursor
+        in: query
+        required: false
+        description: |
+          `nextCursor` de la página anterior. Opaco: devolvelo tal cual. Vacío o
+          ausente es la primera página; un valor que el server no emitió es `422
+          VALIDATION_FAILED`.
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Una página de la conversación, del más viejo al más nuevo.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/chat.yaml#/MessagePage'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/ChatBlocked'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/MatchNotFound'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 4
+
+  post:
+    operationId: sendMessage
+    summary: Envía un mensaje al match
+    description: |
+      Escribe en la conversación del match como el perfil de la sesión y devuelve
+      el mensaje persistido con `201`.
+
+      **Idempotencia.** `clientMessageId` es la clave: es única por `(match,
+      emisor)`. Reintentar el mismo pedido devuelve **el mismo** `Message` —mismo
+      `id`, mismo `createdAt`— y no crea una segunda fila ni un segundo evento.
+      Es lo que hace que un doble toque o un reintento de red no dupliquen el
+      mensaje.
+
+      **Validación.** `body` vacío o sólo espacios, un `clientMessageId` ausente
+      o un campo de más es `422 VALIDATION_FAILED`. El server recorta los bordes
+      del texto antes de guardarlo.
+
+      **Un match cerrado no acepta mensajes.** Si el otro lado ya no existe (un
+      bot cuyo dueño se fue de la demo, un perfil regenerado), la conversación
+      queda legible pero escribir es `409 MATCH_CLOSED`.
+
+      **El bot responde solo.** Si el otro lado es un bot, el server agenda su
+      respuesta (~2 s) y emite `typing.started` y `message.created` en el stream.
+      El cliente no simula nada: el mismo camino sirve para humano y bot.
+
+      **Cuota.** Hay un tope de mensajes por ventana: superarlo es `429
+      RATE_LIMITED`.
+    tags:
+      - matches
+    parameters:
+      - name: matchId
+        in: path
+        required: true
+        description: Id del match. Un id malformado es 422, no 404.
+        schema:
+          type: string
+          format: uuid
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/chat.yaml#/MessageCreate'
+    responses:
+      '201':
+        description: |
+          Mensaje aceptado. Si ya existía uno con el mismo `clientMessageId` del
+          mismo emisor, es ese mismo mensaje, sin duplicar.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/chat.yaml#/Message'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/ChatBlocked'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/MatchNotFound'
+      '409':
+        $ref: '../openapi.yaml#/components/responses/MatchClosed'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '429':
+        $ref: '../openapi.yaml#/components/responses/RateLimited'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 4
+
+matches-read:
+  post:
+    operationId: markMatchRead
+    summary: Marca leída la conversación
+    description: |
+      Marca como leídos los mensajes **del otro lado** en este match. `204`, sin
+      body: no hay recurso nuevo que devolver y el efecto se lee en
+      `GET /matches`.
+
+      **Idempotente por resultado.** Repetirlo deja el mismo estado
+      (`unreadCount: 0`) y no es un error: marcar leído dos veces no miente sobre
+      nada, a diferencia de aceptar dos veces un ping.
+
+      **Un match cerrado se puede marcar leído.** El badge tiene que poder
+      apagarse aunque ya no se pueda responder.
+    tags:
+      - matches
+    parameters:
+      - name: matchId
+        in: path
+        required: true
+        description: Id del match. Un id malformado es 422, no 404.
+        schema:
+          type: string
+          format: uuid
+    responses:
+      '204':
+        description: Leído. No hay body.
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/ChatBlocked'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/MatchNotFound'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 4

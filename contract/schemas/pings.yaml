@@ -207,9 +207,10 @@ Match:
     los dos lados reciben exactamente el mismo objeto y el cliente sabe cuál es
     el propio porque ya conoce su `profileId`.
 
-    No hay `GET /matches` ni chat en esta versión: el `Match` se entrega en el
-    `200` de aceptar y el emisor lo descubre por `Ping.matchId`. La conversación
-    llega en S5.
+    El `Match` se entrega en el `200` de aceptar y el emisor lo descubre por
+    `Ping.matchId`. Desde v0.4 también es un recurso: `GET /matches` es la
+    bandeja de conversaciones y sus mensajes cuelgan de
+    `GET|POST /matches/{matchId}/messages` (ver `schemas/chat.yaml`).
   properties:
     id:
       type: string

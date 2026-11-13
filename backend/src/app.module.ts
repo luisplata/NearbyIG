@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
 import { BotsModule } from './bots/bots.module';
+import { ChatModule } from './chat/chat.module';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './db/database.module';
 import { DiscoveryModule } from './discovery/discovery.module';
@@ -23,8 +24,9 @@ import { ResetModule } from './reset/reset.module';
  *   EventsModule   → log de eventos, SSE, polling y ticker del mundo
  *   DiscoveryModule→ GET /discovery (radio, filtros y medidas por observador)
  *   PresenceModule → PUT y DELETE /presence (región y zona derivadas)
- *   ProfilesModule → GET /demo/profiles
+ *   ProfilesModule → GET /demo/profiles y GET /me
  *   PingsModule    → POST/GET /pings y accept/reject (S4)
+ *   ChatModule     → GET /matches, mensajes y read (S4, delta v0.4)
  *   ResetModule    → POST /demo/reset y /demo/reset/self (fuera del contrato)
  */
 @Module({
@@ -39,6 +41,7 @@ import { ResetModule } from './reset/reset.module';
     PresenceModule,
     ProfilesModule,
     PingsModule,
+    ChatModule,
     ResetModule,
   ],
 })

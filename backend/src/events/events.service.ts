@@ -12,8 +12,7 @@ import type {
   EventPayload,
   EventsPage,
   EventType,
-  ProfileMovedPayload,
-  ProfilePresencePayload,
+  PayloadFor,
   VisibleSubjects,
 } from './events.types';
 
@@ -32,7 +31,7 @@ interface EventRow {
   seq: string;
   event_type: EventType;
   occurred_at: Date;
-  payload: ProfileMovedPayload | ProfilePresencePayload;
+  payload: EventPayload;
 }
 
 /**
@@ -78,7 +77,7 @@ export class EventsService {
   async append<T extends EventType>(
     regionKey: string,
     type: T,
-    payload: T extends 'profile.moved' ? ProfileMovedPayload : ProfilePresencePayload,
+    payload: PayloadFor<T>,
   ): Promise<EventEnvelope> {
     const { rows } = await this.pool.query<{ seq: string; occurred_at: Date }>(
       `WITH next AS (
@@ -162,8 +161,11 @@ export class EventsService {
    * después de esta página.
    */
   async readPage(session: AuthContext, cursor: EventCursor | null, limit: number): Promise<EventsPage> {
-    const subjects = await this.bots.visibleSubjects(session);
-    const page = await this.readRows(session.regionKey, cursor, limit, subjects);
+    const [subjects, matchIds] = await Promise.all([
+      this.bots.visibleSubjects(session),
+      this.visibleMatchIds(session),
+    ]);
+    const page = await this.readRows(session.regionKey, cursor, limit, subjects, matchIds);
 
     return {
       events: page,
@@ -174,16 +176,46 @@ export class EventsService {
   }
 
   /**
+   * Los matches de los que la sesión es **parte**, para filtrar los eventos de
+   * chat.
+   *
+   * Es una regla distinta de `visibleSubjects` y a propósito más chica: un
+   * `message.created` lleva `matchId` y no `profileId`, y "el match existe en mi
+   * región" no alcanza —filtrar por región le mostraría a cualquiera las
+   * conversaciones ajenas—. Ver el match donde el observador es uno de los dos
+   * lados es la única lectura que no filtra el chat de otro.
+   *
+   * Un match con un bot propio entra por el perfil del humano, no por el bot: la
+   * conversación es del humano que escribió, no del dueño del bot.
+   */
+  private async visibleMatchIds(session: AuthContext): Promise<readonly string[]> {
+    const { rows } = await this.pool.query<{ match_id: string }>(
+      `SELECT match_id::text AS match_id
+         FROM matches
+        WHERE region_key = $1
+          AND (profile_a_id = $2 OR profile_b_id = $2)`,
+      [session.regionKey, session.profileId],
+    );
+    return rows.map((row) => row.match_id);
+  }
+
+  /**
    * Filas del log ya filtradas por observador. El filtro va en SQL —no en
    * JavaScript— para que "una página" sea una página del conjunto visible: si se
    * filtrara después del `LIMIT`, dos lecturas del mismo cursor podrían devolver
    * páginas distintas según lo que hubiera caído en el borde.
+   *
+   * Los dos eventos de chat entran por `matchIds`: es el conjunto de
+   * conversaciones propias que calcula `visibleMatchIds`. El payload no lleva
+   * `profileId` (el contrato sólo declara `matchId`), así que la regla de
+   * sujetos visibles no aplica y la de matches es la única puerta.
    */
   private async readRows(
     regionKey: string,
     cursor: EventCursor | null,
     limit: number,
     subjects: VisibleSubjects,
+    matchIds: readonly string[],
   ): Promise<readonly EventEnvelope[]> {
     const { rows } = await this.pool.query<EventRow>(
       `SELECT seq, event_type, occurred_at, payload
@@ -193,10 +225,12 @@ export class EventsService {
           AND (
                (event_type = 'profile.presence' AND payload->>'profileId' = ANY($3::text[]))
             OR (event_type = 'profile.moved'    AND payload->>'profileId' = ANY($4::text[]))
+            OR (event_type IN ('message.created', 'typing.started')
+                AND payload->>'matchId' = ANY($6::text[]))
           )
         ORDER BY seq
         LIMIT $5`,
-      [regionKey, cursor?.seq ?? 0, subjects.humans, subjects.bots, limit + 1],
+      [regionKey, cursor?.seq ?? 0, subjects.humans, subjects.bots, limit + 1, [...matchIds]],
     );
 
     return rows.slice(0, limit).map((row) => ({

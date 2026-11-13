@@ -26,6 +26,7 @@ ErrorCode:
     - PRESENCE_STALE
     - PING_DUPLICATE
     - PING_RESOLVED
+    - MATCH_CLOSED
     # 410 — lo que estaba ya no está
     - CURSOR_EXPIRED
     - PING_EXPIRED
@@ -39,7 +40,7 @@ ErrorCode:
     - INTERNAL
     - NOT_IMPLEMENTED
   description: |
-    Motivo del error, cerrado a estos 21 valores. `code` es el discriminante
+    Motivo del error, cerrado a estos 22 valores. `code` es el discriminante
     estable: el cliente decide con él, nunca con `title` ni con `detail` (esos
     son texto para humanos, traducible y variable).
 
@@ -64,6 +65,7 @@ ErrorCode:
     PRESENCE_STALE: 409
     PING_DUPLICATE: 409
     PING_RESOLVED: 409
+    MATCH_CLOSED: 409
     CURSOR_EXPIRED: 410
     PING_EXPIRED: 410
     RATE_LIMITED: 429
@@ -73,18 +75,19 @@ ErrorCode:
     INTERNAL: 500
     NOT_IMPLEMENTED: 501
 
-  # Códigos que existen para S5 (chat y matches como recurso propio) y todavía
-  # no tienen operation. La marca no es decorativa: es lo único que permite
-  # exigir "cada código no reservado se usa al menos una vez" sin inventar paths
-  # que la spec prohíbe. Cuando S5 cablee su path, el código se saca de acá y
-  # queda sujeto a la regla de uso como cualquier otro.
+  # Códigos que existen para una superficie que todavía no tiene operation. La
+  # marca no es decorativa: es lo único que permite exigir "cada código no
+  # reservado se usa al menos una vez" sin inventar paths que la spec prohíbe.
+  # Cuando la operation se cablea, el código se saca de acá y queda sujeto a la
+  # regla de uso como cualquier otro.
   #
   # v0.3 sacó `PING_DUPLICATE` y `PING_EXPIRED`: los pings ya tienen operations y
-  # los dos códigos se usan de verdad. `MATCH_NOT_FOUND` sigue reservado porque
-  # todavía no hay `GET /matches/{id}`, y `CHAT_BLOCKED` porque no hay chat.
-  x-reserved:
-    CHAT_BLOCKED: true
-    MATCH_NOT_FOUND: true
+  # los dos códigos se usan de verdad. v0.4 saca los dos últimos —
+  # `MATCH_NOT_FOUND` (el chat ya tiene paths) y `CHAT_BLOCKED` (403 de una
+  # conversación ajena)— y suma `MATCH_CLOSED`, que nace ya en uso. **Hoy no queda
+  # ninguno reservado**: el bloqueo de S5 reusará `CHAT_BLOCKED`, no necesita un
+  # código nuevo.
+  x-reserved: {}
 
 Problem:
   type: object

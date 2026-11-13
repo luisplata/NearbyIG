@@ -5,7 +5,7 @@
  * mitad de la salida sobre el grafo **resuelto** (`loadSpec()` expande todos los
  * `$ref`), desde las raíces públicas:
  *
- *  - toda `responses.*.content.*.schema` de las 16 operations;
+ *  - toda `responses.*.content.*.schema` de las 21 operations;
  *  - el envelope de eventos y la página de polling (`EventEnvelope` cubre la unión
  *    de los 6 payloads; `EventsPage` cubre el envelope).
  *

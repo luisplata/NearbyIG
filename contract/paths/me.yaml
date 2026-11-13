@@ -1,0 +1,53 @@
+# Perfil propio (Sprint 4, delta v0.4).
+#
+# La única operation de este archivo: `GET /me`.
+#
+# **Por qué existe.** Hasta v0.3 el cliente no tenía forma de saber qué perfil
+# encarna su sesión: `DemoSession` da `profileId` y `demoSlot`, pero no el
+# nickname, la foto ni la intención. La demo mostraba el `self` del dataset, que
+# es el perfil equivocado en cuanto alguien entra con otro slot. `SelfProfile` ya
+# estaba declarado desde S0 sin consumer; esto le da el suyo.
+#
+# **Sin coordenadas y sin medidas.** El perfil propio no lleva `distanceM` ni
+# `bearingDeg` (no hay distancia a sí mismo) ni `online` (la sesión está viva por
+# construcción) ni `gender`/`verified`/`bioKey`, que el dataset tampoco le da al
+# self.
+
+me:
+  get:
+    operationId: getSelfProfile
+    summary: Devuelve el perfil de la propia sesión
+    description: |
+      El perfil que encarna la sesión —el que el tab Perfil muestra como "yo"—
+      con la forma de `SelfProfile`: la identidad (`profileId`, `regionKey`,
+      `demoSlot`, `sourceType`) y la fila de display del catálogo (nickname,
+      iniciales, intención, foto, Instagram, clave de estado).
+
+      **No es el dataset.** El `self` de `fixtures.json` es el perfil de la demo
+      mock; acá sale la fila del catálogo que la sesión reclamó, así que dos
+      navegadores en slots distintos ven cada uno el suyo.
+
+      **Un invitado no tiene perfil.** Cuando los 10 slots están ocupados, la
+      sesión es de relleno: no existe fila de catálogo y el nickname, la foto y el
+      handle no se pueden inventar. La respuesta es `404 PROFILE_NOT_FOUND`, el
+      mismo código que un perfil borrado por un seed nuevo: la credencial sirve,
+      el recurso no está.
+
+      **Sin `distanceM`/`bearingDeg` ni `online`.** El perfil propio no se mide
+      contra sí mismo y la sesión está viva por definición.
+    tags:
+      - profiles
+    responses:
+      '200':
+        description: El perfil de la sesión.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/profile.yaml#/SelfProfile'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/ProfileNotFound'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 4

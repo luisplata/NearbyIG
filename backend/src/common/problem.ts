@@ -1,7 +1,7 @@
 /**
  * Errores HTTP con la forma del contrato (`Problem`, RFC 9457).
  *
- * El catálogo de códigos es cerrado: `ErrorCode` replica los 21 valores de
+ * El catálogo de códigos es cerrado: `ErrorCode` replica los 22 valores de
  * `contract/schemas/errors.yaml` y `ERROR_STATUS` la tabla `x-status`. No se
  * inventan códigos en el server; si hace falta uno nuevo, primero se agrega al
  * contrato (y sus gates lo exigen).
@@ -21,6 +21,7 @@ export type ErrorCode =
   | 'PRESENCE_STALE'
   | 'PING_DUPLICATE'
   | 'PING_RESOLVED'
+  | 'MATCH_CLOSED'
   | 'CURSOR_EXPIRED'
   | 'PING_EXPIRED'
   | 'RATE_LIMITED'
@@ -45,6 +46,7 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   PRESENCE_STALE: 409,
   PING_DUPLICATE: 409,
   PING_RESOLVED: 409,
+  MATCH_CLOSED: 409,
   CURSOR_EXPIRED: 410,
   PING_EXPIRED: 410,
   RATE_LIMITED: 429,
@@ -69,6 +71,7 @@ const TITLE: Readonly<Record<ErrorCode, string>> = {
   PRESENCE_STALE: 'Presence stale',
   PING_DUPLICATE: 'Ping duplicate',
   PING_RESOLVED: 'Ping already resolved',
+  MATCH_CLOSED: 'Match closed',
   CURSOR_EXPIRED: 'Cursor expired',
   PING_EXPIRED: 'Ping expired',
   RATE_LIMITED: 'Rate limited',

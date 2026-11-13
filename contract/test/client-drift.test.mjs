@@ -70,10 +70,10 @@ test('el cliente es type-only: sin runtime, sin imports, con las tres vistas', (
   assert.equal(/\brequire\s*\(/.test(COMMITTED), false, 'el generado no puede requerir nada');
   assert.equal(/^export default/m.test(COMMITTED), false, 'no hay cliente runtime: sólo tipos');
 
-  // Las 16 operations del contrato existen como claves tipadas.
+  // Las 21 operations del contrato existen como claves tipadas.
   const operations = COMMITTED.slice(COMMITTED.indexOf('export interface operations'));
   const operationIds = Object.values(spec.paths).flatMap(operationsOf).map((operation) => operation.operationId);
-  assert.equal(operationIds.length, 16, `el contrato declara ${operationIds.length} operations, no 16`);
+  assert.equal(operationIds.length, 21, `el contrato declara ${operationIds.length} operations, no 21`);
   for (const operationId of operationIds) {
     assert.ok(operations.includes(`${operationId}:`), `falta la operation ${operationId} en el cliente`);
   }
