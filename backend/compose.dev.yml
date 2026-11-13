@@ -1,0 +1,53 @@
+# Overlay de desarrollo. Se usa SIEMPRE junto al base:
+#
+#   docker compose -f compose.yml -f compose.dev.yml up --build -d
+#
+# Cambia tres cosas y nada más:
+#   * build → target `development` (devDependencies + código fuente)
+#   * bind mount del código y `start:dev` (tsc --watch + node --watch)
+#   * puerto de debug 9229 y Postgres publicado para correr tooling en el host
+#
+# El volumen anónimo `/app/node_modules` evita que el bind mount tape las
+# dependencias de la imagen: el host no necesita `npm install` para levantar la
+# demo. `../contract:/seed:ro` hace que el runner de seeds lea el contrato vivo.
+services:
+  db:
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      target: development
+    image: nearbyig-api:dev
+    command: ['sh', '-c', 'node scripts/migrate.mjs && node scripts/seed.mjs']
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://${POSTGRES_USER:-nearbyig}:${POSTGRES_PASSWORD:-nearbyig}@db:5432/${POSTGRES_DB:-nearbyig}
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ../contract:/seed:ro
+
+  api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      target: development
+    image: nearbyig-api:dev
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-nearbyig}:${POSTGRES_PASSWORD:-nearbyig}@db:5432/${POSTGRES_DB:-nearbyig}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-jwt-secret-change-me}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-7200}
+      DEFAULT_REGION_KEY: ${DEFAULT_REGION_KEY:-mx}
+    command: ['sh', '-c', 'npm run build && npm run start:dev']
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ../contract:/seed:ro
+    ports:
+      - '${PORT:-3000}:3000'
+      - '9229:9229'
