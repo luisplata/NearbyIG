@@ -24,7 +24,9 @@ import type { DemoSource, UiProfile } from '../src/state/types';
  * `EventSource`, así que el test le pasa un shim mínimo de SSE sobre `fetch`
  * para ejercitar los frames reales, y un segundo controller para el polling.
  */
-const settings = readLiveSettings(process.env.EXPO_PUBLIC_API_URL, process.env.EXPO_PUBLIC_DEMO_REGION);
+const settings = readLiveSettings(process.env.EXPO_PUBLIC_API_URL);
+/** Zona del smoke: `cdmx` (mx) por defecto; `bogota` para probar la región `co`. */
+const zone = process.env.EXPO_PUBLIC_DEMO_ZONE ?? 'cdmx';
 const enabled = settings !== null && process.env.LIVE_SMOKE === '1';
 
 /** `EventSource` de 40 líneas: frames `event:`/`data:` separados por línea vacía. */
@@ -105,6 +107,7 @@ function makeController(createEventSource: (url: string) => EventSourceLike | nu
   const catalogs: { profiles: readonly UiProfile[] | null; source: DemoSource }[] = [];
   const controller = createLiveController({
     settings,
+    initialZoneKey: zone,
     onCatalog: (profiles, source) => catalogs.push({ profiles, source }),
     createEventSource,
   });

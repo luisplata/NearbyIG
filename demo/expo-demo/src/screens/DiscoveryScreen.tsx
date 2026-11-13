@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
 import { useLive } from '../live/LiveProvider';
-import { centerForRegion } from '../live/regions';
+import { mapCenterFor, regionForZone } from '../live/regions';
 import { useDemo } from '../state/DemoProvider';
 import { formatRadius } from '../state/format';
 import { visibleProfiles } from '../state/selectors';
@@ -30,12 +30,13 @@ export function DiscoveryScreen() {
   const live = useLive();
   const profiles = useMemo(() => visibleProfiles(state), [state]);
   /**
-   * Geografía del basemap: la región de la sesión live manda. Sin sesión (o en
-   * el dataset del build) `centerForRegion` devuelve el centro de la demo, así
-   * que el mapa nunca se queda en una ciudad que no es la de las distancias.
+   * Geografía del basemap: el punto del GPS manda (vive sólo en memoria), y sin
+   * punto el centroide de la zona de la sesión. Nunca una ciudad por defecto:
+   * sin zona, `mapCenterFor(null, null)` devuelve el centro de la demo.
    */
-  const regionKey = live.state.session?.regionKey ?? live.settings?.region ?? null;
-  const center = useMemo(() => centerForRegion(regionKey), [regionKey]);
+  const regionKey = live.state.session?.regionKey ?? regionForZone(live.state.zoneKey);
+  const point = live.state.point;
+  const center = useMemo(() => mapCenterFor(point, regionKey), [point, regionKey]);
   const filtered =
     state.filters.intentions !== null ||
     state.filters.gender !== null ||

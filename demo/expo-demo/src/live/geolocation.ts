@@ -3,14 +3,18 @@
  *
  * **Para qué.** En el modo live, el `PUT /presence` acepta un `point` privado:
  * es la única entrada del contrato que lleva coordenadas y la única forma de que
- * las distancias del radar sean las reales. Si el usuario no da permiso, el
- * navegador no expone la API o el contexto no es seguro, se cae a `demoZoneKey`
- * (la zona demo de la región) sin romper nada.
+ * las distancias del radar sean las reales.
  *
- * **Qué NO hace.** No sigue la ubicación en el tiempo (un solo pedido), no
- * guarda el punto (ni storage ni cookie: lo que dure la sesión en memoria), no
- * lo manda a ningún lado más que al `PUT /presence`, y no lo lee de IP ni de
- * ningún servicio.
+ * **Sólo con gesto.** `requestPoint` no se llama al abrir la app ni al abrir la
+ * sesión: lo llama el controlador desde el botón "Usar mi ubicación". En móvil
+ * (iOS/Safari) un `getCurrentPosition` sin gesto se rechaza o se ignora, y el
+ * usuario ve un error que no llegó a leer. El gesto es el permiso, no un
+ * detalle de UX.
+ *
+ * **Qué NO hace.** No sigue la ubicación en el tiempo (un solo pedido, sin
+ * seguimiento continuo), no guarda el punto (ni storage ni cookie: lo que dure
+ * la sesión en memoria), no lo manda a ningún lado más que al `PUT /presence`,
+ * y no lo lee de IP ni de ningún servicio.
  *
  * **Contexto seguro.** `getCurrentPosition` sólo existe en HTTPS o `localhost`.
  * En una IP de la LAN por HTTP plano el navegador devuelve `undefined` o falla, así que se
@@ -21,16 +25,26 @@
 export type GeoPoint = { readonly lat: number; readonly lng: number };
 
 export type GeoResult =
-  | { readonly status: 'ok'; readonly point: GeoPoint }
+  | {
+      readonly status: 'ok';
+      readonly point: GeoPoint;
+      /** Precisión que reportó el navegador, redondeada a 10 m. Nunca el punto. */
+      readonly accuracyM: number | null;
+    }
   | { readonly status: 'denied' }
+  /** `POSITION_UNAVAILABLE`: sin señal, sin GPS o el proveedor falló. */
   | { readonly status: 'unavailable' }
+  /** `TIMEOUT`: el navegador no contestó en `TIMEOUT_MS`. */
+  | { readonly status: 'timeout' }
   | { readonly status: 'unsupported' }
   | { readonly status: 'insecure' };
 
 /** Lo mínimo de `Geolocation` que se usa (así el test no necesita el DOM). */
 export type GeolocationLike = {
   getCurrentPosition(
-    success: (position: { coords: { latitude: number; longitude: number } }) => void,
+    success: (position: {
+      coords: { latitude: number; longitude: number; accuracy?: number };
+    }) => void,
     error?: (error: { code?: number }) => void,
     options?: { enableHighAccuracy?: boolean; timeout?: number; maximumAge?: number },
   ): void;
@@ -42,14 +56,26 @@ export type GeoEnvironment = {
   secureContext?: boolean;
 };
 
-/** `PERMISSION_DENIED` del DOM. Los otros dos códigos son "no se pudo". */
+/** Códigos del DOM: `PERMISSION_DENIED`, `POSITION_UNAVAILABLE`, `TIMEOUT`. */
 const PERMISSION_DENIED = 1;
+const TIMEOUT = 3;
 
 const TIMEOUT_MS = 8000;
 
 /** El navegador puede mandar 15 decimales: se recortan a 6, como el contrato. */
 export function round6(value: number): number {
   return Math.round(value * 1e6) / 1e6;
+}
+
+/**
+ * Precisión en metros, redondeada a 10. Sirve para el debug ("precisión 30 m")
+ * y no revela nada del punto: un radio de error no es una coordenada.
+ */
+export function roundAccuracy(value: number | undefined | null): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  return Math.round(value / 10) * 10;
 }
 
 /** `ok` sólo con un punto numérico y dentro de rango; si no, `null`. */
@@ -71,9 +97,9 @@ export function pointFromPosition(
 }
 
 /**
- * Pide el punto una sola vez. Nunca rechaza: cada final posible es un `status`
- * que el controlador sabe manejar (con `ok` se manda el punto; con cualquier
- * otro se usa la zona demo).
+ * Pide el punto una sola vez, desde un gesto. Nunca rechaza: cada final posible
+ * es un `status` que el controlador sabe explicar (con `ok` se manda el punto;
+ * con cualquier otro se pide la zona demo y se muestra el motivo).
  */
 export function requestPoint(environment: GeoEnvironment): Promise<GeoResult> {
   const geolocation = environment.geolocation ?? null;
@@ -94,11 +120,19 @@ export function requestPoint(environment: GeoEnvironment): Promise<GeoResult> {
       geolocation.getCurrentPosition(
         (position) => {
           const point = pointFromPosition(position);
-          settle(point === null ? { status: 'unavailable' } : { status: 'ok', point });
+          settle(
+            point === null
+              ? { status: 'unavailable' }
+              : { status: 'ok', point, accuracyM: roundAccuracy(position?.coords?.accuracy) },
+          );
         },
         (error) => {
           settle(
-            error?.code === PERMISSION_DENIED ? { status: 'denied' } : { status: 'unavailable' },
+            error?.code === PERMISSION_DENIED
+              ? { status: 'denied' }
+              : error?.code === TIMEOUT
+                ? { status: 'timeout' }
+                : { status: 'unavailable' },
           );
         },
         { enableHighAccuracy: false, timeout: TIMEOUT_MS, maximumAge: 0 },

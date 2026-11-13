@@ -3,9 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createLiveController, type EventSourceLike } from '../src/live/controller';
 import type { LiveSettings } from '../src/live/config';
 import type { EventSourceLike as EsLike } from '../src/live/controller';
+import type { GeoResult } from '../src/live/geolocation';
 import type { DemoSource, UiProfile } from '../src/state/types';
 
-const SETTINGS: LiveSettings = { baseUrl: '/api', region: 'mx' };
+const SETTINGS: LiveSettings = { baseUrl: '/api' };
 
 const SESSION = {
   token: 'tok-1',
@@ -45,9 +46,16 @@ function makeServer(routeOverrides: Record<string, Route> = {}) {
     'POST /api/auth/demo-session': (_url, init) => {
       const body = init.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>);
       const slot = typeof body['demoSlot'] === 'number' ? body['demoSlot'] : 5;
+      // La región se refleja: el backend nunca la inventa, la toma del body.
+      const region = typeof body['regionKey'] === 'string' ? body['regionKey'] : 'mx';
       return {
         status: 201,
-        body: JSON.stringify({ ...SESSION, demoSlot: slot, profileId: `mx-p0${slot}` }),
+        body: JSON.stringify({
+          ...SESSION,
+          regionKey: region,
+          demoSlot: slot,
+          profileId: `${region}-p0${slot}`,
+        }),
       };
     },
     'POST /api/auth/takeover': (_url, init) => {
@@ -146,23 +154,36 @@ function makeStream() {
   return { factory, instances };
 }
 
+type ControllerOptions = {
+  settings?: LiveSettings | null;
+  zone?: string | null;
+  requestPoint?: () => Promise<GeoResult>;
+  pollMs?: number;
+  heartbeatMs?: number;
+  reseedMs?: number;
+};
+
 function makeController(
   server: ReturnType<typeof makeServer>,
   stream: ReturnType<typeof makeStream>,
-  settings: LiveSettings | null = SETTINGS,
-  extra: { pollMs?: number; heartbeatMs?: number; reseedMs?: number } = {},
+  options: ControllerOptions = {},
 ) {
   const catalogs: { profiles: readonly UiProfile[] | null; source: DemoSource }[] = [];
+  /** Cada zona persistida, en orden: la recarga depende de esta escritura. */
+  const persistedZones: string[] = [];
   const controller = createLiveController({
-    settings,
+    settings: options.settings === undefined ? SETTINGS : options.settings,
+    initialZoneKey: options.zone === undefined ? 'cdmx' : options.zone,
+    onZoneChange: (zoneKey) => persistedZones.push(zoneKey),
+    requestPoint: options.requestPoint,
     fetchImpl: server.fetchImpl as never,
     createEventSource: stream.factory,
     onCatalog: (profiles, source) => catalogs.push({ profiles, source }),
-    pollMs: extra.pollMs ?? 10,
-    heartbeatMs: extra.heartbeatMs ?? 1000,
-    reseedMs: extra.reseedMs ?? 10,
+    pollMs: options.pollMs ?? 10,
+    heartbeatMs: options.heartbeatMs ?? 1000,
+    reseedMs: options.reseedMs ?? 10,
   });
-  return { controller, catalogs };
+  return { controller, catalogs, persistedZones };
 }
 
 const movedEvent = (seq: number, profileId: string, distanceM: number) =>
@@ -209,7 +230,7 @@ describe('arranque de la sesión', () => {
   it('sin base de API configurada no intenta nada: avisa y se queda con el dataset', async () => {
     const server = makeServer();
     const stream = makeStream();
-    const { controller } = makeController(server, stream, null);
+    const { controller } = makeController(server, stream, { settings: null });
 
     const started = await controller.start();
     expect(started).toBe(false);
@@ -233,14 +254,15 @@ describe('arranque de la sesión', () => {
     expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'dataset' });
   });
 
-  it('una zona desconocida no se inventa: falla suave antes de pedir presencia', async () => {
+  it('una zona desconocida no se inventa: no hay sesión que abrir', async () => {
     const server = makeServer();
     const stream = makeStream();
-    const { controller } = makeController(server, stream, { baseUrl: '/api', region: 'zz' });
+    const { controller } = makeController(server, stream, { zone: 'zz' });
 
     expect(await controller.start()).toBe(false);
     expect(server.count('PUT /api/presence')).toBe(0);
-    expect(controller.getState().notice).toBe('unreachable');
+    expect(controller.getState().status).toBe('needs-zone');
+    expect(controller.getState().zonePrompt).toBe('initial');
   });
 });
 
@@ -261,6 +283,7 @@ describe('transporte', () => {
     });
     const controller = createLiveController({
       settings: SETTINGS,
+      initialZoneKey: 'cdmx',
       fetchImpl: server.fetchImpl as never,
       createEventSource: () => null,
       pollMs: 50,
@@ -368,7 +391,7 @@ describe('latido de presencia', () => {
     vi.useFakeTimers();
     const server = makeServer();
     const stream = makeStream();
-    const { controller } = makeController(server, stream, SETTINGS, { heartbeatMs: 1000 });
+    const { controller } = makeController(server, stream, { heartbeatMs: 1000 });
     await controller.start();
     stream.instances[0].open();
     const discoveryBefore = server.count('GET /api/discovery');
@@ -386,7 +409,7 @@ describe('latido de presencia', () => {
       'PUT /api/presence': () => (fail ? { status: 500, body: '{"code":"INTERNAL"}' } : { status: 200, body: '{}' }),
     });
     const stream = makeStream();
-    const { controller, catalogs } = makeController(server, stream, SETTINGS, { heartbeatMs: 1000 });
+    const { controller, catalogs } = makeController(server, stream, { heartbeatMs: 1000 });
     await controller.start();
     stream.instances[0].open();
     fail = true;
@@ -410,7 +433,7 @@ describe('latido de presencia', () => {
           : { status: 200, body: '{}' },
     });
     const stream = makeStream();
-    const { controller } = makeController(server, stream, SETTINGS, { heartbeatMs: 1000 });
+    const { controller } = makeController(server, stream, { heartbeatMs: 1000 });
     await controller.start();
     revoked = true;
 
@@ -595,108 +618,158 @@ describe('cierre', () => {
 });
 
 describe('presencia con ubicación real', () => {
-  const GPS = { status: 'ok' as const, point: { lat: 19.432608, lng: -99.13321 } };
+  const GPS_CDMX = {
+    status: 'ok' as const,
+    point: { lat: 19.432608, lng: -99.13321 },
+    accuracyM: 20,
+  };
+  const GPS_BOGOTA = { status: 'ok' as const, point: { lat: 4.6832, lng: -74.0974 }, accuracyM: 30 };
+  /** Palermo: dentro del catálogo no hay zona, así que no se puede proyectar. */
+  const GPS_BUENOS_AIRES = {
+    status: 'ok' as const,
+    point: { lat: -34.5889, lng: -58.4306 },
+    accuracyM: 40,
+  };
+
+  type Call = { method: string; path: string; body: string | undefined };
 
   /**
-   * Controller con la ubicación inyectada. Se registran las URLs completas para
-   * poder afirmar que el punto **sólo** viaja al `PUT /presence`: discovery y
-   * eventos no llevan coordenadas (el contrato no las acepta en la salida).
+   * Controller con la ubicación inyectada y el registro de cada request en
+   * orden. El orden es lo que prueba que el punto no viaja con una sesión de
+   * otra región: primero el logout y la sesión nueva, después la presencia.
    */
   function makeGeoController(
     server: ReturnType<typeof makeServer>,
-    geo: () => Promise<{ status: string; point?: { lat: number; lng: number } }>,
+    geo: () => Promise<GeoResult>,
+    options: { zone?: string | null } = {},
   ) {
-    const urls: string[] = [];
-    const bodies: { url: string; body: string | undefined }[] = [];
+    const calls: Call[] = [];
+    const persistedZones: string[] = [];
+    let geoCalls = 0;
     const fetchImpl = async (url: string, init?: { method?: string; body?: string }) => {
-      urls.push(url);
-      bodies.push({ url, body: init?.body });
+      calls.push({ method: init?.method ?? 'GET', path: url.split('?')[0], body: init?.body });
       return server.fetchImpl(url as never, init as never);
     };
     const controller = createLiveController({
       settings: SETTINGS,
+      initialZoneKey: options.zone === undefined ? 'cdmx' : options.zone,
+      onZoneChange: (zoneKey) => persistedZones.push(zoneKey),
       fetchImpl: fetchImpl as never,
       createEventSource: () => null,
-      requestPoint: geo as never,
+      requestPoint: () => {
+        geoCalls += 1;
+        return geo();
+      },
       pollMs: 10,
       heartbeatMs: 10_000,
     });
-    return { controller, urls, bodies };
+    const presenceCalls = (): Call[] =>
+      calls.filter((call) => call.method === 'PUT' && call.path.endsWith('/presence'));
+    const sessions = (): Call[] =>
+      calls.filter((call) => call.method === 'POST' && call.path.endsWith('/auth/demo-session'));
+    const bodyOf = (call: Call | undefined): unknown => JSON.parse(String(call?.body ?? 'null'));
+    return {
+      controller,
+      calls,
+      presenceCalls,
+      sessions,
+      persistedZones,
+      geoCalls: () => geoCalls,
+      bodyOf,
+    };
   }
 
-  it('con GPS la presencia va con el punto y la barra dice GPS', async () => {
+  it('arrancar no pide la ubicación: la sesión sale de la zona elegida', async () => {
     const server = makeServer();
-    const { controller, urls, bodies } = makeGeoController(server, async () => GPS);
+    const { controller, presenceCalls, sessions, geoCalls, bodyOf } = makeGeoController(
+      server,
+      async () => GPS_CDMX,
+    );
 
     expect(await controller.start()).toBe(true);
+    expect(geoCalls()).toBe(0);
+    expect(bodyOf(sessions()[0])).toEqual({ regionKey: 'mx' });
+    expect(bodyOf(presenceCalls()[0])).toEqual({ demoZoneKey: 'cdmx' });
+    expect(controller.getState().location).toBe('demo');
+    expect(controller.getState().zoneKey).toBe('cdmx');
+    expect(controller.getState().notice).toBeNull();
+  });
+
+  it('con GPS en la misma región la presencia va con el punto y la barra dice GPS', async () => {
+    const server = makeServer();
+    const { controller, calls, presenceCalls } = makeGeoController(server, async () => GPS_CDMX);
+
+    await controller.start();
+    await controller.requestLocation();
     expect(controller.getState().location).toBe('gps');
     expect(controller.getState().notice).toBeNull();
-
-    const presence = bodies.filter((call) => call.url.endsWith('/presence'));
-    expect(presence).toHaveLength(1);
-    expect(JSON.parse(String(presence[0].body))).toEqual({
+    expect(JSON.parse(String(presenceCalls().at(-1)?.body))).toEqual({
       point: { lat: 19.432608, lng: -99.13321 },
     });
 
     // El punto no se repite: ninguna otra URL lo lleva en la query.
-    for (const url of urls.filter((candidate) => !candidate.endsWith('/presence'))) {
-      expect(url).not.toMatch(/lat=|lng=/);
+    for (const call of calls.filter((candidate) => !candidate.path.endsWith('/presence'))) {
+      expect(call.path).not.toMatch(/lat=|lng=/);
     }
   });
 
-  it('si el permiso se niega, la presencia va con la zona demo y sin romper', async () => {
-    const server = makeServer();
-    const { controller, bodies } = makeGeoController(server, async () => ({ status: 'denied' }));
-
-    expect(await controller.start()).toBe(true);
-    expect(controller.getState().location).toBe('demo');
-    expect(controller.getState().status).toBe('polling');
-    const presence = bodies.filter((call) => call.url.endsWith('/presence'));
-    expect(JSON.parse(String(presence[0].body))).toEqual({ demoZoneKey: 'cdmx' });
-  });
-
-  it('sin soporte o con contexto inseguro tampoco se rompe', async () => {
-    for (const status of ['unsupported', 'insecure', 'unavailable']) {
+  it('si el permiso falla el sheet dice por qué y la sesión no se toca', async () => {
+    for (const status of ['denied', 'timeout', 'unavailable', 'unsupported', 'insecure'] as const) {
       const server = makeServer();
-      const { controller, bodies } = makeGeoController(server, async () => ({ status }));
-      expect(await controller.start(), status).toBe(true);
-      expect(controller.getState().location).toBe('demo');
-      const presence = bodies.filter((call) => call.url.endsWith('/presence'));
-      expect(JSON.parse(String(presence[0].body))).toEqual({ demoZoneKey: 'cdmx' });
+      const stream = makeStream();
+      const { controller } = makeController(server, stream, {
+        requestPoint: async () => ({ status }),
+      });
+      await controller.start();
+      const before = server.count('PUT /api/presence');
+
+      await controller.requestLocation();
+      expect(controller.getState().zonePrompt, status).toBe(status);
+      expect(controller.getState().session, status).not.toBeNull();
+      expect(controller.getState().location, status).toBe('demo');
+      expect(server.count('PUT /api/presence'), status).toBe(before);
     }
   });
 
-  it('un punto fuera de la zona demo re-registra con zona y deja el aviso', async () => {
-    let calls = 0;
+  it('un punto fuera de México y Colombia no se manda: se pide la zona', async () => {
+    const server = makeServer();
+    const { controller, geoCalls } = makeGeoController(server, async () => GPS_BUENOS_AIRES);
+    await controller.start();
+    const before = server.count('PUT /api/presence');
+
+    await controller.requestLocation();
+    expect(geoCalls()).toBe(1);
+    expect(controller.getState().zonePrompt).toBe('outside-zone');
+    // Nunca se manda un punto que el backend sólo puede rechazar.
+    expect(server.count('PUT /api/presence')).toBe(before);
+    expect(controller.getState().location).toBe('demo');
+  });
+
+  it('si el server responde fallbackRequired, se re-registra con la zona y avisa', async () => {
     const server = makeServer({
-      'PUT /api/presence': () => {
-        calls += 1;
-        const fallback = calls === 1;
+      'PUT /api/presence': (_url, init) => {
+        const body =
+          init.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>);
+        const isPoint = body['point'] !== undefined;
         return {
           status: 200,
           body: JSON.stringify({
             profileId: 'mx-p05',
             regionKey: 'mx',
-            zoneKey: fallback ? null : 'cdmx',
+            zoneKey: isPoint ? null : 'cdmx',
             online: true,
-            fallbackRequired: fallback,
+            fallbackRequired: isPoint,
           }),
         };
       },
     });
-    // Buenos Aires: el punto existe, pero el catálogo no tiene esa zona.
-    const { controller, bodies } = makeGeoController(server, async () => ({
-      status: 'ok',
-      point: { lat: -34.5889, lng: -58.4306 },
-    }));
+    const { controller } = makeGeoController(server, async () => GPS_CDMX);
 
-    expect(await controller.start()).toBe(true);
+    await controller.start();
+    await controller.requestLocation();
     expect(controller.getState().location).toBe('demo');
     expect(controller.getState().notice).toBe('outside-zone');
-
-    const presence = bodies.filter((call) => call.url.endsWith('/presence'));
-    expect(presence).toHaveLength(2);
-    expect(JSON.parse(String(presence[1].body))).toEqual({ demoZoneKey: 'cdmx' });
+    expect(controller.getState().zonePrompt).toBe('outside-zone');
   });
 
   it('el latido repite la presencia sin volver a pedir el punto', async () => {
@@ -706,6 +779,7 @@ describe('presencia con ubicación real', () => {
     const urls: string[] = [];
     const controller = createLiveController({
       settings: SETTINGS,
+      initialZoneKey: 'cdmx',
       fetchImpl: (async (url: string, init?: { method?: string; body?: string }) => {
         urls.push(url);
         return server.fetchImpl(url as never, init as never);
@@ -713,13 +787,16 @@ describe('presencia con ubicación real', () => {
       createEventSource: () => null,
       requestPoint: async () => {
         geoCalls += 1;
-        return GPS;
+        return GPS_CDMX;
       },
       pollMs: 1_000,
       heartbeatMs: 50,
     });
 
     await controller.start();
+    await controller.requestLocation();
+    expect(geoCalls).toBe(1);
+
     await vi.advanceTimersByTimeAsync(60);
     expect(geoCalls).toBe(1);
     expect(urls.filter((url) => url.endsWith('/presence')).length).toBeGreaterThanOrEqual(2);
@@ -728,15 +805,212 @@ describe('presencia con ubicación real', () => {
   it('el botón de ubicación reintenta el punto y puede pasar de demo a GPS', async () => {
     const server = makeServer();
     let attempt = 0;
-    const { controller } = makeGeoController(server, async () => {
+    const { controller, sessions } = makeGeoController(server, async () => {
       attempt += 1;
-      return attempt === 1 ? { status: 'denied' } : GPS;
+      return attempt === 1 ? { status: 'denied' } : GPS_CDMX;
     });
 
     await controller.start();
+    await controller.requestLocation();
     expect(controller.getState().location).toBe('demo');
+    expect(controller.getState().zonePrompt).toBe('denied');
 
     await controller.requestLocation();
     expect(controller.getState().location).toBe('gps');
+    expect(controller.getState().zonePrompt).toBeNull();
+    // Un permiso denegado no abre una segunda sesión: sólo se reintenta el punto.
+    expect(sessions()).toHaveLength(1);
+  });
+
+  it('elegir una zona de otra región cierra la sesión y abre otra en la correcta', async () => {
+    const server = makeServer();
+    const { controller, calls, presenceCalls, sessions, persistedZones, bodyOf } =
+      makeGeoController(server, async () => GPS_CDMX);
+
+    await controller.start();
+    expect(controller.getState().session?.regionKey).toBe('mx');
+
+    await controller.chooseZone('bogota');
+
+    const opened = sessions();
+    expect(opened).toHaveLength(2);
+    expect(bodyOf(opened[1])).toEqual({ regionKey: 'co' });
+    expect(controller.getState().session?.regionKey).toBe('co');
+    expect(controller.getState().zoneKey).toBe('bogota');
+    expect(controller.getState().zonePrompt).toBeNull();
+
+    // Se cierra la sesión vieja antes de abrir la nueva, y no con un PUT de punto.
+    const logout = calls.findIndex((call) => call.path.endsWith('/auth/logout'));
+    expect(logout).toBeGreaterThanOrEqual(0);
+    expect(logout).toBeLessThan(calls.indexOf(opened[1]));
+    expect(presenceCalls().map((call) => bodyOf(call))).toEqual([
+      { demoZoneKey: 'cdmx' },
+      { demoZoneKey: 'bogota' },
+    ]);
+
+    // La elección queda escrita para la próxima carga.
+    expect(persistedZones).toEqual(['bogota']);
+  });
+
+  it('elegir la misma zona no reabre la sesión', async () => {
+    const server = makeServer();
+    const { controller, presenceCalls, sessions, persistedZones } = makeGeoController(
+      server,
+      async () => GPS_CDMX,
+    );
+
+    await controller.start();
+    await controller.chooseZone('cdmx');
+    expect(sessions()).toHaveLength(1);
+    expect(presenceCalls()).toHaveLength(2);
+    expect(controller.getState().session?.regionKey).toBe('mx');
+    expect(persistedZones).toEqual([]);
+  });
+
+  it('el diagnóstico queda en el estado y no guarda coordenadas en las métricas', async () => {
+    const server = makeServer();
+    const { controller } = makeGeoController(server, async () => GPS_CDMX);
+
+    await controller.start();
+    await controller.requestLocation();
+    const { diagnostics, point } = controller.getState();
+    expect(diagnostics).toEqual({
+      geo: 'ok',
+      accuracyM: 20,
+      presenceStatus: 200,
+      presenceZoneKey: 'cdmx',
+      fallbackRequired: false,
+    });
+    // El punto vive en memoria para centrar el mapa; el diagnóstico no lo copia.
+    expect(point).toEqual({ lat: 19.432608, lng: -99.13321 });
+    expect(JSON.stringify(diagnostics)).not.toMatch(/lat|lng|19\.4|-99\.1/);
+  });
+
+  it('los logs de diagnóstico llevan prefijo [geo] y no coordenadas', async () => {
+    const server = makeServer();
+    const logs: string[] = [];
+    const controller = createLiveController({
+      settings: SETTINGS,
+      initialZoneKey: 'cdmx',
+      fetchImpl: server.fetchImpl as never,
+      createEventSource: () => null,
+      requestPoint: async () => GPS_CDMX,
+      log: (message) => logs.push(message),
+      heartbeatMs: 10_000,
+      pollMs: 10,
+    });
+
+    await controller.start();
+    await controller.requestLocation();
+
+    expect(logs.some((line) => line.startsWith('[geo] request=ok'))).toBe(true);
+    expect(logs.some((line) => line.includes('[geo] presence=200'))).toBe(true);
+    expect(logs.some((line) => line.includes('region=mx'))).toBe(true);
+    expect(logs.some((line) => line.includes('session region=mx'))).toBe(true);
+    for (const line of logs) {
+      // Ni el punto ni la precisión exacta: la precisión va redondeada a 10 m.
+      expect(line).not.toMatch(/-?\d{2}\.\d{3,}/);
+    }
+  });
+
+  it('un GPS en Bogotá con sesión mx recrea la sesión y recién después manda el punto', async () => {
+    const server = makeServer();
+    const { controller, calls, sessions, persistedZones, bodyOf } = makeGeoController(
+      server,
+      async () => GPS_BOGOTA,
+    );
+
+    await controller.start();
+    expect(controller.getState().session?.regionKey).toBe('mx');
+
+    await controller.requestLocation();
+
+    const opened = sessions();
+    expect(opened).toHaveLength(2);
+    expect(bodyOf(opened[1])).toEqual({ regionKey: 'co' });
+    expect(controller.getState().session?.regionKey).toBe('co');
+    expect(controller.getState().location).toBe('gps');
+    expect(persistedZones).toEqual(['bogota']);
+
+    const logout = calls.findIndex((call) => call.path.endsWith('/auth/logout'));
+    expect(logout).toBeGreaterThanOrEqual(0);
+    expect(logout).toBeLessThan(calls.indexOf(opened[1]));
+
+    // El punto de Bogotá viaja **después** de la sesión `co`: nunca con la `mx`.
+    const point = calls.findIndex(
+      (call) => call.method === 'PUT' && String(call.body).includes('"point"'),
+    );
+    expect(point).toBeGreaterThan(calls.indexOf(opened[1]));
+    expect(bodyOf(calls[point])).toEqual({
+      point: { lat: 4.6832, lng: -74.0974 },
+    });
+  });
+});
+
+describe('zona y región', () => {
+  it('sin zona elegida no abre sesión ni inventa una ciudad', async () => {
+    const server = makeServer();
+    const stream = makeStream();
+    const { controller, catalogs } = makeController(server, stream, { zone: null });
+
+    expect(await controller.start()).toBe(false);
+    expect(server.counts.size).toBe(0);
+    expect(controller.getState().status).toBe('needs-zone');
+    expect(controller.getState().zonePrompt).toBe('initial');
+    expect(controller.getState().notice).toBeNull();
+    expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'dataset' });
+  });
+
+  it('la zona persistida define la región: bogota abre sesión co', async () => {
+    const server = makeServer();
+    const bodies: string[] = [];
+    const fetchImpl = async (url: string, init?: { method?: string; body?: string }) => {
+      if (url.endsWith('/auth/demo-session') && init?.body !== undefined) {
+        bodies.push(init.body);
+      }
+      return server.fetchImpl(url as never, init as never);
+    };
+    const persistedZones: string[] = [];
+    const controller = createLiveController({
+      settings: SETTINGS,
+      initialZoneKey: 'bogota',
+      onZoneChange: (zoneKey) => persistedZones.push(zoneKey),
+      fetchImpl: fetchImpl as never,
+      createEventSource: () => null,
+      heartbeatMs: 10_000,
+      pollMs: 10,
+    });
+
+    expect(await controller.start()).toBe(true);
+    expect(JSON.parse(bodies[0])).toEqual({ regionKey: 'co' });
+    expect(controller.getState().session?.regionKey).toBe('co');
+    expect(controller.getState().zoneKey).toBe('bogota');
+    // La zona viene de una visita anterior: no se reescribe.
+    expect(persistedZones).toEqual([]);
+  });
+
+  it('una zona desconocida no se inventa: no hay sesión que abrir', async () => {
+    const server = makeServer();
+    const stream = makeStream();
+    const { controller } = makeController(server, stream, { zone: 'zz' });
+
+    expect(await controller.start()).toBe(false);
+    expect(server.counts.size).toBe(0);
+    expect(controller.getState().status).toBe('needs-zone');
+    expect(controller.getState().zonePrompt).toBe('initial');
+  });
+
+  it('el sheet se puede cerrar y volver a abrir sin perder la zona', async () => {
+    const server = makeServer();
+    const stream = makeStream();
+    const { controller } = makeController(server, stream, { zone: null });
+    await controller.start();
+
+    controller.dismissZoneSheet();
+    expect(controller.getState().zonePrompt).toBeNull();
+    expect(controller.getState().status).toBe('needs-zone');
+
+    controller.openZoneSheet();
+    expect(controller.getState().zonePrompt).toBe('initial');
   });
 });

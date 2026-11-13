@@ -153,10 +153,10 @@ npm run serve:dist          # http://localhost:8081
 | Pieza | Qué usa | Detalle |
 |---|---|---|
 | Base de la API | `?api=` > `localStorage` > `EXPO_PUBLIC_API_URL` | Un túnel cambia de URL sin rebuild |
-| Región | `EXPO_PUBLIC_DEMO_REGION` | Default `mx`. No hay selector de país |
-| Sesión | `POST /auth/demo-session` | Token **en memoria**; refresh = sesión nueva |
+| Zona demo | `?zone=` > `localStorage['nearbyig.demoZone']` | Define la región: `cdmx → mx`, `bogota → co`. `?zone=off` la borra (no hay default) |
+| Sesión | `POST /auth/demo-session` | Token **en memoria**; refresh = sesión nueva. Si la zona es de otra región, se cierra y se abre allá |
 | Presencia | `PUT /presence` cada 8 s | Punto del GPS o `demoZoneKey`; el TTL es 12 s |
-| Ubicación | `navigator.geolocation` (una vez) | Si se niega o no hay HTTPS, zona demo; "Usar mi ubicación" reintenta |
+| Ubicación | `navigator.geolocation` **con gesto** | "Usar mi ubicación" es el único disparo; sin permiso, no disponible o punto fuera de zona se abre el **sheet de zona** con el motivo |
 | Descubrimiento | `GET /discovery` | Radio y filtros server-side; medidas `distanceM`/`bearingDeg` |
 | Actualización | `GET /events` (SSE, ticket) | Fallback a `GET /events/poll?cursor=` con dedupe por `seq` |
 | Selector de perfil | `GET /demo/profiles` | Muestra `inUse`; claim libre y takeover **confirmado** |
@@ -195,12 +195,19 @@ vuelve a la base del build. Sólo se aceptan `http(s)://`: cualquier otra cosa s
 descarta en silencio.
 
 > El GPS sólo funciona en contexto seguro (HTTPS o `localhost`). Un túnel HTTPS
-> cumple; `http://192.168.x.x:8081` no, y ahí la app cae a la zona demo.
+> cumple; `http://192.168.x.x:8081` no, y ahí el sheet de zona lo dice.
+>
+> La primera visita pide la zona (o el botón de ubicación) **antes** de abrir
+> sesión: sin zona no hay región que pedirle al backend. La elección se guarda y
+> una recarga ya no vuelve a preguntar. `?zone=bogota` es el atajo para probar la
+> región `co` desde el móvil.
 
 Smoke real del flujo con el **mismo** cliente, sin navegador:
 
 ```bash
 EXPO_PUBLIC_API_URL=http://localhost:3000 LIVE_SMOKE=1 npm --prefix demo/expo-demo run smoke:live
+# región co: la zona elegida manda, igual que en la app
+EXPO_PUBLIC_API_URL=http://localhost:3000 EXPO_PUBLIC_DEMO_ZONE=bogota LIVE_SMOKE=1 npm --prefix demo/expo-demo run smoke:live
 ```
 
 > **Git Bash / MSYS**: `EXPO_BASE_URL=/expo` y `--base-href "/flutter/"` se reescriben a

@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { MAP_PHASES, reduceMapStatus, showsRealTiles, type MapEvent, type MapPhase } from '../src/map/mapStatus';
+import {
+  MAP_PHASES,
+  canRetryMap,
+  reduceMapStatus,
+  showsRealTiles,
+  type MapEvent,
+  type MapPhase,
+} from '../src/map/mapStatus';
 
 /**
- * Reductor puro de la fase del basemap. La tabla es el contrato: un solo
- * intento, `failed` terminal y `ready` la única fase con tiles reales.
+ * Reductor puro de la fase del basemap. La tabla es el contrato: un intento por
+ * montaje, `failed` sólo se revive con `RETRY` (el chip del usuario) y `ready`
+ * es la única fase con tiles reales.
  */
-const EVENTS: MapEvent[] = ['LOAD', 'READY', 'FAIL'];
+const EVENTS: MapEvent[] = ['LOAD', 'READY', 'FAIL', 'RETRY'];
 
 describe('reduceMapStatus', () => {
   it('idle → loading → ready', () => {
@@ -24,10 +32,17 @@ describe('reduceMapStatus', () => {
     expect(reduceMapStatus('ready', 'FAIL')).toBe('failed');
   });
 
-  it('failed es terminal: ningún evento lo revive', () => {
-    for (const event of EVENTS) {
-      expect(reduceMapStatus('failed', event)).toBe('failed');
+  it('failed no se revive solo: LOG/READY/FAIL lo dejan igual', () => {
+    for (const event of ['LOAD', 'READY', 'FAIL'] as const) {
+      expect(reduceMapStatus('failed', event), event).toBe('failed');
     }
+  });
+
+  it('RETRY es la única salida de failed y vuelve a idle para remontar', () => {
+    expect(reduceMapStatus('failed', 'RETRY')).toBe('idle');
+    // Un RETRY con el mapa sano no lo apaga: no hay nada que reintentar.
+    expect(reduceMapStatus('ready', 'RETRY')).toBe('ready');
+    expect(reduceMapStatus('loading', 'RETRY')).toBe('idle');
   });
 
   it('ready no vuelve a loading ni pierde el canvas con LOAD duplicado', () => {
@@ -52,5 +67,11 @@ describe('showsRealTiles', () => {
       true,
       false,
     ]);
+  });
+});
+
+describe('canRetryMap', () => {
+  it('el reintento existe sólo con el basemap caído', () => {
+    expect(MAP_PHASES.filter(canRetryMap)).toEqual(['failed']);
   });
 });

@@ -1,21 +1,26 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-  DEFAULT_DEMO_REGION,
   isClearApiCommand,
+  isClearZoneCommand,
   isHttpBaseUrl,
   normalizeBaseUrl,
-  normalizeRegion,
+  normalizeZoneKey,
   readLiveSettings,
   readQueryApi,
+  readQueryZone,
+  readRuntimeZone,
+  readStoredZone,
   resolveApiBase,
+  resolveZone,
+  writeStoredZone,
 } from '../src/live/config';
 
 describe('base de la API', () => {
   it('sin variable no hay modo live (no hay default ni valor de producción)', () => {
-    expect(readLiveSettings(undefined, undefined)).toBeNull();
-    expect(readLiveSettings('', undefined)).toBeNull();
-    expect(readLiveSettings('   ', undefined)).toBeNull();
+    expect(readLiveSettings(undefined)).toBeNull();
+    expect(readLiveSettings('')).toBeNull();
+    expect(readLiveSettings('   ')).toBeNull();
   });
 
   it('recorta espacios y barras finales para concatenar paths con barra inicial', () => {
@@ -29,7 +34,12 @@ describe('base de la API', () => {
   });
 
   it('una base relativa es válida: la demo puede servirse desde el mismo origen', () => {
-    expect(readLiveSettings('/api', 'mx')).toEqual({ baseUrl: '/api', region: 'mx' });
+    expect(readLiveSettings('/api')).toEqual({ baseUrl: '/api' });
+  });
+
+  it('ya no hay región de build: la sesión sale de la zona elegida', () => {
+    // Era el camino del defecto: `mx` por defecto mandaba a CDMX a cualquiera.
+    expect(readLiveSettings('/api')).not.toHaveProperty('region');
   });
 });
 
@@ -113,21 +123,118 @@ describe('override de la base en runtime', () => {
   });
 });
 
-describe('región de la demo', () => {
-  it('cae en mx cuando no hay variable', () => {
-    expect(normalizeRegion(undefined)).toBe(DEFAULT_DEMO_REGION);
-    expect(DEFAULT_DEMO_REGION).toBe('mx');
+describe('zona demo elegida', () => {
+  it('sin elección no hay zona: la UI tiene que preguntar, no adivinar', () => {
+    expect(resolveZone(null, null)).toBeNull();
+    expect(resolveZone(undefined, undefined)).toBeNull();
+    expect(resolveZone('', '   ')).toBeNull();
   });
 
-  it('acepta cualquier RegionKey del contrato (dos minúsculas)', () => {
-    expect(normalizeRegion('co')).toBe('co');
-    expect(normalizeRegion(' CO ')).toBe('co');
+  it('`?zone=` gana sobre lo guardado y se normaliza', () => {
+    expect(resolveZone(' BOGOTA ', 'cdmx')).toBe('bogota');
+    expect(resolveZone('cdmx', null)).toBe('cdmx');
+    expect(resolveZone(null, 'bogota')).toBe('bogota');
   });
 
-  it('una región inválida no viaja: vuelve al default', () => {
-    expect(normalizeRegion('mexico')).toBe('mx');
-    expect(normalizeRegion('M')).toBe('mx');
-    expect(normalizeRegion('')).toBe('mx');
-    expect(normalizeRegion('1x')).toBe('mx');
+  it('una clave con forma inválida no viaja: se sigue con lo guardado', () => {
+    expect(resolveZone('javascript:alert(1)', 'cdmx')).toBe('cdmx');
+    expect(resolveZone('CDMX!', null)).toBeNull();
+    expect(normalizeZoneKey('  cdmx  ')).toBe('cdmx');
+    expect(normalizeZoneKey('no es una zona')).toBeNull();
+    expect(normalizeZoneKey(null)).toBeNull();
+  });
+
+  it('lee `?zone=` sin confundirse con otros parámetros', () => {
+    expect(readQueryZone('?zone=bogota')).toBe('bogota');
+    expect(readQueryZone('?api=off&zone=cdmx')).toBe('cdmx');
+    expect(readQueryZone('?api=off')).toBeNull();
+    expect(readQueryZone(null)).toBeNull();
+  });
+
+  it('`?zone=off` es el reset de la zona; `?api=off` no la toca', () => {
+    expect(isClearZoneCommand('off')).toBe(true);
+    expect(isClearZoneCommand(' OFF ')).toBe(true);
+    expect(isClearZoneCommand('cdmx')).toBe(false);
+    expect(isClearZoneCommand(null)).toBe(false);
+    expect(isClearApiCommand('cdmx')).toBe(false);
+  });
+});
+
+/**
+ * El storage real del navegador no existe en `environment: 'node'`, así que se
+ * inyecta `window` con un `localStorage` de memoria. Es la única forma de
+ * probar que la elección **sobrevive a una recarga** sin un navegador.
+ */
+describe('zona persistida entre cargas', () => {
+  type FakeWindow = { location: { search: string }; localStorage: Map<string, string> & {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+  } };
+
+  function withWindow<T>(
+    search: string,
+    run: (map: Map<string, string>) => T,
+  ): { result: T; stored: Map<string, string> } {
+    const map = new Map<string, string>();
+    const store = map as FakeWindow['localStorage'];
+    store.getItem = (key) => map.get(key) ?? null;
+    store.setItem = (key, value) => {
+      map.set(key, value);
+    };
+    store.removeItem = (key) => {
+      map.delete(key);
+    };
+    const globals = globalThis as unknown as { window?: FakeWindow };
+    globals.window = { location: { search }, localStorage: store };
+    try {
+      return { result: run(map), stored: map };
+    } finally {
+      delete globals.window;
+    }
+  }
+
+  afterEach(() => {
+    delete (globalThis as unknown as { window?: FakeWindow }).window;
+  });
+
+  it('sin storage no hay zona: el runtime sin DOM no inventa una', () => {
+    expect(readStoredZone()).toBeNull();
+    expect(readRuntimeZone()).toBeNull();
+  });
+
+  it('la elección se lee después de escribirse (la recarga no vuelve a mx)', () => {
+    const { result, stored } = withWindow('', () => {
+      writeStoredZone('bogota');
+      return readRuntimeZone();
+    });
+    expect(result).toBe('bogota');
+    expect(stored.get('nearbyig.demoZone')).toBe('bogota');
+  });
+
+  it('`?zone=` fija y persiste la zona de la URL', () => {
+    const { result, stored } = withWindow('?zone=cdmx', () => readRuntimeZone());
+    expect(result).toBe('cdmx');
+    expect(stored.get('nearbyig.demoZone')).toBe('cdmx');
+  });
+
+  it('`?zone=off` borra la elección y no toca el override de API', () => {
+    const { result, stored } = withWindow('?zone=off', (map) => {
+      writeStoredZone('cdmx');
+      map.set('nearbyig.api', 'https://tunel.ejemplo');
+      return readRuntimeZone();
+    });
+    expect(result).toBeNull();
+    expect(stored.get('nearbyig.demoZone')).toBeUndefined();
+    expect(stored.get('nearbyig.api')).toBe('https://tunel.ejemplo');
+  });
+
+  it('`?api=off` no borra la zona elegida', () => {
+    const { result, stored } = withWindow('?api=off', () => {
+      writeStoredZone('bogota');
+      return readRuntimeZone();
+    });
+    expect(result).toBe('bogota');
+    expect(stored.get('nearbyig.demoZone')).toBe('bogota');
   });
 });

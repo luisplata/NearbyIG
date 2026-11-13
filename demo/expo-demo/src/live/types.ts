@@ -1,3 +1,5 @@
+import type { GeoPoint } from './geolocation';
+
 /**
  * Tipos del borde live: la forma exacta que devuelve la API.
  *
@@ -82,19 +84,75 @@ export type LiveTransport = 'none' | 'sse' | 'polling';
  * Estado de la sesión live.
  *
  * - `idle`: nunca se abrió (o se cerró por el usuario).
+ * - `needs-zone`: todavía no hay zona elegida, así que no hay región con la que
+ *   abrir sesión. La UI pide la zona demo o el gesto de ubicación.
  * - `connecting`: abriendo sesión, presencia y primera foto.
  * - `live`: stream SSE abierto.
  * - `polling`: sin SSE (navegador sin soporte, ticket rechazado o stream caído).
  * - `offline`: no se pudo conectar o se perdió la sesión; la UI vuelve al
  *   dataset del build con un aviso.
  */
-export type LiveStatus = 'idle' | 'connecting' | 'live' | 'polling' | 'offline';
+export type LiveStatus = 'idle' | 'needs-zone' | 'connecting' | 'live' | 'polling' | 'offline';
 
 /** Aviso para la UI, sin copy adentro: el texto lo resuelve `liveCopy`. */
-export type LiveNotice = 'unconfigured' | 'unreachable' | 'session-lost' | 'degraded' | 'outside-zone';
+export type LiveNotice =
+  | 'unconfigured'
+  | 'unreachable'
+  | 'session-lost'
+  | 'degraded'
+  | 'outside-zone';
+
+/**
+ * Por qué la UI tiene que pedir una zona. Cada causa tiene su texto: un "no hay
+ * ubicación" genérico no le dice al usuario si tiene el permiso bloqueado, si el
+ * navegador no la soporta o si está fuera de México y Colombia.
+ *
+ * - `initial`: primera visita, todavía no eligió (no es un error).
+ * - `outside-zone`: el punto no cae en ninguna zona del catálogo.
+ * - el resto: por qué falló el pedido de ubicación (`GeoResult` sin `ok`).
+ */
+export type ZonePromptCause =
+  | 'initial'
+  | 'outside-zone'
+  | 'denied'
+  | 'unavailable'
+  | 'timeout'
+  | 'unsupported'
+  | 'insecure';
 
 /** Cómo se registró la presencia: ubicación real o zona demo. */
 export type LiveLocation = 'gps' | 'demo';
+
+/** Final del último pedido de ubicación, para el debug visible. */
+export type LiveGeoStatus = 'ok' | 'denied' | 'unavailable' | 'timeout' | 'unsupported' | 'insecure';
+
+/**
+ * Diagnóstico del flujo de ubicación, sin coordenadas.
+ *
+ * Es lo que el usuario puede leer en pantalla y copiar de la consola cuando
+ * "el mapa muestra otra ciudad": si el pedido salió `ok`, qué contestó el
+ * `PUT /presence`, en qué región quedó la sesión y qué zona está activa. Con eso
+ * el problema se diagnostica sin adivinar, y sin exponer dónde está la persona.
+ */
+export type LiveDiagnostics = {
+  geo: LiveGeoStatus | null;
+  /** Precisión reportada por el navegador, redondeada a 10 m. */
+  accuracyM: number | null;
+  /** Status HTTP del último `PUT /presence`. */
+  presenceStatus: number | null;
+  presenceZoneKey: string | null;
+  fallbackRequired: boolean | null;
+};
+
+export function emptyDiagnostics(): LiveDiagnostics {
+  return {
+    geo: null,
+    accuracyM: null,
+    presenceStatus: null,
+    presenceZoneKey: null,
+    fallbackRequired: null,
+  };
+}
 
 export type LiveState = {
   status: LiveStatus;
@@ -102,10 +160,25 @@ export type LiveState = {
   session: LiveSession | null;
   /**
    * `gps` = `PUT /presence` con el punto del navegador; `demo` = con la
-   * `demoZoneKey` de la región (sin permiso, sin soporte, contexto inseguro o
-   * punto fuera de zona). `null` = todavía no se registró presencia.
+   * `demoZoneKey` elegida (o a la que se cayó por un punto fuera de zona).
+   * `null` = todavía no se registró presencia.
    */
   location: LiveLocation | null;
+  /**
+   * Zona demo en uso: define la **región** de la sesión (`cdmx → mx`,
+   * `bogota → co`). `null` = todavía no se eligió ninguna.
+   */
+  zoneKey: string | null;
+  /** Causa del sheet de zona. `null` = no hay nada que preguntar. */
+  zonePrompt: ZonePromptCause | null;
+  /**
+   * Punto del GPS, **sólo en memoria del cliente**: centra el mapa y no se
+   * persiste, no se reenvía y no se manda a otro request que el `PUT /presence`
+   * que ya se hizo. `null` = sin ubicación (se usa el centroide de la zona).
+   */
+  point: GeoPoint | null;
+  /** Último pedido de ubicación y su resultado, para el debug visible. */
+  diagnostics: LiveDiagnostics;
   /** Catálogo de la región (`/demo/profiles`), con `inUse`. */
   rows: LiveProfileRow[];
   /** Última foto de `/discovery`. Es la fuente del catálogo de la UI. */
@@ -123,6 +196,10 @@ export function emptyLiveState(): LiveState {
     transport: 'none',
     session: null,
     location: null,
+    zoneKey: null,
+    zonePrompt: null,
+    point: null,
+    diagnostics: emptyDiagnostics(),
     rows: [],
     discovery: [],
     lastSeq: 0,

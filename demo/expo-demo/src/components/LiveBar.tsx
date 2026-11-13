@@ -14,18 +14,20 @@ import { useDemo } from '../state/DemoProvider';
 import { colors, fontSize, space, text } from '../theme/theme';
 
 import { Chip } from './Chip';
+import { LiveDebug } from './LiveDebug';
 
 /**
  * Barra de la sesión live, debajo del header.
  *
- * **No hay switch.** Cuando el build tiene API, la sesión arranca sola y la barra
- * cuenta qué pasa: estado, línea de sesión, transporte, perfiles y si las
- * distancias salen del GPS o de la zona demo. El dataset del build no es un modo
- * que se elija: es el catálogo con el que la app arranca y al que vuelve si la
- * API no responde, con un aviso que explica el porqué.
+ * **No hay switch.** Cuando el build tiene API, la sesión arranca sola —si hay
+ * zona elegida— y la barra cuenta qué pasa: estado, línea de sesión, transporte,
+ * perfiles y si las distancias salen del GPS o de la zona demo (`zona demo
+ * (CDMX)`). El dataset del build no es un modo que se elija: es el catálogo con
+ * el que la app arranca y al que vuelve si la API no responde.
  *
- * La ubicación se pide al entrar en live (una vez) y se puede reintentar con el
- * chip "Usar mi ubicación": no hay tracking ni prompt repetido en cada latido.
+ * **La ubicación no se pide sola.** El chip "Usar mi ubicación" es el gesto que
+ * dispara el único pedido al navegador; queda visible siempre que la presencia
+ * sea de zona demo, así se puede reintentar después de elegir zona.
  *
  * Sin API configurada (`EXPO_PUBLIC_API_URL` o `?api=`) la barra no se monta: el
  * artefacto publicado se ve exactamente como antes (CONTRACT.md §6 y §9).
@@ -38,6 +40,7 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
   const session = liveSessionText(live.state);
   const transport = liveTransportText(live.state);
   const location = liveLocationText(live.state);
+  const needsZone = live.state.status === 'needs-zone';
 
   // Sin base de API en el build no hay nada que contar: la barra no se monta.
   if (!live.available) {
@@ -58,6 +61,7 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
         {isLive && live.enabled ? (
           <Chip label={liveText('changeProfile')} icon="person" onPress={onOpenProfiles} />
         ) : null}
+        {needsZone ? <Chip label={liveText('chooseZone')} onPress={live.openZoneSheet} /> : null}
         {offline ? <Chip label={liveText('retry')} onPress={() => void live.enable()} /> : null}
       </View>
 
@@ -66,6 +70,9 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
           <Text numberOfLines={1} style={[text.small, styles.meta]}>
             {meta.join(' · ')}
           </Text>
+          {live.state.location === 'demo' && live.enabled ? (
+            <Chip label={liveText('changeZone')} onPress={live.openZoneSheet} />
+          ) : null}
           {live.state.location === 'demo' && live.enabled ? (
             <Chip
               label={liveText('useMyLocation')}
@@ -78,6 +85,8 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
       {notice === null ? null : (
         <Text style={[text.small, styles.notice]}>{notice}</Text>
       )}
+
+      <LiveDebug />
     </View>
   );
 }

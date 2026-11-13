@@ -20,22 +20,24 @@
  * página contra lo que la API declare. Un túnel de la app se resuelve en la
  * allowlist del backend, no acá.
  *
- * La región no tiene selector en la UI: sale de `EXPO_PUBLIC_DEMO_REGION` y cae
- * en `mx`, que es la región del dataset por defecto. `RegionKey` del contrato es
- * ISO 3166-1 alpha-2 en minúsculas, así que se valida esa forma.
+ * **Zona demo persistida.** La región de la sesión sale de la zona elegida
+ * (`cdmx → mx`, `bogota → co`), no de una variable de build: por eso no existe
+ * `EXPO_PUBLIC_DEMO_REGION` ni un default `mx`. La elección se guarda en
+ * `localStorage['nearbyig.demoZone']` para que recargar no vuelva a preguntar
+ * ni, mucho menos, a abrir una sesión en la ciudad equivocada. `?zone=cdmx` /
+ * `?zone=bogota` la fija desde la URL y `?zone=off` la borra; `?api=off` toca
+ * **sólo** la base de la API y no la zona.
  */
-
-/** Región por defecto: la del dataset (`fixtures.profiles` es MX). */
-export const DEFAULT_DEMO_REGION = 'mx';
 
 /** Clave del override persistido. Sólo guarda la base: nunca una coordenada. */
 export const API_STORAGE_KEY = 'nearbyig.api';
 
+/** Clave de la zona demo elegida. Sólo guarda la clave (`cdmx`), nunca el punto. */
+export const ZONE_STORAGE_KEY = 'nearbyig.demoZone';
+
 export type LiveSettings = {
   /** Base de la API sin barra final. Puede ser relativa (mismo origen). */
   baseUrl: string;
-  /** `RegionKey` del contrato. */
-  region: string;
 };
 
 /** De dónde salió la base que se está usando. */
@@ -47,7 +49,8 @@ export type ApiBaseResolution = {
   origin: ApiBaseOrigin;
 };
 
-const REGION_KEY = /^[a-z]{2}$/;
+/** Forma de una `zoneKey` del contrato (`^[a-z][a-z0-9-]*$`). No valida catálogo. */
+const ZONE_KEY = /^[a-z][a-z0-9-]*$/;
 
 /**
  * Normaliza la base: sin espacios y sin barras finales, porque los paths se
@@ -101,24 +104,51 @@ export function resolveApiBase(
   return fromEnv === null ? null : { raw: fromEnv, origin: 'env' };
 }
 
-export function normalizeRegion(raw: string | undefined): string {
-  if (raw === undefined) {
-    return DEFAULT_DEMO_REGION;
+/**
+ * Zona demo efectiva del arranque: `?zone=` de la página, si no la persistida.
+ * Puro: los dos valores entran por parámetro.
+ *
+ * `null` **no** es "usá un default": es "todavía no hay zona elegida", y la UI
+ * tiene que preguntarla. Es la regla que impide abrir una sesión en una ciudad
+ * que el usuario no eligió.
+ */
+export function resolveZone(
+  queryZone: string | null | undefined,
+  storedZone: string | null | undefined,
+): string | null {
+  const fromQuery = normalizeZoneKey(queryZone);
+  if (fromQuery !== null) {
+    return fromQuery;
+  }
+  return normalizeZoneKey(storedZone);
+}
+
+/** Clave con forma de `zoneKey`, en minúsculas; basura o vacío ⇒ `null`. */
+export function normalizeZoneKey(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined) {
+    return null;
   }
   const trimmed = raw.trim().toLowerCase();
-  return REGION_KEY.test(trimmed) ? trimmed : DEFAULT_DEMO_REGION;
+  return ZONE_KEY.test(trimmed) ? trimmed : null;
 }
 
 /** `null` = modo live no configurado en este build (ni por override). */
-export function readLiveSettings(
-  apiUrl: string | undefined,
-  demoRegion: string | undefined,
-): LiveSettings | null {
+export function readLiveSettings(apiUrl: string | undefined): LiveSettings | null {
   const baseUrl = normalizeBaseUrl(apiUrl);
-  if (baseUrl === null) {
+  return baseUrl === null ? null : { baseUrl };
+}
+
+/** `?zone=...` de la URL actual, o `null` si no hay (o no hay `window`). */
+export function readQueryZone(search: string | null): string | null {
+  if (search === null || search === '') {
     return null;
   }
-  return { baseUrl, region: normalizeRegion(demoRegion) };
+  try {
+    const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+    return params.get('zone');
+  } catch {
+    return null;
+  }
 }
 
 /** `?api=...` de la URL actual, o `null` si no hay (o no hay `window`). */
@@ -170,13 +200,71 @@ export function clearStoredApi(): void {
   }
 }
 
+export function readStoredZone(): string | null {
+  try {
+    return normalizeZoneKey(storage()?.getItem(ZONE_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+export function writeStoredZone(zoneKey: string): void {
+  try {
+    storage()?.setItem(ZONE_STORAGE_KEY, zoneKey);
+  } catch {
+    // Sin storage la elección vive lo que dura esta carga: no es un error.
+  }
+}
+
+export function clearStoredZone(): void {
+  try {
+    storage()?.removeItem(ZONE_STORAGE_KEY);
+  } catch {
+    // Lo mismo: si no hay storage no hay nada que borrar.
+  }
+}
+
+/**
+ * `?zone=off` borra la zona elegida. Es el reset de la elección: sin esto, un
+ * usuario que eligió la ciudad equivocada no tendría forma de volver a elegir
+ * desde la URL. `?api=off` **no** la toca: son overrides independientes.
+ */
+export function isClearZoneCommand(raw: string | null | undefined): boolean {
+  return raw !== null && raw !== undefined && raw.trim().toLowerCase() === 'off';
+}
+
 /**
  * `?api=off` borra el override guardado y vuelve a la base del build. Sin esto,
  * un túnel viejo quedaría pegado en `localStorage` y la próxima visita seguiría
  * apuntando a una URL muerta sin forma de salir desde la UI.
+ *
+ * No toca la zona demo: son dos overrides distintos y apagar la API no tiene por
+ * qué olvidar en qué ciudad está el usuario.
  */
 export function isClearApiCommand(raw: string | null | undefined): boolean {
   return raw !== null && raw !== undefined && raw.trim().toLowerCase() === 'off';
+}
+
+/**
+ * Zona demo efectiva para este arranque. `?zone=` válido se persiste (es el
+ * atajo de demo más cómodo); `?zone=off` borra lo guardado; sin query manda la
+ * elección persistida y, si no hay ninguna, `null`.
+ *
+ * Sólo toca `window`/`localStorage` cuando existen: en el export web y en
+ * `expo start` sí, en un runtime sin DOM devuelve `null`.
+ */
+export function readRuntimeZone(): string | null {
+  const search = typeof window === 'undefined' ? null : window.location.search;
+  const query = readQueryZone(search);
+  if (isClearZoneCommand(query)) {
+    clearStoredZone();
+    return null;
+  }
+  const resolved = resolveZone(query, readStoredZone());
+  if (normalizeZoneKey(query) !== null && resolved !== null) {
+    writeStoredZone(resolved);
+  }
+  return resolved;
 }
 
 /**
@@ -202,10 +290,7 @@ export function readRuntimeApiBase(envUrl: string | undefined): ApiBaseResolutio
 }
 
 /** Settings del arranque: build + overrides de runtime ya resueltos. */
-export function readRuntimeLiveSettings(
-  envUrl: string | undefined,
-  demoRegion: string | undefined,
-): LiveSettings | null {
+export function readRuntimeLiveSettings(envUrl: string | undefined): LiveSettings | null {
   const resolved = readRuntimeApiBase(envUrl);
-  return readLiveSettings(resolved?.raw, demoRegion);
+  return readLiveSettings(resolved?.raw);
 }

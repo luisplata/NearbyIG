@@ -195,6 +195,7 @@ describe('presencia', () => {
       zoneKey: 'cdmx',
       online: true,
       fallbackRequired: false,
+      status: 200,
     });
   });
 

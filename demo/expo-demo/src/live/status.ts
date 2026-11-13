@@ -1,7 +1,7 @@
 import type { DemoSource } from '../state/types';
 
-import { liveText } from './liveCopy';
-import type { LiveNotice, LiveState } from './types';
+import { liveText, type LiveCopyKey } from './liveCopy';
+import type { LiveNotice, LiveState, ZonePromptCause } from './types';
 
 /**
  * Textos derivados del estado live. Puro y testeado: el componente sólo pinta.
@@ -26,15 +26,55 @@ export function liveNoticeText(notice: LiveNotice | null): string | null {
   }
 }
 
+/** Nombre corto de la zona demo (`CDMX`, `Bogotá`); la clave cruda si es nueva. */
+export function zoneNameText(zoneKey: string | null): string | null {
+  if (zoneKey === null) {
+    return null;
+  }
+  if (zoneKey === 'cdmx') {
+    return liveText('zoneCdmxShort');
+  }
+  if (zoneKey === 'bogota') {
+    return liveText('zoneBogotaShort');
+  }
+  return zoneKey;
+}
+
+/**
+ * Motivo del sheet de zona, uno por causa. El encabezado (`zoneLead`) ya dice
+ * "no pudimos usar tu ubicación"; esto agrega **por qué**, que es lo que permite
+ * destrabarlo. `initial` no es una falla: es la primera visita.
+ */
+export function zoneCauseText(cause: ZonePromptCause): string {
+  const key: LiveCopyKey =
+    cause === 'initial'
+      ? 'zoneLeadInitial'
+      : cause === 'denied'
+        ? 'causeDenied'
+        : cause === 'unavailable'
+          ? 'causeUnavailable'
+          : cause === 'timeout'
+            ? 'causeTimeout'
+            : cause === 'unsupported'
+              ? 'causeUnsupported'
+              : cause === 'insecure'
+                ? 'causeInsecure'
+                : 'causeOutside';
+  return liveText(key);
+}
+
 /**
  * Línea de estado de la barra: siempre una, nunca vacía.
  *
  * El estado manda sobre el origen: "conectando…" mientras se abre la sesión y
  * "sin conexión" si se cayó, sin importar que el catálogo todavía sea el del
- * build. Cuando no hay sesión —build sin API— la barra ni se monta, así que acá
- * `statusDataset` es el caso "la sesión todavía no entregó la primera foto".
+ * build. "elegí una zona demo" es el estado propio de `needs-zone`: sin zona no
+ * hay región con la que abrir sesión, y la barra no puede fingir que hay una.
  */
 export function liveStatusText(source: DemoSource, live: LiveState): string {
+  if (live.status === 'needs-zone') {
+    return liveText('statusNeedsZone');
+  }
   if (live.status === 'connecting') {
     return liveText('statusConnecting');
   }
@@ -82,15 +122,17 @@ export function liveTransportText(live: LiveState): string | null {
 }
 
 /**
- * De dónde salen las distancias: `GPS` o `zona demo`. Texto corto porque va en
- * la línea de la barra, al lado del transporte y del conteo.
+ * De dónde salen las distancias: `GPS` o `zona demo (CDMX)`. La zona va en el
+ * texto a propósito: con dos regiones en el catálogo, "zona demo" sola no dice
+ * si el radar habla de México o de Colombia.
  */
 export function liveLocationText(live: LiveState): string | null {
   if (live.location === 'gps') {
     return liveText('gps');
   }
   if (live.location === 'demo') {
-    return liveText('demoZone');
+    const zone = zoneNameText(live.zoneKey);
+    return zone === null ? liveText('demoZone') : liveText('demoZoneIn', { zone });
   }
   return null;
 }

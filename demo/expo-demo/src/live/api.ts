@@ -65,6 +65,8 @@ export type PresenceState = {
   zoneKey: string | null;
   online: boolean;
   fallbackRequired: boolean;
+  /** Status HTTP del `PUT /presence`; el debug visible lo muestra tal cual. */
+  status: number;
 };
 
 export type LiveApi = {
@@ -215,7 +217,7 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
   const request = async (
     path: string,
     init?: { method?: string; body?: unknown },
-  ): Promise<unknown> => {
+  ): Promise<{ status: number; payload: unknown }> => {
     const withBody = init?.body !== undefined;
     const response = await doFetch(`${baseUrl}${path}`, {
       method: init?.method ?? 'GET',
@@ -244,12 +246,12 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
       throw new LiveApiError(response.status, code, message);
     }
     if (text === '') {
-      return null;
+      return { status: response.status, payload: null };
     }
     try {
-      return JSON.parse(text) as unknown;
+      return { status: response.status, payload: JSON.parse(text) as unknown };
     } catch {
-      return null;
+      return { status: response.status, payload: null };
     }
   };
 
@@ -265,14 +267,17 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
       token = next;
     },
     openSession: async (regionKey) =>
-      sessionWithToken(await request('/auth/demo-session', { method: 'POST', body: { regionKey } })),
+      sessionWithToken(
+        (await request('/auth/demo-session', { method: 'POST', body: { regionKey } })).payload,
+      ),
     claimSlot: async (regionKey, demoSlot) =>
       sessionWithToken(
-        await request('/auth/demo-session', { method: 'POST', body: { regionKey, demoSlot } }),
+        (await request('/auth/demo-session', { method: 'POST', body: { regionKey, demoSlot } }))
+          .payload,
       ),
     takeover: async (regionKey, demoSlot) =>
       sessionWithToken(
-        await request('/auth/takeover', { method: 'POST', body: { regionKey, demoSlot } }),
+        (await request('/auth/takeover', { method: 'POST', body: { regionKey, demoSlot } })).payload,
       ),
     logout: async () => {
       try {
@@ -284,44 +289,45 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
     presence: async (target) => {
       const body =
         'point' in target ? { point: { lat: target.point.lat, lng: target.point.lng } } : target;
-      const payload = (await request('/presence', { method: 'PUT', body })) as Record<
-        string,
-        unknown
-      > | null;
+      const response = await request('/presence', { method: 'PUT', body });
+      const payload = response.payload as Record<string, unknown> | null;
       const zoneKey = payload?.['zoneKey'];
       return {
         regionKey: readString(payload ?? {}, 'regionKey'),
         zoneKey: typeof zoneKey === 'string' ? zoneKey : null,
         online: readBool(payload ?? {}, 'online'),
         fallbackRequired: readBool(payload ?? {}, 'fallbackRequired'),
+        status: response.status,
       };
     },
     listProfiles: async (regionKey) =>
-      readRows(await request(`/demo/profiles${queryString({ regionKey })}`), 'profiles'),
-    discovery: async (query) =>
       readRows(
-        await request(
-          `/discovery${queryString({
-            radiusM: query.radiusM,
-            intention: query.intention,
-            gender: query.gender,
-            verified: query.verified,
-            online: query.online,
-          })}`,
-        ),
-        'results',
+        (await request(`/demo/profiles${queryString({ regionKey })}`)).payload,
+        'profiles',
       ),
+    discovery: async (query) => {
+      const response = await request(
+        `/discovery${queryString({
+          radiusM: query.radiusM,
+          intention: query.intention,
+          gender: query.gender,
+          verified: query.verified,
+          online: query.online,
+        })}`,
+      );
+      return readRows(response.payload, 'results');
+    },
+
     streamTicket: async () => {
-      const payload = (await request('/auth/stream-ticket', { method: 'POST' })) as Record<
-        string,
-        unknown
-      > | null;
+      const response = await request('/auth/stream-ticket', { method: 'POST' });
+      const payload = response.payload as Record<string, unknown> | null;
       return typeof payload?.['ticket'] === 'string' ? payload['ticket'] : '';
     },
     poll: async (cursor) => {
-      const payload = (await request(
+      const response = await request(
         `/events/poll${queryString({ cursor: cursor ?? undefined, limit: 100 })}`,
-      )) as Record<string, unknown> | null;
+      );
+      const payload = response.payload as Record<string, unknown> | null;
       const events = Array.isArray(payload?.['events']) ? payload?.['events'] : [];
       const nextCursor = payload?.['nextCursor'];
       return {

@@ -5,6 +5,7 @@ import {
   requestPoint,
   round6,
   type GeoEnvironment,
+  type GeoResult,
   type GeolocationLike,
 } from '../src/live/geolocation';
 
@@ -48,6 +49,7 @@ describe('requestPoint', () => {
     await expect(requestPoint(environment)).resolves.toEqual({
       status: 'ok',
       point: { lat: 19.432608, lng: -99.13321 },
+      accuracyM: null,
     });
   });
 
@@ -59,13 +61,18 @@ describe('requestPoint', () => {
     await expect(requestPoint(environment)).resolves.toEqual({ status: 'denied' });
   });
 
-  it('timeout o posición no disponible es `unavailable`', async () => {
-    for (const code of [2, 3, undefined]) {
+  it('cada código del DOM tiene su propio final: el usuario necesita saber cuál', async () => {
+    const cases: { code: number | undefined; status: GeoResult['status'] }[] = [
+      { code: 2, status: 'unavailable' },
+      { code: 3, status: 'timeout' },
+      { code: undefined, status: 'unavailable' },
+    ];
+    for (const { code, status } of cases) {
       const environment: GeoEnvironment = {
         secureContext: true,
         geolocation: stubGeo((_success, fail) => fail?.({ code })),
       };
-      await expect(requestPoint(environment)).resolves.toEqual({ status: 'unavailable' });
+      await expect(requestPoint(environment), `code ${String(code)}`).resolves.toEqual({ status });
     }
   });
 

@@ -13,9 +13,10 @@ import { ProfilePickerSheet } from './components/ProfilePickerSheet';
 import { SimSheet } from './components/SimSheet';
 import { ToastHost } from './components/ToastHost';
 import { VisibilitySwitch } from './components/VisibilitySwitch';
+import { ZoneSheet } from './components/ZoneSheet';
 import { ghostSwitch } from './components/visibilityModel';
 import { fmt } from './generated/copy';
-import { LiveProvider } from './live/LiveProvider';
+import { LiveProvider, useLive } from './live/LiveProvider';
 import { AboutScreen } from './screens/AboutScreen';
 import { BlockedScreen } from './screens/BlockedScreen';
 import { ChatScreen } from './screens/ChatScreen';
@@ -72,11 +73,13 @@ export default function App() {
  */
 function DemoShell() {
   const { state, dispatch } = useDemo();
+  const live = useLive();
   const [simOpen, setSimOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const overlayProfile = profileById(state.profileId, state.catalog);
   const celebration = profileById(state.matchCelebration, state.catalog);
   const ghost = ghostSwitch(state);
+  const zonePrompt = live.state.zonePrompt;
 
   const closeSheet = (): void => setSimOpen(false);
   const openSheet = (): void => setSimOpen(true);
@@ -178,6 +181,12 @@ function DemoShell() {
                 <ProfilePickerSheet onClose={() => setPickerOpen(false)} />
               </SheetLayer>
             ) : null}
+
+            {zonePrompt === null ? null : (
+              <SheetLayer onClose={live.dismissZoneSheet}>
+                <ZoneSheet cause={zonePrompt} />
+              </SheetLayer>
+            )}
           </View>
         </View>
       </DemoFrame>

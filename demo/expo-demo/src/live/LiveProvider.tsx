@@ -13,7 +13,12 @@ import { fixtures } from '../generated/fixtures';
 import { useDemo } from '../state/DemoProvider';
 import type { DemoStore } from '../state/store';
 
-import { readRuntimeLiveSettings, type LiveSettings } from './config';
+import {
+  readRuntimeLiveSettings,
+  readRuntimeZone,
+  writeStoredZone,
+  type LiveSettings,
+} from './config';
 import {
   createLiveController,
   type EventSourceLike,
@@ -31,6 +36,11 @@ import { emptyLiveState, type LiveState } from './types';
  * los filtros en el reducer, el provider los empuja al controlador. El
  * controlador no sabe que existe un store y el reducer no sabe que existe una
  * red: si el modo live desapareciera, la demo mock seguiría igual.
+ *
+ * **Arranque.** La sesión arranca sola, pero sólo si ya hay una zona elegida
+ * (persistida de una visita anterior). Sin zona, el controlador queda en
+ * `needs-zone` y la UI pregunta: el mapa/lista siguen con el dataset del build.
+ * La ubicación **no** se pide al montar; se pide desde el botón.
  */
 
 export type LiveBinding = {
@@ -40,10 +50,14 @@ export type LiveBinding = {
   state: LiveState;
   /** Hay una sesión abierta (viva o degradada a polling). */
   enabled: boolean;
-  /** Abre (o reintenta abrir) la sesión. La UI no ofrece "apagar el live". */
+  /** Abre (o reintenta abrir) la sesión con la zona ya elegida. */
   enable: () => Promise<void>;
-  /** Reintenta la ubicación real (botón "Usar mi ubicación"). */
+  /** El gesto "Usar mi ubicación": un solo pedido, sin seguimiento. */
   requestLocation: () => Promise<void>;
+  /** Elige la zona demo (CDMX/Bogotá). Recrea la sesión si cambia de región. */
+  chooseZone: (zoneKey: string) => Promise<void>;
+  openZoneSheet: () => void;
+  dismissZoneSheet: () => void;
   refresh: () => Promise<void>;
   refreshRows: () => Promise<void>;
   claim: (slot: number) => Promise<LiveActionResult>;
@@ -81,20 +95,27 @@ export function LiveProvider({
 }: LiveProviderProps) {
   // `EXPO_PUBLIC_*` se inlinea al compilar: el acceso tiene que ser estático.
   // El override de runtime (`?api=` y storage) entra después, en `config`.
+  // La región no entra: sale de la zona elegida (`cdmx → mx`, `bogota → co`).
   const settings = useMemo(
-    () =>
-      readRuntimeLiveSettings(
-        process.env.EXPO_PUBLIC_API_URL,
-        process.env.EXPO_PUBLIC_DEMO_REGION,
-      ),
+    () => readRuntimeLiveSettings(process.env.EXPO_PUBLIC_API_URL),
     [],
   );
+
+  /**
+   * Zona persistida de una visita anterior. Se lee **una vez**, antes de crear
+   * el controlador: es el arranque sin gesto que no adivina la ciudad.
+   */
+  const [initialZone] = useState<string | null>(() => readRuntimeZone());
 
   const [controller] = useState<LiveController>(() =>
     createLiveController({
       settings,
+      initialZoneKey: initialZone,
+      onZoneChange: writeStoredZone,
       createEventSource: createEventSource ?? defaultEventSource,
       requestPoint: requestBrowserPoint,
+      // El usuario puede copiar estos logs cuando algo no cuadra. Sin coordenadas.
+      log: (message) => console.info(message),
       onCatalog: (profiles, source) => {
         store.setCatalog(profiles === null ? fixtures.profiles : profiles, source);
       },
@@ -128,7 +149,9 @@ export function LiveProvider({
     };
   }, [controller]);
 
-  const enabled = live.status !== 'idle' && live.status !== 'offline';
+  /** Con sesión abierta: `live`, `polling` o el `connecting` del arranque. */
+  const enabled =
+    live.status === 'live' || live.status === 'polling' || live.status === 'connecting';
 
   useEffect(() => {
     if (!enabled) {
@@ -143,6 +166,21 @@ export function LiveProvider({
 
   const requestLocation = useCallback(async () => {
     await controller.requestLocation();
+  }, [controller]);
+
+  const chooseZone = useCallback(
+    async (zoneKey: string) => {
+      await controller.chooseZone(zoneKey);
+    },
+    [controller],
+  );
+
+  const openZoneSheet = useCallback(() => {
+    controller.openZoneSheet();
+  }, [controller]);
+
+  const dismissZoneSheet = useCallback(() => {
+    controller.dismissZoneSheet();
   }, [controller]);
 
   const refreshRows = useCallback(async () => {
@@ -161,6 +199,9 @@ export function LiveProvider({
         enabled,
         enable,
         requestLocation,
+        chooseZone,
+        openZoneSheet,
+        dismissZoneSheet,
         refresh,
         refreshRows,
         claim,

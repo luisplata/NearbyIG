@@ -11,41 +11,52 @@ import {
 } from './api';
 import type { LiveSettings } from './config';
 import { applyEvents } from './events';
-import type { GeoResult } from './geolocation';
-import { defaultZoneFor } from './regions';
+import type { GeoPoint, GeoResult } from './geolocation';
+import { regionForZone } from './regions';
 import {
   emptyLiveState,
   EVENT_TYPES,
   parseEvent,
+  type LiveDiagnostics,
   type LiveEvent,
   type LiveLocation,
   type LiveNotice,
   type LiveState,
+  type ZonePromptCause,
 } from './types';
+import { zoneForPoint } from './zones';
 
 /**
  * Controlador de la sesión live. Sin React y sin React Native: todo el I/O pasa
  * por `fetch` inyectable, así los tests lo manejan con un fake y no hay una
  * segunda versión de la lógica en los tests.
  *
- * **Ciclo.** `start()` abre sesión (`POST /auth/demo-session`), registra
- * presencia en la zona por defecto de la región (`PUT /presence`), pide la
- * primera foto (`GET /discovery` + `GET /demo/profiles`) y abre el stream
- * (`POST /auth/stream-ticket` + `EventSource` sobre `GET /events`).
+ * **Ciclo.** `start()` abre sesión (`POST /auth/demo-session`) **en la región de
+ * la zona elegida**, registra la presencia demo de esa zona (`PUT /presence`),
+ * pide la primera foto (`GET /discovery` + `GET /demo/profiles`) y abre el
+ * stream (`POST /auth/stream-ticket` + `EventSource` sobre `GET /events`).
+ *
+ * **La zona manda, y no se adivina.** La región nunca sale de una variable de
+ * build ni de un default: sale de la zona (`cdmx → mx`, `bogota → co`) que el
+ * usuario eligió, que quedó persistida de una visita anterior, o de la zona en
+ * la que cae el punto del GPS. Sin zona no hay sesión: el estado queda en
+ * `needs-zone` y la UI pregunta. Así no existe el camino "no dio el GPS, abro en
+ * CDMX" que mandaba a un usuario de Bogotá a la ciudad equivocada.
+ *
+ * **El GPS, sólo con gesto.** `start()` no pide la ubicación: `requestLocation()`
+ * es el botón "Usar mi ubicación". Pedir la ubicación sin gesto en móvil se
+ * rechaza o se ignora, y el usuario ve un error que no llega a leer.
+ *
+ * **Cambio de región.** Si la zona elegida (o la del punto) es de otra región, la
+ * sesión actual no sirve: se cierra (`POST /auth/logout`) y se abre otra en la
+ * región correcta. Nunca se manda un punto de Bogotá con una sesión `mx`: el
+ * backend deriva la región de la sesión y respondería `fallbackRequired`.
  *
  * **Latido de presencia.** El TTL de presencia del backend es de 12 s y
  * `/discovery` no devuelve nada sin presencia viva ("ver sin ser visto es lo que
  * un ghost no debe poder hacer"). Por eso el latido repite `PUT /presence` cada
  * 8 s (4 s de margen) y, en la misma vuelta, refresca la foto: eso es también el
  * mecanismo que repara cualquier hueco del stream.
- *
- * **Presencia: GPS o zona demo.** Al abrir la sesión se pide el punto una vez
- * (`ports.requestPoint`). Si el navegador lo da, el `PUT /presence` lleva
- * `point`; si lo niega, no hay soporte o el contexto no es seguro, lleva la
- * `demoZoneKey` de la región. Si el server responde `fallbackRequired` (el punto
- * no cae en ninguna zona del catálogo) se re-registra con la zona demo y queda un
- * aviso: el mapa y las distancias son de la zona demo, no de donde está el
- * usuario. El punto no se guarda ni se repite en ningún otro pedido.
  *
  * **Transporte.** SSE es la actualización fina; el polling (`/events/poll` con
  * `cursor`) es el fallback si el navegador no soporta `EventSource`, si el
@@ -60,9 +71,8 @@ import {
  * **Falla suave.** Cualquier error de arranque deja `status: 'offline'` y avisa
  * con `onCatalog(null, 'dataset')`: la app vuelve al dataset del build sin
  * romperse. No hay un modo "mock" visible que elegir: el dataset es el piso, no
- * una opción de la UI.
- * Dos latidos fallidos seguidos se tratan igual (la sesión se perdió o la API se
- * cayó), incluso si el stream seguía abierto.
+ * una opción de la UI. Dos latidos fallidos seguidos se tratan igual (la sesión
+ * se perdió o la API se cayó), incluso si el stream seguía abierto.
  */
 
 export type EventSourceLike = {
@@ -81,10 +91,19 @@ export type LiveControllerPorts = {
   /** `null` = el runtime no tiene `EventSource`; se usa polling. */
   createEventSource?: (url: string) => EventSourceLike | null;
   /**
-   * Punto del navegador. `undefined` = no se pide (tests, runtimes sin DOM) y la
-   * presencia va con la zona demo, que es el camino sin permiso.
+   * Punto del navegador. Sólo lo llama `requestLocation()` (el gesto del
+   * usuario), nunca `start()`. `undefined` = runtime sin DOM (tests).
    */
   requestPoint?: () => Promise<GeoResult>;
+  /** Zona persistida de una visita anterior. `null` = todavía no eligió. */
+  initialZoneKey?: string | null;
+  /** Persiste la zona elegida o resuelta por GPS (`cdmx`/`bogota`, nunca un punto). */
+  onZoneChange?: (zoneKey: string) => void;
+  /**
+   * Log de diagnóstico con prefijo `[geo]`. La app pasa `console.info`; los tests
+   * no, así el ruido queda en el navegador y no en la salida de vitest.
+   */
+  log?: (message: string) => void;
   /** Catálogo para la UI. `null` significa "volvé al dataset del build". */
   onCatalog?: (profiles: readonly UiProfile[] | null, source: DemoSource) => void;
   heartbeatMs?: number;
@@ -96,14 +115,19 @@ export type LiveController = {
   getSettings(): LiveSettings | null;
   getState(): LiveState;
   subscribe(listener: () => void): () => void;
-  /** `false` si no se pudo abrir: la UI se queda con el dataset del build. */
+  /** `false` si no se pudo abrir (sin zona, sin API): la UI se queda con el dataset. */
   start(): Promise<boolean>;
   stop(): Promise<void>;
   refresh(): Promise<void>;
   refreshRows(): Promise<void>;
   setFilters(filters: DiscoveryFilters): void;
-  /** Reintenta el punto del navegador (botón "Usar mi ubicación"). */
+  /** El gesto "Usar mi ubicación": un solo pedido, sin seguimiento. */
   requestLocation(): Promise<void>;
+  /** Elige la zona demo. Recrea la sesión si la zona es de otra región. */
+  chooseZone(zoneKey: string): Promise<void>;
+  /** Vuelve a mostrar el sheet de zona (después de un "Ahora no"). */
+  openZoneSheet(): void;
+  dismissZoneSheet(): void;
   claim(slot: number): Promise<LiveActionResult>;
   takeover(slot: number): Promise<LiveActionResult>;
 };
@@ -118,6 +142,11 @@ function isConnected(status: LiveState['status']): boolean {
   return status === 'live' || status === 'polling';
 }
 
+/** `GeoResult` sin `ok` → causa del sheet. Nunca se llama con `ok`. */
+function failureCause(status: Exclude<GeoResult['status'], 'ok'>): ZonePromptCause {
+  return status;
+}
+
 export function createLiveController(ports: LiveControllerPorts): LiveController {
   const settings = ports.settings;
   const api: LiveApi | null =
@@ -125,7 +154,8 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
 
   let state: LiveState = emptyLiveState();
   const listeners = new Set<() => void>();
-  let zone: string | null = null;
+  /** Zona demo en uso. Es la que define la región de la sesión. */
+  let zone: string | null = ports.initialZoneKey ?? null;
   /** Lo que se repite en cada latido: el punto (si se pudo) o la zona demo. */
   let presence: PresenceTarget | null = null;
   let cursor: string | null = null;
@@ -167,6 +197,23 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     ports.onCatalog?.(null, 'dataset');
   };
 
+  const log = ports.log ?? ((): void => undefined);
+
+  /** Actualiza un subconjunto del diagnóstico sin pisar el resto. */
+  const diagnose = (patch: Partial<LiveDiagnostics>): void => {
+    set({ diagnostics: { ...state.diagnostics, ...patch } });
+  };
+
+  /** Fija la zona activa y la persiste: una recarga no vuelve a preguntar. */
+  const applyZone = (zoneKey: string): void => {
+    const changed = zone !== zoneKey;
+    zone = zoneKey;
+    set({ zoneKey });
+    if (changed) {
+      ports.onZoneChange?.(zoneKey);
+    }
+  };
+
   const queryFor = (current: DiscoveryFilters): DiscoveryQuery => {
     const intentions = current.intentions;
     return {
@@ -200,33 +247,49 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   };
 
   /**
-   * Decide con qué se registra la presencia y la registra.
+   * Registra la presencia del objetivo y devuelve de dónde salieron las
+   * distancias.
    *
-   * `gps` sólo si el navegador dio un punto **y** el server lo pudo proyectar a
-   * una zona (`fallbackRequired: false`). El punto fuera de zona no es un error
-   * del contrato: es el caso "estoy en otra ciudad", y la respuesta correcta es
-   * caer a la zona demo con un aviso, no dejar la presencia sin zona.
+   * El punto fuera de la zona de la región no es un error del contrato: es el
+   * caso "estoy en otra ciudad". El server responde `fallbackRequired` y acá se
+   * re-registra con la zona demo de la región + un aviso, en vez de dejar la
+   * presencia sin zona. El cliente ya descarta el punto antes de mandarlo cuando
+   * no cae en ninguna zona (`zoneForPoint`), así que esto es la red del server.
    */
-  const applyPresence = async (demoZoneKey: string): Promise<LiveLocation> => {
+  const registerPresence = async (
+    target: PresenceTarget,
+    zoneKey: string,
+  ): Promise<LiveLocation> => {
     if (api === null) {
       return 'demo';
     }
-    const geo = ports.requestPoint === undefined ? null : await ports.requestPoint();
-    if (geo !== null && geo.status === 'ok') {
-      const projected = await api.presence({ point: geo.point });
-      if (!projected.fallbackRequired) {
-        presence = { point: geo.point };
-        return 'gps';
-      }
-      // Fuera de la zona demo: la presencia va con zona y el aviso lo explica.
-      await api.presence({ demoZoneKey });
-      presence = { demoZoneKey };
-      set({ notice: 'outside-zone' });
+    const result = await api.presence(target);
+    diagnose({
+      presenceStatus: result.status,
+      presenceZoneKey: result.zoneKey,
+      fallbackRequired: result.fallbackRequired,
+    });
+    log(
+      `[geo] presence=${result.status} region=${result.regionKey} zone=${result.zoneKey ?? 'none'} fallback=${result.fallbackRequired}`,
+    );
+    if ('point' in target && result.fallbackRequired) {
+      const fallback = await api.presence({ demoZoneKey: zoneKey });
+      diagnose({
+        presenceStatus: fallback.status,
+        presenceZoneKey: fallback.zoneKey,
+        fallbackRequired: fallback.fallbackRequired,
+      });
+      log(
+        `[geo] presence=${fallback.status} region=${fallback.regionKey} zone=${fallback.zoneKey ?? 'none'} fallback=${fallback.fallbackRequired}`,
+      );
+      presence = { demoZoneKey: zoneKey };
+      set({ notice: 'outside-zone', zonePrompt: 'outside-zone', point: null });
       return 'demo';
     }
-    await api.presence({ demoZoneKey });
-    presence = { demoZoneKey };
-    return 'demo';
+    presence = target;
+    // Un punto que sí se pudo proyectar cierra el sheet y borra el aviso.
+    set({ notice: null, zonePrompt: null });
+    return 'point' in target ? 'gps' : 'demo';
   };
 
   const clearTimers = (): void => {
@@ -270,13 +333,46 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     cursor = null;
     failures = 0;
     presence = null;
-    set({ status: 'offline', transport: 'none', notice, error: code, location: null });
+    set({ status: 'offline', transport: 'none', notice, error: code, location: null, point: null });
     emitDataset();
     if (api !== null && state.session !== null) {
       // Best effort: la sesión ya puede estar revocada.
       void api.logout().catch(() => undefined);
     }
     set({ session: null });
+  };
+
+  /**
+   * Cierra la sesión actual sin tocar la zona elegida: es el paso previo a
+   * abrir otra en la región correcta. `silent` evita el parpadeo al dataset en
+   * medio de un cambio de zona (la nueva sesión llega en el mismo gesto).
+   */
+  const closeSession = async (silent: boolean): Promise<void> => {
+    const hadSession = state.session !== null;
+    clearTimers();
+    stopPolling();
+    closeStream();
+    cursor = null;
+    failures = 0;
+    presence = null;
+    set({
+      session: null,
+      discovery: [],
+      rows: [],
+      lastSeq: 0,
+      lastEventAt: null,
+      location: null,
+      transport: 'none',
+      status: 'idle',
+      point: null,
+    });
+    if (silent) {
+      return;
+    }
+    emitDataset();
+    if (api !== null && hadSession) {
+      await api.logout().catch(() => undefined);
+    }
   };
 
   const apply = (events: readonly LiveEvent[]): void => {
@@ -468,6 +564,63 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     startHeartbeat();
   };
 
+  /**
+   * Abre la sesión en la región de la zona y registra la presencia con la que se
+   * arranca: el punto si hay un gesto de ubicación, la zona demo si no.
+   *
+   * Es el único camino que crea sesión, así que la región siempre es la de una
+   * zona del catálogo: no hay una "región por defecto" que pueda aparecer.
+   */
+  const openSessionWith = async (zoneKey: string, geoPoint: GeoPoint | null): Promise<boolean> => {
+    if (api === null) {
+      return false;
+    }
+    const regionKey = regionForZone(zoneKey);
+    if (regionKey === null) {
+      set({ status: 'needs-zone', transport: 'none', zonePrompt: 'initial' });
+      emitDataset();
+      return false;
+    }
+    set({ status: 'connecting', transport: 'none', notice: null, error: null });
+    let session: LiveState['session'];
+    try {
+      // Sin `demoSlot`: el backend toma el primer slot libre y, si los 10 están
+      // ocupados, entra como invitado. Nunca hay que adivinar un slot.
+      session = await api.openSession(regionKey);
+    } catch (error) {
+      failures = 0;
+      set({
+        status: 'offline',
+        transport: 'none',
+        notice: noticeFor(error),
+        error: error instanceof LiveApiError ? error.code : null,
+        session: null,
+        location: null,
+      });
+      emitDataset();
+      return false;
+    }
+    applyZone(zoneKey);
+    api.setToken(session.token);
+    set({ session, zoneKey, zonePrompt: null });
+    log(
+      `[geo] session region=${session.regionKey} slot=${session.demoSlot ?? 'invitado'} profile=${session.profileId}`,
+    );
+    try {
+      const target: PresenceTarget = geoPoint === null ? { demoZoneKey: zoneKey } : { point: geoPoint };
+      const location = await registerPresence(target, zoneKey);
+      set({ location, point: location === 'gps' ? geoPoint : null });
+      await refreshDiscovery();
+    } catch (error) {
+      degrade(error);
+      return false;
+    }
+    void refreshRows();
+    await connectStream();
+    startHeartbeat();
+    return true;
+  };
+
   return {
     getSettings: () => settings,
     getState: () => state,
@@ -485,52 +638,30 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       if (isConnected(state.status) || state.status === 'connecting') {
         return true;
       }
-      const nextZone = defaultZoneFor(settings.region);
-      set({ status: 'connecting', transport: 'none', notice: null, error: null });
-      if (nextZone === null) {
-        set({ status: 'offline', transport: 'none', notice: 'unreachable' });
-        emitDataset();
-        return false;
-      }
-      let session: LiveState['session'];
-      try {
-        session = await api.openSession(settings.region);
-      } catch (error) {
-        failures = 0;
+      /**
+       * Sin zona no se abre nada. La única forma de arrancar en `mx`/`co` es una
+       * zona elegida (ahora o en una visita anterior): no hay default mudo, y la
+       * ubicación no se pide sin un gesto.
+       */
+      if (zone === null || regionForZone(zone) === null) {
         set({
-          status: 'offline',
+          status: 'needs-zone',
           transport: 'none',
-          notice: noticeFor(error),
-          error: error instanceof LiveApiError ? error.code : null,
+          notice: null,
+          error: null,
+          location: null,
+          point: null,
+          zonePrompt: 'initial',
         });
         emitDataset();
         return false;
       }
-      zone = nextZone;
-      api.setToken(session.token);
-      set({ session });
-      try {
-        const location = await applyPresence(nextZone);
-        set({ location });
-        await refreshDiscovery();
-      } catch (error) {
-        degrade(error);
-        return false;
-      }
-      void refreshRows();
-      await connectStream();
-      startHeartbeat();
-      return true;
+      return openSessionWith(zone, null);
     },
     stop: async () => {
       const hadSession = state.session !== null;
-      clearTimers();
-      stopPolling();
-      closeStream();
-      cursor = null;
-      failures = 0;
+      await closeSession(true);
       zone = null;
-      presence = null;
       state = emptyLiveState();
       notify();
       emitDataset();
@@ -539,12 +670,55 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       }
     },
     requestLocation: async () => {
-      if (api === null || zone === null || state.session === null) {
+      if (api === null || ports.requestPoint === undefined) {
+        return;
+      }
+      const geo = await ports.requestPoint();
+      diagnose({
+        geo: geo.status,
+        accuracyM: geo.status === 'ok' ? geo.accuracyM : null,
+      });
+      if (geo.status !== 'ok') {
+        log(`[geo] request=${geo.status} zone=${zone ?? 'none'}`);
+        // La sesión (si existe) sigue con su zona demo; el sheet explica el motivo.
+        set({ zonePrompt: failureCause(geo.status) });
+        return;
+      }
+      const zoneKey = zoneForPoint(geo.point);
+      log(
+        `[geo] request=ok accuracy=${geo.accuracyM === null ? 'desconocida' : `${geo.accuracyM}m`} zone=${zoneKey ?? 'none'}`,
+      );
+      if (zoneKey === null) {
+        // Fuera de México y Colombia: no se manda un punto que el server va a
+        // rechazar ni se abre una sesión en una región que no es la del usuario.
+        set({ zonePrompt: 'outside-zone', point: null });
+        return;
+      }
+      const regionKey = regionForZone(zoneKey);
+      if (regionKey === null) {
+        set({ zonePrompt: 'outside-zone' });
+        return;
+      }
+      const current = state.session;
+      if (current === null) {
+        applyZone(zoneKey);
+        await openSessionWith(zoneKey, geo.point);
+        return;
+      }
+      if (current.regionKey !== regionKey) {
+        // La zona del punto es de otra región: la sesión actual no sirve.
+        await closeSession(true);
+        if (api !== null) {
+          await api.logout().catch(() => undefined);
+        }
+        applyZone(zoneKey);
+        await openSessionWith(zoneKey, geo.point);
         return;
       }
       try {
-        const location = await applyPresence(zone);
-        set({ location });
+        applyZone(zoneKey);
+        const location = await registerPresence({ point: geo.point }, zoneKey);
+        set({ location, point: location === 'gps' ? geo.point : null });
         await refreshDiscovery();
       } catch (error) {
         failures += 1;
@@ -552,6 +726,53 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
           degrade(error);
         }
       }
+    },
+    chooseZone: async (zoneKey) => {
+      if (api === null) {
+        return;
+      }
+      const regionKey = regionForZone(zoneKey);
+      if (regionKey === null) {
+        return;
+      }
+      // La elección se persiste antes de abrir: si la API está caída, recargar
+      // respeta lo que el usuario eligió en vez de volver a preguntar.
+      applyZone(zoneKey);
+      const current = state.session;
+      if (current !== null && current.regionKey === regionKey) {
+        // Misma región: sólo cambia la zona demo de la presencia.
+        try {
+          presence = { demoZoneKey: zoneKey };
+          await api.presence(presence);
+          set({ location: 'demo', notice: null, zonePrompt: null, error: null });
+          await refreshDiscovery();
+        } catch (error) {
+          failures += 1;
+          if (failures >= 2) {
+            degrade(error);
+          }
+        }
+        return;
+      }
+      if (current !== null) {
+        // Otra región: cerrar y abrir de nuevo. Mandar presencia de `co` con un
+        // token `mx` sólo devolvería `fallbackRequired` y dejaría al usuario en
+        // la ciudad equivocada.
+        await closeSession(true);
+        if (api !== null) {
+          await api.logout().catch(() => undefined);
+        }
+      }
+      await openSessionWith(zoneKey, null);
+    },
+    openZoneSheet: () => {
+      if (state.zonePrompt !== null) {
+        return;
+      }
+      set({ zonePrompt: zone === null ? 'initial' : 'outside-zone' });
+    },
+    dismissZoneSheet: () => {
+      set({ zonePrompt: null });
     },
     refresh: async () => {
       await refreshDiscovery().catch((error: unknown) => {
@@ -578,11 +799,12 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       });
     },
     claim: async (slot) => {
-      if (api === null || state.session === null || settings === null) {
+      const regionKey = state.session?.regionKey ?? regionForZone(zone);
+      if (api === null || state.session === null || regionKey === null) {
         return { ok: false, code: 'NO_SESSION' };
       }
       try {
-        const session = await api.claimSlot(settings.region, slot);
+        const session = await api.claimSlot(regionKey, slot);
         await afterSlotChange(session);
         return { ok: true, code: null };
       } catch (error) {
@@ -590,11 +812,12 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       }
     },
     takeover: async (slot) => {
-      if (api === null || state.session === null || settings === null) {
+      const regionKey = state.session?.regionKey ?? regionForZone(zone);
+      if (api === null || state.session === null || regionKey === null) {
         return { ok: false, code: 'NO_SESSION' };
       }
       try {
-        const session = await api.takeover(settings.region, slot);
+        const session = await api.takeover(regionKey, slot);
         await afterSlotChange(session);
         return { ok: true, code: null };
       } catch (error) {

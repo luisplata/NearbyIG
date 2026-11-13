@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import { liveCopy } from '../src/live/liveCopy';
 import { emptyLiveState, type LiveState } from '../src/live/types';
-import { liveNoticeText, liveStatusText, liveSessionText, liveTransportText } from '../src/live/status';
+import {
+  liveLocationText,
+  liveNoticeText,
+  liveStatusText,
+  liveSessionText,
+  liveTransportText,
+  zoneCauseText,
+} from '../src/live/status';
 
 /**
  * La barra ya no es un switch: el estado cuenta qué está pasando y el dataset del
@@ -40,6 +47,35 @@ describe('estado de la barra', () => {
       expect(liveNoticeText(notice) ?? '').not.toMatch(/mock/i);
     }
     expect(liveNoticeText('unconfigured')).toContain('EXPO_PUBLIC_API_URL');
+  });
+
+  it('sin zona elegida el estado lo dice: no hay sesión que fingir', () => {
+    expect(liveStatusText('dataset', state({ status: 'needs-zone' }))).toBe('elegí una zona demo');
+  });
+
+  it('la ubicación se cuenta con la zona: "zona demo (CDMX)" no es "zona demo"', () => {
+    expect(liveLocationText(emptyLiveState())).toBeNull();
+    expect(liveLocationText(state({ location: 'gps', zoneKey: 'bogota' }))).toBe('GPS');
+    expect(liveLocationText(state({ location: 'demo', zoneKey: 'cdmx' }))).toBe('zona demo (CDMX)');
+    expect(liveLocationText(state({ location: 'demo', zoneKey: 'bogota' }))).toBe(
+      'zona demo (Bogotá)',
+    );
+  });
+
+  it('cada causa del sheet tiene su texto, y ninguna dice "zona demo" a secas', () => {
+    const causes = [
+      'initial',
+      'denied',
+      'timeout',
+      'unavailable',
+      'unsupported',
+      'insecure',
+      'outside-zone',
+    ] as const;
+    expect(new Set(causes.map((cause) => zoneCauseText(cause))).size).toBe(causes.length);
+    expect(zoneCauseText('denied')).toMatch(/bloqueada/i);
+    expect(zoneCauseText('insecure')).toMatch(/HTTPS/i);
+    expect(zoneCauseText('outside-zone')).toMatch(/fuera de México y Colombia/i);
   });
 
   it('la línea de sesión y el transporte sólo existen con sesión', () => {

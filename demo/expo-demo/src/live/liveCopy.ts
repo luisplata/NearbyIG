@@ -11,10 +11,17 @@
  *
  * No hay copy de "Mock" ni de "Live" como chips: en el build publicado el
  * dataset no es una elección visible, y cuando hay API la sesión arranca sola.
+ *
+ * **Un texto por causa.** El pedido de ubicación puede fallar por cinco motivos
+ * distintos y el usuario necesita saber cuál para poder destrabarlo: el mensaje
+ * genérico de antes ("seguimos en la zona demo") no decía si el permiso estaba
+ * bloqueado, si el navegador no la soporta o si estaba fuera de México y
+ * Colombia.
  */
 export const liveCopy = {
   liveBadge: 'Modo de datos: {mode}',
   statusDataset: 'dataset local',
+  statusNeedsZone: 'elegí una zona demo',
   statusConnecting: 'conectando…',
   statusLive: 'en vivo',
   statusPolling: 'en vivo por polling',
@@ -34,10 +41,41 @@ export const liveCopy = {
   noticeDegraded: 'Se cortó el stream: seguimos actualizando por polling.',
   gps: 'GPS',
   demoZone: 'zona demo',
+  demoZoneIn: 'zona demo ({zone})',
   useMyLocation: 'Usar mi ubicación',
-  geolocationDenied: 'Sin permiso de ubicación: seguimos en la zona demo.',
-  geolocationUnavailable: 'Este navegador no dio la ubicación: seguimos en la zona demo.',
   geolocationOutside: 'Estás fuera de la zona demo: el mapa y las distancias son de la zona demo.',
+
+  // Sheet de zona: la puerta de entrada cuando no hay ubicación utilizable.
+  zoneTitle: 'Zona de la demo',
+  zoneLead: 'No pudimos usar tu ubicación. Elegí una zona para la demo.',
+  zoneLeadInitial: 'Elegí una zona para la demo o usá tu ubicación para ver distancias reales.',
+  causeDenied: 'El navegador tiene la ubicación bloqueada para este sitio.',
+  causeUnavailable: 'La ubicación no está disponible en este momento.',
+  causeTimeout: 'La ubicación tardó demasiado en responder.',
+  causeUnsupported: 'Este navegador no entrega la ubicación.',
+  causeInsecure: 'El sitio no está en HTTPS, así que el navegador no entrega la ubicación.',
+  causeOutside: 'Tu ubicación está fuera de México y Colombia.',
+  unblockHint: 'Para destrabarlo, tocá el candado de la barra de direcciones y habilitá la ubicación para este sitio.',
+  zoneSwitchNote: 'Elegir una zona de otra región cierra esta sesión y abre una nueva allá.',
+  zoneCdmx: 'CDMX, México',
+  zoneBogota: 'Bogotá, Colombia',
+  zoneCdmxShort: 'CDMX',
+  zoneBogotaShort: 'Bogotá',
+  changeZone: 'Cambiar zona',
+  chooseZone: 'Elegir zona',
+  notNow: 'Ahora no',
+
+  // Debug del flujo de ubicación: discreto, sin coordenadas.
+  debugToggle: 'debug',
+  debugTitle: 'Diagnóstico de ubicación',
+  debugGeo: 'geo: {geo} · precisión {accuracy}',
+  debugPresence: 'presence: {status} · zona {zone} · fallback {fallback}',
+  debugSession: 'sesión: {region} · {slot}',
+  debugZone: 'zona: {zone}',
+  none: '—',
+  yes: 'sí',
+  no: 'no',
+
   pickerTitle: 'Perfiles demo',
   pickerHelp: 'Un slot en uso lo tiene otra sesión de demo. Podés esperar a que se libere o desalojarla.',
   inUse: 'en uso',
