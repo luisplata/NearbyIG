@@ -2,7 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Pool } from 'pg';
 import type { AuthContext, SourceType } from '../auth/session.types';
 import { AppProblemError } from '../common/problem';
-import { isRecord, rejectUnknownKeys, validationFailed } from '../common/validation';
+import { RateLimiterService } from '../common/rate-limit.service';
+import { isRecord, parseProfileId, rejectUnknownKeys, validationFailed } from '../common/validation';
 import { PG_POOL } from '../db/database.module';
 import type { PingPeer } from '../pings/pings.types';
 import type { Block, BlockList } from './blocks.types';
@@ -10,22 +11,25 @@ import type { Block, BlockList } from './blocks.types';
 /** Un `profileId` de bot: `<owner>-b1` / `<owner>-b2`. */
 const BOT_PROFILE_ID = /-b[12]$/;
 
+/**
+ * Tope de bloqueos por minuto. No protege de un abuso grave (bloquear es
+ * idempotente y por perfil), pero corta el loop que inserta filas sin fin: un
+ * reset limpia decenas, no millones.
+ */
+const BLOCK_RATE_PER_MINUTE = 30;
+
 /** El humano detrás de un `profileId`: el mismo si no es bot, el dueño si lo es. */
 function canonicalProfileId(profileId: string): string {
   return profileId.replace(BOT_PROFILE_ID, '');
 }
 
-/** `profileId` del body: obligatorio, string, sin campos de más. */
-function parseProfileId(body: unknown): string {
+/** `profileId` del body: obligatorio, con forma de id y sin campos de más. */
+function parseBlockBody(body: unknown): string {
   if (!isRecord(body)) {
     throw validationFailed('body debe ser un objeto JSON con profileId.');
   }
   rejectUnknownKeys(body, ['profileId']);
-  const value = body['profileId'];
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw validationFailed('profileId es obligatorio y debe ser un string no vacío.');
-  }
-  return value;
+  return parseProfileId(body['profileId']);
 }
 
 interface BlockRow {
@@ -68,7 +72,10 @@ interface BlockListRow extends BlockRow {
 export class BlocksService {
   private readonly logger = new Logger(BlocksService.name);
 
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    private readonly rateLimit: RateLimiterService,
+  ) {}
 
   /** `GET /blocks`: los bloqueos propios, más reciente primero. */
   async list(session: AuthContext): Promise<BlockList> {
@@ -114,7 +121,12 @@ export class BlocksService {
    */
   async create(session: AuthContext, body: unknown): Promise<Block> {
     this.assertHasProfile(session);
-    const requested = parseProfileId(body);
+    const requested = parseBlockBody(body);
+    this.rateLimit.assertWithin(
+      `blocks:${session.profileId}`,
+      { capacity: BLOCK_RATE_PER_MINUTE, refillPerSecond: BLOCK_RATE_PER_MINUTE / 60 },
+      `Superaste el tope de ${BLOCK_RATE_PER_MINUTE} bloqueos por minuto.`,
+    );
     const target = canonicalProfileId(requested);
     if (target === session.profileId) {
       throw validationFailed('No podés bloquearte a vos mismo.');
@@ -160,10 +172,9 @@ export class BlocksService {
    */
   async remove(session: AuthContext, rawProfileId: unknown): Promise<void> {
     this.assertHasProfile(session);
-    if (typeof rawProfileId !== 'string' || rawProfileId.trim() === '') {
-      throw validationFailed('profileId del path no puede estar vacío.');
-    }
-    const target = canonicalProfileId(rawProfileId);
+    // La forma se valida igual que en el body: un NUL en el path no puede
+    // llegar a Postgres (500) ni un id de 5 KB pasar por "no existía" (204).
+    const target = canonicalProfileId(parseProfileId(rawProfileId, 'profileId del path'));
     if (target === session.profileId) {
       throw validationFailed('No podés desbloquearte a vos mismo: nunca estuviste bloqueado.');
     }

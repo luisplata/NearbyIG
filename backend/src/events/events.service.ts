@@ -125,7 +125,16 @@ export class EventsService {
    * retención es 410 `CURSOR_EXPIRED`. Un cursor al futuro no es ninguno de los
    * dos: devuelve una página vacía y el cursor no se mueve.
    */
-  async resolveCursor(regionKey: string, raw: string | null | undefined): Promise<EventCursor | null> {
+  /**
+   * Cursor del log: `undefined`/`null`/`''` es "desde el principio". Cualquier
+   * otra cosa tiene que ser un string con la forma `<región>:<12 dígitos>`.
+   *
+   * Un valor repetido (`?cursor=a&cursor=b`) llega como array: es un pedido
+   * ambiguo y se responde `422`, igual que en discovery y en el resto de los
+   * query params. Aceptarlo como "sin cursor" haría que el cliente que tiene un
+   * bug de armado recibiera el log completo en silencio y perdiera el replay.
+   */
+  async resolveCursor(regionKey: string, raw: unknown): Promise<EventCursor | null> {
     if (raw === null || raw === undefined || raw === '') return null;
 
     const match = typeof raw === 'string' ? EVENT_ID_PATTERN.exec(raw) : null;
@@ -134,9 +143,10 @@ export class EventsService {
         `El cursor está malformado: se esperaba <regionKey>:<seq de 12 dígitos> (por ejemplo "mx:000000000042").`,
       );
     }
+    const rawCursor = raw as string;
     const [, cursorRegion, seqText] = match as RegExpExecArray;
     if (cursorRegion !== regionKey) {
-      throw validationFailed(`El cursor "${raw}" no es de la región ${regionKey}.`);
+      throw validationFailed(`El cursor "${rawCursor}" no es de la región ${regionKey}.`);
     }
 
     const seq = Number(seqText);
@@ -144,10 +154,10 @@ export class EventsService {
     if (minSeq > 0 && seq < minSeq - 1) {
       throw new AppProblemError(
         'CURSOR_EXPIRED',
-        `El cursor "${raw}" quedó fuera de la retención del log de ${regionKey}. Reabrí el stream sin cursor.`,
+        `El cursor "${rawCursor}" quedó fuera de la retención del log de ${regionKey}. Reabrí el stream sin cursor.`,
       );
     }
-    return { id: raw, seq };
+    return { id: rawCursor, seq };
   }
 
   /** `limit` de `?limit=`: entero 1..500, default 100. Fuera de rango es 422. */

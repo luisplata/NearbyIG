@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Pool } from 'pg';
 import type { AuthContext } from '../auth/session.types';
 import { BotsService } from '../bots/bots.service';
+import { RateLimiterService } from '../common/rate-limit.service';
 import { validationFailed } from '../common/validation';
 import { APP_CONFIG } from '../config/config.module';
 import type { AppConfig } from '../config/env';
@@ -36,6 +37,18 @@ const CONTRACT_DISTANCE_MAX_M = 5_000;
 
 const INTENTIONS = ['networking', 'friendship', 'activities'] as const;
 const GENDERS = ['female', 'male', 'nonbinary'] as const;
+
+/**
+ * `DI-12`: 2 consultas por segundo por perfil, con ráfaga.
+ *
+ * El cliente pide discovery cada 2–3 s (una sola pestaña), así que la tasa
+ * sostenida nunca lo toca. La ráfaga de 60 cubre un arranque con varias
+ * pestañas, un cambio de filtros en cadena y la suite de integración (que sondea
+ * en `waitFor`): lo que se corta es un loop sostenido, no un pico. Con 2/s de
+ * recarga, 60 tokens son 30 s de margen.
+ */
+const DISCOVERY_RATE_PER_SECOND = 2;
+const DISCOVERY_RATE_BURST = 60;
 
 /**
  * Un parámetro de query escalar. Repetido (`?radiusM=1&radiusM=2`) llega como
@@ -146,6 +159,7 @@ export class DiscoveryService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     private readonly bots: BotsService,
+    private readonly rateLimit: RateLimiterService,
     // `botsPerHuman` es lo que separa la rotación de caras entre dueños
     // contiguos: con dos bots por humano, el dueño del slot `s` arranca en la
     // posición `(s - 1) * botsPerHuman` de la lista de candidatos.
@@ -171,6 +185,15 @@ export class DiscoveryService {
   }
 
   async list(session: AuthContext, filters: DiscoveryFilters): Promise<DiscoveryResult> {
+    // El límite va por sesión y por clase de endpoint: es lo que impide que un
+    // loop del cliente (o una pestaña rota) multe la base con ST_DWithin. La
+    // consulta no usa el token para nada: `429` antes de tocar Postgres.
+    this.rateLimit.assertWithin(
+      `discovery:${session.sessionId}`,
+      { capacity: DISCOVERY_RATE_BURST, refillPerSecond: DISCOVERY_RATE_PER_SECOND },
+      `Superaste el tope de ${DISCOVERY_RATE_PER_SECOND} consultas de descubrimiento por segundo.`,
+    );
+
     // El conjunto de bots sale de `BotsService` para que el cap de 6 y el filtro
     // de ghost no tengan una segunda copia que se desincronice del stream.
     const botIds = await this.bots.visibleBotIds(session.regionKey, session.profileId);

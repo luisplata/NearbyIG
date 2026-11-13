@@ -139,10 +139,7 @@ export class EventsController {
     @Query('limit') rawLimit: unknown,
     @CurrentSession() session: AuthContext,
   ): Promise<EventsPage> {
-    const cursor = await this.events.resolveCursor(
-      session.regionKey,
-      typeof rawCursor === 'string' ? rawCursor : rawCursor === undefined ? undefined : null,
-    );
+    const cursor = await this.events.resolveCursor(session.regionKey, rawCursor);
     const limit = this.events.parseLimit(rawLimit);
     return this.events.readPage(session, cursor, limit);
   }

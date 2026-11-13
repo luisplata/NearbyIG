@@ -11,6 +11,37 @@ import { AppProblemError } from './problem';
  */
 export const REGION_KEY_PATTERN = /^[a-z]{2}$/;
 
+/**
+ * Forma de un `profileId` de la demo: `mx-p01`, `<dueño>-b1|b2`, `guest-ab12cd34`.
+ *
+ * **Por qué se valida la forma y no sólo el tipo.** Un `profileId` termina como
+ * parámetro de `pg` en un `WHERE profile_id = $2`. Todo lo que no sea un id
+ * plausible (`\0`, `%`, espacios, 70 KB de basura) no puede existir en el
+ * catálogo: dejarlo llegar a Postgres convierte una validación en un 500 real
+ * (`invalid byte sequence for encoding "UTF8": 0x00` en el NUL) y, en el mejor
+ * caso, en un 404 que miente sobre lo que se mandó. Acá es `422`.
+ *
+ * 64 caracteres cubren de sobra los ids del catálogo (los más largos son
+ * `<región>-pNN-bN`, 9) y los invitados (`guest-` + 8 hex).
+ */
+export const PROFILE_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
+
+/**
+ * `profileId` de body o path. `field` se usa en el mensaje porque el mismo
+ * validador sirve para `targetProfileId`, `profileId` y el parámetro del path.
+ */
+export function parseProfileId(value: unknown, field = 'profileId'): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw validationFailed(`${field} es obligatorio y debe ser un string no vacío.`);
+  }
+  if (!PROFILE_ID_PATTERN.test(value)) {
+    throw validationFailed(
+      `${field} no tiene forma de profileId de la demo (minúsculas, dígitos y "-", empezando con letra).`,
+    );
+  }
+  return value;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

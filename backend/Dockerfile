@@ -53,4 +53,11 @@ COPY contract/seed /seed/seed
 EXPOSE 3000
 # La imagen trae el usuario `node` (uid 1000): la API no corre como root.
 USER node
+# Healthcheck de la imagen, no sólo del compose: `docker run` suelto también
+# distingue "escuchando" de "listo" (`/health/ready` mira base, PostGIS y seed).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/health/ready >/dev/null 2>&1 || exit 1
+# `node` como PID 1 no reenvía señales por su cuenta, pero la app habilita
+# `enableShutdownHooks()` y cierra el pool: SIGTERM llega al proceso de Node.
+STOPSIGNAL SIGTERM
 CMD ["node", "dist/main.js"]

@@ -4,6 +4,7 @@ import type { AuthContext, SourceType } from '../auth/session.types';
 import { AppProblemError } from '../common/problem';
 import {
   isRecord,
+  parseProfileId,
   rejectUnknownKeys,
   validationFailed,
 } from '../common/validation';
@@ -103,17 +104,18 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === '23505';
 }
 
-/** `targetProfileId` del body: obligatorio, string y sin campos de más. */
+/**
+ * `targetProfileId` del body: obligatorio, sin campos de más y con forma de
+ * `profileId`. La forma se valida acá y no en el SQL: un NUL o 70 KB de basura
+ * no son "un perfil inexistente" (404), son un pedido inválido (422), y además
+ * un NUL revienta en Postgres con 500.
+ */
 function parseTargetProfileId(body: unknown): string {
   if (!isRecord(body)) {
     throw validationFailed('body debe ser un objeto JSON con targetProfileId.');
   }
   rejectUnknownKeys(body, ['targetProfileId']);
-  const value = body['targetProfileId'];
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw validationFailed('targetProfileId es obligatorio y debe ser un string no vacío.');
-  }
-  return value;
+  return parseProfileId(body['targetProfileId'], 'targetProfileId');
 }
 
 /** `box` de query: obligatorio, uno de los dos valores del contrato. */

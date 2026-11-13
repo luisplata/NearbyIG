@@ -23,6 +23,19 @@ const STATUS_TO_CODE: Readonly<Record<number, ErrorCode>> = {
   501: 'NOT_IMPLEMENTED',
 };
 
+/**
+ * El contrato no tiene 400: `errors.yaml` declara que un pedido mal formado es
+ * `VALIDATION_FAILED` (422). Express/Nest, en cambio, responde 400 cuando el
+ * body no es JSON parseable (o no es un objeto), 413 cuando supera el límite de
+ * 100 KB y 415 cuando el charset no se soporta. Traducir esos tres a 422 es lo
+ * que mantiene el contrato cerrado: mismo `code` ⇒ mismo status, siempre.
+ */
+const NORMALIZED_STATUS: Readonly<Record<number, number>> = {
+  400: 422,
+  413: 422,
+  415: 422,
+};
+
 @Catch()
 export class ProblemFilter implements ExceptionFilter {
   private readonly logger = new Logger('ProblemFilter');
@@ -55,8 +68,9 @@ export class ProblemFilter implements ExceptionFilter {
       return exception.toBody(requestId);
     }
     if (exception instanceof HttpException) {
-      const status = exception.getStatus();
-      if (status >= 400 && status < 500) {
+      const rawStatus = exception.getStatus();
+      if (rawStatus >= 400 && rawStatus < 500) {
+        const status = NORMALIZED_STATUS[rawStatus] ?? rawStatus;
         const code = STATUS_TO_CODE[status] ?? 'VALIDATION_FAILED';
         return {
           type: 'about:blank',

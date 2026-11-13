@@ -81,10 +81,28 @@ export interface AppConfig {
    * en producción los orígenes son exactamente los declarados.
    */
   readonly corsAllowTunnelOrigins: boolean;
+  /**
+   * Secreto de operador para `POST /demo/reset` (reset global). Cadena vacía =
+   * no configurado: en desarrollo el endpoint queda abierto (es el comando de
+   * §11, se usa desde una terminal local) y en producción se **rechaza** salvo
+   * que alguien lo configure. Ver `ResetService`.
+   */
+  readonly demoResetToken: string;
+  /**
+   * Ventana mínima entre resets globales, en ms. `0` desactiva el throttle.
+   *
+   * PS-11 pide uno cada 10 s. En desarrollo/test es 0 a propósito: la suite de
+   * integración resetea el mundo entre casos y un throttle la haría fallar por
+   * tiempo, no por comportamiento. En producción es el valor del contrato.
+   */
+  readonly demoResetMinIntervalMs: number;
 }
 
 export const DEV_JWT_SECRET = 'dev-only-insecure-jwt-secret-change-me';
 export const DEV_DATABASE_URL = 'postgres://nearbyig:nearbyig@localhost:5432/nearbyig';
+
+/** `DEMO_RESET_MIN_INTERVAL_MS` del contrato (PS-11): uno cada 10 s. */
+export const PRODUCTION_DEMO_RESET_MIN_INTERVAL_MS = 10_000;
 
 /**
  * Orígenes del front local, que es lo que la demo necesita para correr sin
@@ -222,6 +240,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
+  // Un secreto de operador corto es peor que ninguno: da la sensación de estar
+  // protegido. Si está, se exige largo de verdad; si no está, la política de
+  // `ResetService` decide (abierto en local, cerrado en producción).
+  const demoResetToken = env.DEMO_RESET_TOKEN?.trim() ?? '';
+  if (demoResetToken !== '' && demoResetToken.length < 24) {
+    throw new Error('DEMO_RESET_TOKEN debe tener al menos 24 caracteres (o quedar vacío para no usarlo).');
+  }
+
   return {
     nodeEnv,
     isProduction,
@@ -241,5 +267,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     defaultRegionKey: (env.DEFAULT_REGION_KEY?.trim() || 'mx').toLowerCase(),
     corsAllowedOrigins: parseCorsOrigins(env.CORS_ALLOWED_ORIGINS, isProduction),
     corsAllowTunnelOrigins: !isProduction,
+    demoResetToken,
+    demoResetMinIntervalMs: isProduction
+      ? parseInteger(
+          'DEMO_RESET_MIN_INTERVAL_MS',
+          env.DEMO_RESET_MIN_INTERVAL_MS,
+          PRODUCTION_DEMO_RESET_MIN_INTERVAL_MS,
+          0,
+          3_600_000,
+        )
+      : 0,
   };
 }

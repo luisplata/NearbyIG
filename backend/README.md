@@ -879,9 +879,14 @@ docker compose -f compose.yml -f compose.dev.yml down -v
 docker compose -f compose.yml -f compose.dev.yml up --build -d
 
 # sólo datos de demo, sin tocar el volumen ni volver a migrar (§11)
+# En desarrollo: abierto. En producción exige DEMO_RESET_TOKEN (ver S7).
 curl -s -X POST http://localhost:3000/demo/reset
 # → {"scope":"global","sessionsDeleted":14,"guestsDeleted":1,"ticketsDeleted":0,
 #    "regions":[{"regionKey":"co","freeSlots":10},{"regionKey":"mx","freeSlots":10}]}
+
+# en producción, desde la terminal del operador
+curl -s -X POST https://api.example.com/demo/reset \
+  -H "Authorization: Bearer $DEMO_RESET_TOKEN"
 
 # sólo mi sesión (el token deja de servir para todo)
 curl -s -X POST http://localhost:3000/demo/reset/self -H "Authorization: Bearer $TOKEN"
@@ -904,12 +909,32 @@ persona).
 |---|---|
 | `compose.yml` | producción/local: target `runtime`, usuario `node` (uid 1000), sin bind mounts |
 | `compose.dev.yml` | overlay: target `development`, bind mount del código, `start:dev`, puerto 9229, Postgres publicado |
-| `Dockerfile` | multi-stage (`deps` → `build` → `runtime-deps` → `runtime`, y `development`) |
+| `compose.prod.yml` | overlay de producción: base administrada por `DATABASE_URL`, `db` detrás del perfil `local-db`, API sólo en loopback, secretos obligatorios |
+| `Dockerfile` | multi-stage (`deps` → `build` → `runtime-deps` → `runtime`, y `development`), `HEALTHCHECK` sobre `/health/ready` |
 | `Dockerfile.dockerignore` | el contexto es la raíz del repo (hace falta `contract/`), así que se excluye todo lo demás |
+| `.env.production.example` | variables de producción documentadas, sin secretos reales |
 
-El `.env` está ignorado por git; `.env.example` es el único versionado. En
-producción la API no arranca sin `DATABASE_URL` y sin un `JWT_SECRET` de 32+
-caracteres (`src/config/env.ts` falla en el boot, no en la primera request).
+El `.env` está ignorado por git; `.env.example` y `.env.production.example` son
+los únicos versionados. En producción la API no arranca sin `DATABASE_URL`, sin
+un `JWT_SECRET` de 32+ caracteres y sin `CORS_ALLOWED_ORIGINS`
+(`src/config/env.ts` y `compose.prod.yml` fallan en el boot, no en la primera
+request). Deploy completo: [`docs/runbook-demo.md`](../docs/runbook-demo.md).
+
+## Hardening (S7)
+
+| Tema | Dónde | Qué hace |
+|---|---|---|
+| Validación de entrada | `src/common/validation.ts` + services | todo pedido mal formado es `422 VALIDATION_FAILED`; `PROFILE_ID_PATTERN` impide que un `\0` o 70 KB de basura lleguen a Postgres (antes: 500) |
+| Errores de body-parser | `src/common/problem.filter.ts` | `400`/`413`/`415` se normalizan a `422` (el contrato no tiene 400) |
+| Rate limits | `src/common/rate-limit.service.ts` | bucket en memoria para discovery (2/s, ráfaga 60), reset global (1/10 s), blocks (30/min) y reports (10/min); pings (30/min) y mensajes (60/min) siguen contando filas en SQL |
+| Backup / restore | `scripts/backup-db.sh`, `scripts/restore-db.sh` | `pg_dump -Fc` con `.meta` y sha256; restore verificado en una base aparte con `--target-db`; sobre la viva exige `--yes` |
+| Load test | `scripts/load-test.mjs` | 10 humanos + 20 bots por región, presencia/discovery/stream/chat, p50/p95/p99, sale 1 si hay 5xx |
+| Revisión de seguridad | [`docs/security-review.md`](../docs/security-review.md) | autorización, IDOR, coordenadas, tickets SSE, reset, CORS y hallazgos con severidad |
+
+Los tests nuevos son `test/integration/{validation,rate-limits,boot-config}.test.mjs`:
+barrido de cuerpos inválidos (con un test que falla ante cualquier 5xx), los 429
+hasta el límite real, y el arranque de producción (CORS cerrado, `*` rechazado,
+reset con y sin token).
 
 ## Problemas conocidos
 
@@ -917,9 +942,11 @@ caracteres (`src/config/env.ts` falla en el boot, no en la primera request).
   (Windows).** El watch no dispara y la API sigue sirviendo el `dist/` anterior:
   después de tocar `src/`, corré `docker compose … exec api npm run build` y
   reiniciá el servicio si el cambio agrega archivos nuevos.
-- **`POST /demo/reset` es anónimo.** Es el comando de operación de §11 y corre
-  desde una terminal limpia, pero en una demo pública cualquiera puede vaciarla.
-  Se endurece en S5/S7 (rate limit y/o secreto de operación); hoy el stack es local.
+- **`POST /demo/reset` es anónimo en desarrollo.** Es el comando de operación de
+  §11 y corre desde una terminal limpia. En producción exige
+  `DEMO_RESET_TOKEN` (sin token el endpoint responde 401), restringe el `Origin`
+  a la allowlist de CORS y permite uno cada 10 s. En desarrollo queda abierto y
+  sin throttle para que la suite no dependa del reloj.
 - **El contrato ya expone ocupación (v0.2).** `ProfileSummary.inUse` sale de un
   `EXISTS` contra `sessions` con la misma condición que hace fallar un claim
   (`revoked_at IS NULL AND expires_at > now()`). Una fila vencida sin revocar no

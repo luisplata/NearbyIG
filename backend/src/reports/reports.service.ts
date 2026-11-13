@@ -2,12 +2,20 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Pool } from 'pg';
 import type { AuthContext } from '../auth/session.types';
 import { AppProblemError } from '../common/problem';
-import { isRecord, rejectUnknownKeys, validationFailed } from '../common/validation';
+import { RateLimiterService } from '../common/rate-limit.service';
+import { isRecord, parseProfileId, rejectUnknownKeys, validationFailed } from '../common/validation';
 import { PG_POOL } from '../db/database.module';
 import type { ReportReason, ReportReceipt } from './reports.types';
 
 /** Un `profileId` de bot: `<owner>-b1` / `<owner>-b2`. */
 const BOT_PROFILE_ID = /-b[12]$/;
+
+/**
+ * Tope de reportes por minuto. Un reporte no tiene consecuencia automática, así
+ * que su riesgo no es la moderación: es llenar la tabla. 10 por minuto deja
+ * reportar a diez personas distintas y corta el loop.
+ */
+const REPORT_RATE_PER_MINUTE = 10;
 
 const REASONS: readonly ReportReason[] = ['spam', 'harassment', 'inappropriate', 'impersonation', 'other'];
 
@@ -22,10 +30,7 @@ function parseReport(body: unknown): { profileId: string; reason: ReportReason }
   }
   rejectUnknownKeys(body, ['profileId', 'reason']);
 
-  const profileId = body['profileId'];
-  if (typeof profileId !== 'string' || profileId.trim() === '') {
-    throw validationFailed('profileId es obligatorio y debe ser un string no vacío.');
-  }
+  const profileId = parseProfileId(body['profileId']);
 
   const reason = body['reason'];
   if (typeof reason !== 'string' || !REASONS.includes(reason as ReportReason)) {
@@ -61,7 +66,10 @@ interface ReportRow {
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
 
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    private readonly rateLimit: RateLimiterService,
+  ) {}
 
   /** `POST /reports` → 202 `ReportReceipt`. */
   async create(session: AuthContext, body: unknown): Promise<ReportReceipt> {
@@ -73,6 +81,11 @@ export class ReportsService {
     }
 
     const input = parseReport(body);
+    this.rateLimit.assertWithin(
+      `reports:${session.profileId}`,
+      { capacity: REPORT_RATE_PER_MINUTE, refillPerSecond: REPORT_RATE_PER_MINUTE / 60 },
+      `Superaste el tope de ${REPORT_RATE_PER_MINUTE} reportes por minuto.`,
+    );
     const target = canonicalProfileId(input.profileId);
     if (target === session.profileId) {
       throw validationFailed('No podés reportarte a vos mismo.');

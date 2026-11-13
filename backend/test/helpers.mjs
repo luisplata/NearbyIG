@@ -79,6 +79,31 @@ export async function openSession(body) {
 }
 
 /**
+ * Request con el body **crudo**, sin `JSON.stringify`.
+ *
+ * Existe para probar los casos que `api` no puede armar: JSON roto, un primitivo
+ * (`5`), charset raro o un payload de 200 KB. Son justo los que el body-parser de
+ * Nest rechaza antes de llegar al handler, y el contrato exige que salgan como
+ * `422 VALIDATION_FAILED` y no como `400`/`413`/`500`.
+ */
+export async function apiRaw(path, { method = 'GET', token, body, contentType = 'application/json', headers = {} } = {}) {
+  const requestHeaders = { ...headers };
+  if (token !== undefined) requestHeaders.authorization = `Bearer ${token}`;
+  if (contentType !== null) requestHeaders['content-type'] = contentType;
+  const response = await fetch(`${API_BASE_URL}${path}`, { method, headers: requestHeaders, body });
+  const text = await response.text();
+  let parsed = null;
+  if (text !== '') {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+  }
+  return { status: response.status, headers: response.headers, body: parsed };
+}
+
+/**
  * `POST /auth/takeover` — desalojo explícito del slot.
  *
  * El body se manda tal cual (no se rellena): un takeover sin slot es un caso de
@@ -680,7 +705,15 @@ export async function presenceToCentroidM(sessionId) {
 }
 
 /** Espera activa de una condición async, con timeout: el ticker es asíncrono. */
-export async function waitFor(check, { timeoutMs = 10_000, intervalMs = 200, label = 'condición' } = {}) {
+/**
+ * Espera a que una condición se cumpla, sondeando.
+ *
+ * `intervalMs` es 600 ms y no 200: el cliente real consulta discovery cada 2–3 s
+ * y el backend limita discovery a 2 consultas por segundo por sesión (DI-12).
+ * Un sondeo a 5/s agotaría el bucket y el test fallaría por el límite, no por lo
+ * que quiere probar. A 600 ms el sostenido es 1,67/s y el bucket no se vacía.
+ */
+export async function waitFor(check, { timeoutMs = 10_000, intervalMs = 600, label = 'condición' } = {}) {
   const deadline = Date.now() + timeoutMs;
   let last;
   while (Date.now() < deadline) {

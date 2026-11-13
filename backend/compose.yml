@@ -44,6 +44,11 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER:-nearbyig}:${POSTGRES_PASSWORD:-nearbyig}@db:5432/${POSTGRES_DB:-nearbyig}
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
     depends_on:
       db:
         condition: service_healthy
@@ -62,8 +67,20 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-jwt-secret-change-me}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-7200}
       DEFAULT_REGION_KEY: ${DEFAULT_REGION_KEY:-mx}
+      # Allowlist de navegador. Vacía en local (CORS apagado); en producción
+      # `compose.prod.yml` la exige con el origen de Pages.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      # Token de operador del reset global. Vacío = abierto en local y
+      # deshabilitado en producción (ver `ResetService`).
+      DEMO_RESET_TOKEN: ${DEMO_RESET_TOKEN:-}
+      DEMO_RESET_MIN_INTERVAL_MS: ${DEMO_RESET_MIN_INTERVAL_MS:-10000}
     ports:
       - '${PORT:-3000}:3000'
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
     depends_on:
       db:
         condition: service_healthy

@@ -73,6 +73,16 @@ async function bootstrap(): Promise<void> {
   if (config.jwtSecret === DEV_JWT_SECRET) {
     logger.warn('JWT_SECRET de desarrollo en uso: no usar este valor fuera de local.');
   }
+  if (config.isProduction && config.demoResetToken === '') {
+    logger.warn(
+      'Reset global deshabilitado (DEMO_RESET_TOKEN sin configurar). El runbook lo necesita para limpiar la demo.',
+    );
+  }
+  if (config.isProduction) {
+    logger.log(
+      `CORS: ${config.corsAllowedOrigins.length} origen(es) · reset global cada ${config.demoResetMinIntervalMs / 1_000} s · discovery 2 req/s por sesión`,
+    );
+  }
 }
 
 bootstrap().catch((error: unknown) => {

@@ -18,6 +18,9 @@
     "seed": "node scripts/seed.mjs",
     "seed:check": "node scripts/seed.mjs --check",
     "db:setup": "npm run migrate && npm run seed",
+    "db:backup": "bash scripts/backup-db.sh",
+    "db:restore": "bash scripts/restore-db.sh",
+    "load:test": "node scripts/load-test.mjs",
     "test:integration": "node --test --test-concurrency=1 \"test/integration/*.test.mjs\""
   },
   "dependencies": {

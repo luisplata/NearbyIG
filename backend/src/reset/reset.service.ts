@@ -1,7 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { Pool } from 'pg';
+import { AppProblemError } from '../common/problem';
+import { RateLimiterService } from '../common/rate-limit.service';
 import { APP_CONFIG } from '../config/config.module';
-import type { AppConfig } from '../config/env';
+import { isAllowedCorsOrigin, type AppConfig } from '../config/env';
 import { PG_POOL } from '../db/database.module';
 import type { AuthContext, SourceType } from '../auth/session.types';
 
@@ -44,6 +47,19 @@ export interface ResetGlobalResult {
   readonly regions: readonly { readonly regionKey: string; readonly freeSlots: number }[];
 }
 
+/** Cabeceras que importan para autorizar el reset global. */
+export interface ResetOperatorAuth {
+  readonly origin?: string | undefined;
+  readonly authorization?: string | undefined;
+}
+
+/** Comparación de secretos en tiempo constante, sin filtrar el largo. */
+function secretMatches(provided: string, expected: string): boolean {
+  const providedHash = createHash('sha256').update(provided).digest();
+  const expectedHash = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(providedHash, expectedHash);
+}
+
 @Injectable()
 export class ResetService {
   private readonly logger = new Logger(ResetService.name);
@@ -51,6 +67,7 @@ export class ResetService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly rateLimit: RateLimiterService,
   ) {}
 
   /**
@@ -128,14 +145,78 @@ export class ResetService {
   }
 
   /**
+   * Política del reset global, en el orden en que se decide:
+   *
+   *   1. **Origen de navegador.** Si la request trae `Origin`, tiene que estar
+   *      en la allowlist de CORS; un origen ajeno no ejecuta el reset. `curl`
+   *      desde una terminal no manda `Origin` y sigue funcionando: el endpoint
+   *      existe para el operador, no para el navegador de la demo.
+   *   2. **Token de operador.** Si `DEMO_RESET_TOKEN` está configurado, se exige
+   *      `Authorization: Bearer <token>` (comparación en tiempo constante). Si
+   *      no está configurado, en producción el endpoint **no existe** (401): la
+   *      demo pública no puede tener un botón de "borrar todo" sin llave. En
+   *      desarrollo queda abierto, que es como lo usa la suite y el runbook
+   *      local.
+   *   3. **Ritmo.** PS-11: uno cada 10 s en producción (token bucket de
+   *      capacidad 1). En desarrollo la ventana es 0 para que la suite no
+   *      dependa del reloj.
+   *
+   * Las tres usan `UNAUTHENTICATED` (401) y no un código nuevo: el reset global
+   * está **fuera del contrato**, así que no hay `code` que inventar ni gate que
+   * romper. El detalle explica cuál de las tres reglas falló.
+   */
+  private assertOperator(auth: ResetOperatorAuth): void {
+    const { origin, authorization } = auth;
+
+    if (
+      origin !== undefined &&
+      origin !== '' &&
+      !isAllowedCorsOrigin(origin, this.config.corsAllowedOrigins, this.config.corsAllowTunnelOrigins)
+    ) {
+      throw new AppProblemError(
+        'UNAUTHENTICATED',
+        'El reset global no está habilitado para este origen. Se ejecuta desde la terminal del operador.',
+      );
+    }
+
+    if (this.config.demoResetToken === '') {
+      if (this.config.isProduction) {
+        throw new AppProblemError(
+          'UNAUTHENTICATED',
+          'Reset global deshabilitado: configurá DEMO_RESET_TOKEN en el entorno para habilitarlo.',
+        );
+      }
+    } else {
+      const header = authorization ?? '';
+      const provided = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+      if (!secretMatches(provided, this.config.demoResetToken)) {
+        throw new AppProblemError('UNAUTHENTICATED', 'Token de operador inválido para el reset global.');
+      }
+    }
+
+    if (this.config.demoResetMinIntervalMs > 0) {
+      this.rateLimit.assertWithin(
+        'demo-reset:global',
+        { capacity: 1, refillPerSecond: 1_000 / this.config.demoResetMinIntervalMs },
+        `El reset global está limitado a uno cada ${this.config.demoResetMinIntervalMs / 1_000} s.`,
+      );
+    }
+  }
+
+  /**
    * Reset global: deja la demo como recién migrada, sin tocar el catálogo.
    *
    * Es un `DELETE` y no un `TRUNCATE` a propósito: `TRUNCATE` no es
    * transaccional con el resto del esquema en todos los casos y pediría
    * `CASCADE` sobre tablas que no queremos vaciar. Correrlo dos veces deja 0
    * filas la segunda: idempotente.
+   *
+   * **Es la operación más destructiva de la API**, así que pasa por
+   * `assertOperator` antes de tocar una fila.
    */
-  async resetGlobal(): Promise<ResetGlobalResult> {
+  async resetGlobal(auth: ResetOperatorAuth = {}): Promise<ResetGlobalResult> {
+    this.assertOperator(auth);
+
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');

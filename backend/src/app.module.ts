@@ -3,6 +3,7 @@ import { AuthModule } from './auth/auth.module';
 import { BlocksModule } from './blocks/blocks.module';
 import { BotsModule } from './bots/bots.module';
 import { ChatModule } from './chat/chat.module';
+import { RateLimitModule } from './common/rate-limit.module';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './db/database.module';
 import { DiscoveryModule } from './discovery/discovery.module';
@@ -21,6 +22,7 @@ import { ResetModule } from './reset/reset.module';
  *
  *   ConfigModule   → configuración validada (global)
  *   DatabaseModule → Pool de `pg` (global)
+ *   RateLimitModule→ límites de frecuencia en memoria (global)
  *   HealthModule   → /health y /health/ready (fuera del contrato)
  *   AuthModule     → sesión demo, logout, ticket de stream y sus guards
  *   BotsModule     → los 2 bots derivados de cada humano vivo (geometría y cap)
@@ -39,6 +41,7 @@ import { ResetModule } from './reset/reset.module';
   imports: [
     ConfigModule,
     DatabaseModule,
+    RateLimitModule,
     HealthModule,
     AuthModule,
     BotsModule,

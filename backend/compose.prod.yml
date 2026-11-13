@@ -1,0 +1,77 @@
+# Overlay de PRODUCCIÓN. Se usa siempre junto al base:
+#
+#   docker compose -f compose.yml -f compose.prod.yml config      # validar
+#   docker compose -f compose.yml -f compose.prod.yml up -d       # desplegar
+#
+# Y **nunca** junto a `compose.dev.yml`: ese overlay publica Postgres, monta el
+# código del host y corre `tsc --watch`. Producción es la imagen `target:
+# runtime`, sin bind mounts.
+#
+# Qué cambia respecto del base:
+#
+#   * **Postgres no se levanta.** `db` queda detrás del perfil `local-db`, que no
+#     se activa por defecto: en producción la base es un Postgres administrado
+#     (Droplet aparte, Managed Database, RDS…) y sólo se conoce por `DATABASE_URL`.
+#     Tampoco se publica el puerto 5432 — ni acá ni en el base.
+#   * **Los secretos son obligatorios y no tienen default.** Compose falla al
+#     interpolar (`:?`) si falta `DATABASE_URL`, `JWT_SECRET` o
+#     `CORS_ALLOWED_ORIGINS`. Un deploy a medias es peor que un deploy que no
+#     arranca.
+#   * **CORS declarado.** El boot de la API rechaza `*` y, sin esta variable, no
+#     emite headers CORS: el navegador de Pages no podría llamar la API.
+#   * **El puerto se publica sólo en loopback.** El TLS lo termina un reverse
+#     proxy en el host (Caddy/nginx) que habla con `127.0.0.1:3000`. Exponer 3000
+#     a internet sería HTTP plano para una demo que autentica con Bearer.
+#   * **Sin volúmenes de datos locales.** El volumen `pgdata` del base queda sin
+#     uso porque `db` no está activo.
+#
+# Variables (ver `.env.production.example`):
+#
+#   DATABASE_URL            obligatoria — postgres://usuario:clave@host:5432/nearbyig
+#   JWT_SECRET              obligatoria — 32+ caracteres aleatorios
+#   CORS_ALLOWED_ORIGINS    obligatoria — https://luisplata.github.io
+#   DEMO_RESET_TOKEN        24+ caracteres; sin ella el reset global no existe
+#   PORT                    puerto de loopback a publicar (default 3000)
+#
+# El reset global en producción queda cerrado salvo que `DEMO_RESET_TOKEN` esté
+# configurada: la demo pública no tiene un botón de "borrar todo" sin llave.
+name: nearbyig
+
+services:
+  db:
+    # Perfil inactivo por defecto: `up` no levanta Postgres en producción.
+    profiles: ['local-db']
+    # `!reset` borra el `ports` heredado del base/dev (no hay ninguno en el base,
+    # pero así el overlay es explícito y no depende de quién lo combine).
+    ports: !reset []
+
+  migrate:
+    # Sin el `depends_on` del base: no hay servicio `db` que esperar. La base
+    # administrada tiene que estar arriba antes de correr esto (el runbook lo
+    # verifica con `pg_isready` desde un contenedor efímero).
+    depends_on: !reset []
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL es obligatoria en producción (Postgres administrado)}
+
+  api:
+    # El único servicio con dependencia: la API no arranca con el esquema a
+    # medio migrar. `!override` reemplaza el mapa del base, que además esperaba
+    # al servicio `db` (en producción no existe).
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL es obligatoria en producción (Postgres administrado)}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET es obligatoria en producción (32+ caracteres)}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS es obligatoria en producción (el origen de Pages)}
+      DEMO_RESET_TOKEN: ${DEMO_RESET_TOKEN:-}
+      DEMO_RESET_MIN_INTERVAL_MS: ${DEMO_RESET_MIN_INTERVAL_MS:-10000}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-7200}
+      DEFAULT_REGION_KEY: ${DEFAULT_REGION_KEY:-mx}
+    # Sólo loopback: el reverse proxy del host es el que ve internet y termina TLS.
+    ports: !override ['127.0.0.1:${PORT:-3000}:3000']
+    security_opt:
+      - no-new-privileges:true
