@@ -12,6 +12,10 @@ coverage/
 .env
 .env.*
 !.env.example
+!.env.production.example
+
+# Backups locales de pg_dump: contienen sesiones y datos de la demo.
+backend/backups/
 *.keystore
 *.jks
 *.p12
