@@ -1,8 +1,8 @@
 # Backend — NearbyIG demo
 
-API NestJS + PostGIS de la demo. **Sprint 2, batch S2-A**: presencia y región
-(contrato v0.2, sin cambios de contrato en este batch). El contrato de `contract/`
-manda: acá se implementa, no se renegocia.
+API NestJS + PostGIS de la demo. **Sprint 2 completo (S2-A presencia + S2-B bots,
+eventos y ghost)**, sin cambios de contrato en este sprint: el contrato de
+`contract/` manda y acá se implementa, no se renegocia.
 
 | Pieza | Estado |
 |---|---|
@@ -11,11 +11,14 @@ manda: acá se implementa, no se renegocia.
 | `POST /auth/demo-session` | listo: claim de slot, invitado si no hay slots, 409 `PROFILE_IN_USE` |
 | `POST /auth/takeover` | listo (contrato v0.2): desalojo explícito, 200 `DemoSession` |
 | `POST /auth/logout` | listo, según el contrato: 204, idempotente, revoca en el acto |
-| `POST /auth/stream-ticket` | listo: ticket de 30 s, un uso; el consumidor es S2 |
+| `POST /auth/stream-ticket` | listo: ticket de 30 s, un uso; lo consume `GET /events` |
 | `PUT /presence` | listo (S2): punto privado **o** `demoZoneKey`; región y zona por `ST_Covers` |
-| `DELETE /presence` | listo (S2): 204, o 409 `PRESENCE_STALE` si no había presencia viva |
+| `DELETE /presence` | listo (S2): 204, o 409 `PRESENCE_STALE` si no había presencia viva; es el ghost/pausa |
+| `GET /events` | listo (S2): SSE con ticket, `Last-Event-ID` y `: keepalive` cada 15 s |
+| `GET /events/poll` | listo (S2): misma secuencia que el SSE desde el mismo cursor |
+| Bots | listo (S2): 2 por humano vivo, 4 waypoints, ticker de 2 s, cap de 6 por observador |
 | `POST /demo/reset`, `/demo/reset/self` | listo (fuera del contrato, §11 del plan) |
-| Migraciones + seeds idempotentes | listo (`001_init`, `002_presence`) |
+| Migraciones + seeds idempotentes | listo (`001_init`, `002_presence`, `003_bots_events`) |
 
 ## Empezar desde cero
 
@@ -145,6 +148,68 @@ curl -s -X DELETE $API/presence -H "Authorization: Bearer $T"                   
 TTL: la presencia vive **12 s**. `expires_at` es la única autoridad y toda lectura
 filtra `expires_at > now()`; no hay cron ni barrido (ver "Decisiones").
 
+### Eventos, bots y ghost (Sprint 2 · S2-B)
+
+Un humano con presencia viva arrastra **2 bots** derivados de su perfil
+(`<profileId>-b1`, `<profileId>-b2`) que orbitan su zona en 4 waypoints y avanzan
+uno cada 5 s. Lo que se mueve nunca es una coordenada en el wire: el evento lleva
+`profileId` + `distanceM`/`bearingDeg` contra el ancla de la zona.
+
+Dos proyecciones del **mismo** log, con la misma secuencia para el mismo cursor:
+
+| Camino | Auth | Cursor | Uso |
+|---|---|---|---|
+| `GET /events?ticket=` | ticket de 30 s, **un solo uso** (`POST /auth/stream-ticket`) | header `Last-Event-ID` | cliente vivo (`EventSource`) |
+| `GET /events/poll?cursor=&limit=` | Bearer `demoSession` | query `cursor` | fallback y móvil |
+
+```bash
+API=http://localhost:3000
+# A observa; B es el humano cuyos bots va a ver
+TA=$(curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":8}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+TB=$(curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":9}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+curl -s -X PUT $API/presence -H "Authorization: Bearer $TA" -H 'content-type: application/json' -d '{"demoZoneKey":"cdmx"}' > /dev/null
+curl -s -X PUT $API/presence -H "Authorization: Bearer $TB" -H 'content-type: application/json' -d '{"demoZoneKey":"cdmx"}' > /dev/null
+
+# stream SSE: preámbulo retry: 5000 y un frame por evento
+TICKET=$(curl -s -X POST $API/auth/stream-ticket -H "Authorization: Bearer $TA" | node -pe 'JSON.parse(require("fs").readFileSync(0)).ticket')
+curl -N "$API/events?ticket=$TICKET"
+# retry: 5000
+#
+# id: mx:000000000006
+# event: profile.moved
+# data: {"id":"mx:000000000006","type":"profile.moved","occurredAt":"…","payload":{"distanceM":1208,"profileId":"mx-p09-b1","bearingDeg":9}}
+#
+# : keepalive          ← cada 15 s, para que un proxy no corte
+
+# la misma secuencia por polling
+curl -s "$API/events/poll?cursor=mx:000000000005&limit=2" -H "Authorization: Bearer $TA"
+# → {"events":[{"id":"mx:000000000006",…}],"nextCursor":"mx:000000000006","hasMore":true}
+
+# el ticket no se reusa
+curl -s "$API/events?ticket=$TICKET" | head -c 120   # → 401 {"code":"TICKET_REUSED",…}
+```
+
+Reglas de la proyección:
+
+| Regla | Comportamiento |
+|---|---|
+| orden | `seq` por región (`mx:000000000042`); `occurredAt` es informativo y no ordena |
+| dedupe | el cliente descarta `seq <= lastSeen`; el server no reentrega el `Last-Event-ID` |
+| replay | `Last-Event-ID`/`cursor` ⇒ arranca en `seq + 1` |
+| página vacía | no avanza el cursor (`nextCursor` = el recibido, `hasMore: false`) |
+| retención | últimos 5000 eventos por región (~20 min a densidad tope); un cursor más viejo es `410 CURSOR_EXPIRED` |
+| visibilidad | humanos de la región (menos uno mismo) + bots ajenos con dueño vivo, **cap 6** |
+| propio | el stream de un humano **no** lleva sus bots: no se ve a sí mismo |
+| ghost | `DELETE /presence` apaga la presencia ⇒ los 2 bots propios desaparecen para los demás, en la lectura y en la tabla |
+
+**Ghost/pausa = `DELETE /presence`.** El contrato no tiene una operation de
+visibilidad y no se inventó una: apagar la presencia es la superficie que ya
+existe, y es coherente con §5 ("ghost oculta humano y bots a los demás"). El
+humano también deja de aparecer (su `profile.presence` sale con `online: false`),
+que es lo que la demo quiere mostrar. Un ghost que mantenga la presencia viva
+necesita un delta de contrato (un `visibility` en `PresenceUpdate`, por ejemplo) —
+está anotado como deuda para S5.
+
 Sin Docker (sólo si tenés Postgres 16 + PostGIS en el host):
 
 ```bash
@@ -182,6 +247,7 @@ Migraciones actuales:
 |---|---|---|---|
 | 001 | `001_init.sql` | `regions`, `zones`, `profiles`, `sessions`, `stream_tickets`, `demo_meta` | dropea las 6 tablas |
 | 002 | `002_presence.sql` | `presence` (una fila por sesión, `Point,4326` privado, `expires_at`) | `DROP TABLE presence`; catálogo y sesiones intactas |
+| 003 | `003_bots_events.sql` | `bots`, `bot_waypoints`, `event_seq`, `events` | dropea las 4 tablas; catálogo, sesiones y presencia intactas |
 
 `002` es aditiva y reversible sin pérdida: la única tabla nueva referencia a
 `sessions` y `zones` (no al revés), así que el `down` no desarma nada. Aplicar y
@@ -189,10 +255,15 @@ revertir en el stack:
 
 ```bash
 docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate:rollback
-# → rollback ok: 002_presence
+# → rollback ok: 003_bots_events
 docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate
-# → migrate ok: 002_presence
+# → migrate ok: 003_bots_events
 ```
+
+`003` sigue la misma regla: los waypoints referencian a `bots`, y `bots` a
+`profiles`/`zones` (nunca al revés). Un `003` revertido deja `GET /events` sin
+esquema (500) hasta volver a aplicarlo; no hay datos de catálogo que se pierdan y
+el log de la demo no es histórico (la retención ya lo recorta).
 
 Dentro de Docker los comandos son los mismos, con `docker compose exec`:
 
@@ -225,8 +296,15 @@ Corren contra la API y la base reales (no hay mocks ni contenedores efímeros).
 Cubren health, sesión demo (claim, 409, invitado, slot vencido), perfiles
 (401/403/422, orden, shape exacto, cero coordenadas), logout (token revocado en el
 acto), tickets de stream (un solo uso), reset propio y global, presencia (punto
-real → zona, fallback, TTL, cambio de región, `DELETE`), logs sin PII y
-migraciones/seeds idempotentes + `ST_Covers`.
+real → zona, fallback, TTL, cambio de región, `DELETE`), bots (2 por humano,
+waypoints, ghost, cap de 6, aislamiento regional), eventos (ticket, cursor, replay,
+paridad SSE↔polling, dedupe), logs sin PII y migraciones/seeds idempotentes +
+`ST_Covers`.
+
+Los tests del mundo (`bots`, `events`) empujan el vencimiento de las presencias del
+escenario con un `UPDATE` (`extendPresence`) para no depender de los 12 s de TTL: el
+TTL se sigue probando en `presence.test.mjs`, y la lectura sigue filtrando
+`expires_at > now()`.
 
 ```bash
 # dentro del stack (recomendado)
@@ -256,6 +334,8 @@ guarda antes y las repone al terminar.
 | `reset.test.mjs` | reset propio, aislamiento, reset global, idempotencia, catálogo intacto |
 | `logs-no-pii.test.mjs` | ningún call site de log interpola token/ticket/coordenada/identidad |
 | `presence.test.mjs` | `PUT`/`DELETE /presence`: punto → zona, fallback, `demoZoneKey`, `ZONE_UNKNOWN`, cambio de región, TTL, 404 y upsert |
+| `bots.test.mjs` | 2 bots por humano con `profileId` estable, waypoints y métricas, bots propios fuera del stream, ghost, cap de 6, aislamiento mx/co |
+| `events.test.mjs` | ticket de un uso, `Last-Event-ID`, cursor y `limit` 422/410, página vacía, paridad SSE↔polling, `profile.presence`, dedupe |
 | `migrations-seeds.test.mjs` | idempotencia de migraciones y seeds, `ST_Covers` |
 
 ## Endpoints
@@ -270,6 +350,8 @@ guarda antes y las repone al terminar.
 | `GET /demo/profiles?regionKey=` | Bearer | `paths/profiles.yaml` | 10 perfiles ordenados por `demoSlot`; `403 REGION_MISMATCH` |
 | `PUT /presence` | Bearer | `paths/presence.yaml` | 200 `PresenceState`; `point` **o** `demoZoneKey`; `422 ZONE_UNKNOWN`/`VALIDATION_FAILED`; `404 PROFILE_NOT_FOUND` |
 | `DELETE /presence` | Bearer | `paths/presence.yaml` | `204` sin cuerpo; `409 PRESENCE_STALE` si no había presencia viva |
+| `GET /events?ticket=` | ticket | `paths/events.yaml` | SSE: `retry: 5000`, `Last-Event-ID`, `: keepalive` cada 15 s; `401 TICKET_EXPIRED`/`TICKET_REUSED`; `410 CURSOR_EXPIRED`; `422` |
+| `GET /events/poll?cursor=&limit=` | Bearer | `paths/events.yaml` | `EventsPage` del mismo log; `limit` 1..500 (default 100); misma secuencia que el SSE desde el mismo cursor |
 | `POST /demo/reset` | — | **no** | reset global: borra sesiones e invitados, no el catálogo (§11) |
 | `POST /demo/reset/self` | Bearer | **no** | reset de la propia sesión; idempotente |
 
@@ -321,6 +403,11 @@ DTOs de la demo. El shape es propio y sólo lo consumen Docker y el runbook.
 | **TTL de presencia por filtro de lectura, sin cron** | `expires_at` es la única autoridad y toda consulta que cuente presencias filtra `expires_at > now()`. Un barrido siempre llega tarde (la presencia vencida seguiría contando hasta la próxima pasada) y la tabla tiene a lo sumo una fila por sesión viva, así que no hay nada que compactar. La fila se reusa por upsert y cae en cascada con la sesión (`logout`, reset, `down -v`). |
 | **La región de una presencia es la de la sesión** | `regionKey` no viene del body: es parte de la identidad (`JWT` + `sessions`). Un punto de la otra región cae en fallback (`zoneKey: null`, `fallbackRequired: true`) en vez de mudar la sesión, porque mudarla en silencio dejaría dos presencias de la misma sesión en dos regiones. Cambiar de región = abrir sesión nueva. |
 | **El punto se guarda, la coordenada no sale** | `presence.point` es `geometry(Point, 4326)` privado (lo va a necesitar S3 para distancia/rumbo). Ningún `SELECT` de la API lo proyecta y ningún log lo interpola: lo que sale es `regionKey`/`zoneKey`/`fallbackRequired`. |
+| **Una sola proyección de eventos** | SSE y polling llaman a `EventsService.readPage`. La paridad no se mantiene sincronizando dos implementaciones: hay una. El SSE pagina el log cada 250 ms después del replay y manda `: keepalive` cada 15 s. |
+| **`seq` por región, no un reloj** | `event_seq` se incrementa con `UPDATE … RETURNING` (serializa la fila y no reparte el mismo número). `occurredAt` viaja porque el contrato lo exige, pero no ordena: entre requests concurrentes el reloj se invierte. |
+| **Ticker del mundo, un solo proceso** | El movimiento se escribe una vez y todas las lecturas ven lo mismo; si se calculara al leer, dos clientes con el mismo cursor verían posiciones distintas para el mismo `seq`. Con más de una instancia hace falta un job con lock (límite anotado, no resuelto antes de tener el problema). |
+| **Bots derivados, geometría en PostGIS** | El `profileId` del bot es `<owner>-b1/b2` (estable entre logins del mismo slot) y su centro/waypoints se calculan en SQL: TypeScript nunca ve una coordenada. `distanceM`/`bearingDeg` se miden contra el ancla de la zona (`ST_PointOnSurface`), la misma referencia estable del catálogo, así el payload no depende de quién lo lee. |
+| **Ghost = `DELETE /presence`** | Es la superficie que el contrato ya tiene; apagar la presencia oculta al humano y retira sus 2 bots de las lecturas. Un ghost que mantenga la presencia viva pide un delta de contrato (S5). |
 
 ## Modelo de datos (S1 + S2)
 
@@ -332,6 +419,10 @@ DTOs de la demo. El shape es propio y sólo lo consumen Docker y el runbook.
 | `sessions` | `session_id` | un solo slot vivo por región (índice único parcial); invitado ⇔ slot `NULL` |
 | `stream_tickets` | `ticket_id` | hash del ticket, no el valor (S2) |
 | `presence` | `session_id` | **una fila por sesión** (upsert); `geometry(Point, 4326)` privado + `expires_at` de 12 s; zona ⇔ región por FK compuesto |
+| `bots` | `(region_key, bot_profile_id)` | 2 por humano (`UNIQUE (region_key, owner_profile_id, bot_index)`); `<owner>-b1/b2`; centro/posición privados + `distanceM`/`bearingDeg` publicables |
+| `bot_waypoints` | `(region_key, bot_profile_id, waypoint_index)` | 4 waypoints por bot, `geometry(Point, 4326)` privados; cascada con el bot |
+| `event_seq` | `region_key` | contador monotónico por región (el orden de `id`) |
+| `events` | `(region_key, seq)` | log de las dos proyecciones; `payload` jsonb sin coordenadas; retención de 5000 por región |
 | `demo_meta` | `key` | `seed_id` y `contract_id` aplicados |
 
 El slot se reclama con la base, no con un `SELECT` previo: si dos navegadores piden
@@ -355,6 +446,9 @@ curl -s -X POST http://localhost:3000/demo/reset/self -H "Authorization: Bearer 
 ```
 
 Los dos son idempotentes: repetirlos devuelve `sessionsDeleted: 0` y no rompe nada.
+El global además vacía `bots`, `events` y `event_seq`: la demo arranca con el stream
+vacío y el `seq` de cada región en 1. El reset propio retira los bots de su perfil en
+la misma transacción (no espera al tick).
 
 ## Imágenes y compose
 
@@ -399,3 +493,14 @@ caracteres (`src/config/env.ts` falla en el boot, no en la primera request).
   resuelva.
 - **Tests contra la base equivocada**: exportá `DATABASE_URL`/`API_BASE_URL`; los
   defaults apuntan al compose local.
+- **El ticker del mundo corre en la API.** Con una sola instancia no hay problema;
+  con varias, cada proceso mueve bots y el log recibiría eventos duplicados (el
+  avance es idempotente por `leg_started_at`, la emisión no). S6/S7: job aparte o
+  `pg_advisory_lock` por tick.
+- **`distanceM`/`bearingDeg` de un bot son contra el ancla de la zona**, no contra
+  la presencia de cada observador. El contrato dice "relativos a quien recibe"; con
+  un log único por región, la única forma de que el mismo `seq` valga lo mismo para
+  todos es una referencia fija. El cálculo por observador es S3 (`/discovery`).
+- **El ghost apaga también al humano.** `DELETE /presence` es la única superficie
+  de pausa que el contrato tiene; si S5 pide "invisible pero online", primero hay
+  que congelar el campo en `PresenceUpdate`.
