@@ -1,8 +1,8 @@
 # Backend — NearbyIG demo
 
-API NestJS + PostGIS de la demo. **Sprint 1, batch S1-C**: ocupación visible y
-takeover (contrato v0.2). El contrato de `contract/` manda: acá se implementa, no
-se renegocia.
+API NestJS + PostGIS de la demo. **Sprint 2, batch S2-A**: presencia y región
+(contrato v0.2, sin cambios de contrato en este batch). El contrato de `contract/`
+manda: acá se implementa, no se renegocia.
 
 | Pieza | Estado |
 |---|---|
@@ -12,8 +12,10 @@ se renegocia.
 | `POST /auth/takeover` | listo (contrato v0.2): desalojo explícito, 200 `DemoSession` |
 | `POST /auth/logout` | listo, según el contrato: 204, idempotente, revoca en el acto |
 | `POST /auth/stream-ticket` | listo: ticket de 30 s, un uso; el consumidor es S2 |
+| `PUT /presence` | listo (S2): punto privado **o** `demoZoneKey`; región y zona por `ST_Covers` |
+| `DELETE /presence` | listo (S2): 204, o 409 `PRESENCE_STALE` si no había presencia viva |
 | `POST /demo/reset`, `/demo/reset/self` | listo (fuera del contrato, §11 del plan) |
-| Migraciones + seeds idempotentes | listo |
+| Migraciones + seeds idempotentes | listo (`001_init`, `002_presence`) |
 
 ## Empezar desde cero
 
@@ -104,6 +106,45 @@ curl -s -X POST $API/auth/takeover -H "Authorization: Bearer $TB2" \
 Los cuatro desenlaces están fijados en `contract/paths/auth.yaml#/takeover`: slot
 ajeno → 200, slot libre → 200, slot propio → 409, otra región → 403.
 
+### Presencia y región (Sprint 2)
+
+`PUT /presence` acepta **exactamente uno** de los dos caminos: el punto privado del
+navegador o una `demoZoneKey` del catálogo (el flujo sin permiso de ubicación). El
+server deriva la zona con `ST_Covers` contra `zones.polygon` **de la región de la
+sesión** y devuelve sólo la proyección: `profileId`, `regionKey`, `zoneKey`,
+`online` y `fallbackRequired`. La coordenada no vuelve nunca —ni en la response ni
+en un log— aunque se guarde en la columna privada `presence.point`.
+
+```bash
+API=http://localhost:3000
+T=$(curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' \
+  -d '{"regionKey":"mx","demoSlot":3}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+
+# punto real en CDMX                  → 200 zoneKey cdmx, fallbackRequired false
+curl -s -X PUT $API/presence -H "Authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"point":{"lat":19.432608,"lng":-99.133209}}'
+# → {"profileId":"mx-p03","regionKey":"mx","zoneKey":"cdmx","online":true,"fallbackRequired":false}
+
+# GPS denegado: la zona la elige el usuario → 200 cdmx (sin coordenada guardada)
+curl -s -X PUT $API/presence -H "Authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"demoZoneKey":"cdmx"}'
+
+# fuera de todo polígono              → 200, zoneKey null, fallbackRequired true (NO es error)
+curl -s -X PUT $API/presence -H "Authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"point":{"lat":0,"lng":0}}'
+
+# zona inexistente o de otra región   → 422 ZONE_UNKNOWN
+curl -s -X PUT $API/presence -H "Authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"demoZoneKey":"bogota"}'
+# ni punto ni zona, o los dos         → 422 VALIDATION_FAILED
+
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE $API/presence -H "Authorization: Bearer $T"  # 204
+curl -s -X DELETE $API/presence -H "Authorization: Bearer $T"                                   # 409 PRESENCE_STALE
+```
+
+TTL: la presencia vive **12 s**. `expires_at` es la única autoridad y toda lectura
+filtra `expires_at > now()`; no hay cron ni barrido (ver "Decisiones").
+
 Sin Docker (sólo si tenés Postgres 16 + PostGIS en el host):
 
 ```bash
@@ -135,6 +176,24 @@ Reglas:
   da igual en Windows y en el contenedor.
 - Rollback completo: `down -v` + `up` (ver Reset). `--rollback` no dropea PostGIS.
 
+Migraciones actuales:
+
+| # | Archivo | Qué crea | Rollback |
+|---|---|---|---|
+| 001 | `001_init.sql` | `regions`, `zones`, `profiles`, `sessions`, `stream_tickets`, `demo_meta` | dropea las 6 tablas |
+| 002 | `002_presence.sql` | `presence` (una fila por sesión, `Point,4326` privado, `expires_at`) | `DROP TABLE presence`; catálogo y sesiones intactas |
+
+`002` es aditiva y reversible sin pérdida: la única tabla nueva referencia a
+`sessions` y `zones` (no al revés), así que el `down` no desarma nada. Aplicar y
+revertir en el stack:
+
+```bash
+docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate:rollback
+# → rollback ok: 002_presence
+docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate
+# → migrate ok: 002_presence
+```
+
 Dentro de Docker los comandos son los mismos, con `docker compose exec`:
 
 ```bash
@@ -165,7 +224,8 @@ re-seedear. Los conteos que imprime son el antes→después.
 Corren contra la API y la base reales (no hay mocks ni contenedores efímeros).
 Cubren health, sesión demo (claim, 409, invitado, slot vencido), perfiles
 (401/403/422, orden, shape exacto, cero coordenadas), logout (token revocado en el
-acto), tickets de stream (un solo uso), reset propio y global, logs sin PII y
+acto), tickets de stream (un solo uso), reset propio y global, presencia (punto
+real → zona, fallback, TTL, cambio de región, `DELETE`), logs sin PII y
 migraciones/seeds idempotentes + `ST_Covers`.
 
 ```bash
@@ -195,6 +255,7 @@ guarda antes y las repone al terminar.
 | `stream-ticket.test.mjs` | emisión, hash persistido, un solo uso, vencimiento, muerte con logout |
 | `reset.test.mjs` | reset propio, aislamiento, reset global, idempotencia, catálogo intacto |
 | `logs-no-pii.test.mjs` | ningún call site de log interpola token/ticket/coordenada/identidad |
+| `presence.test.mjs` | `PUT`/`DELETE /presence`: punto → zona, fallback, `demoZoneKey`, `ZONE_UNKNOWN`, cambio de región, TTL, 404 y upsert |
 | `migrations-seeds.test.mjs` | idempotencia de migraciones y seeds, `ST_Covers` |
 
 ## Endpoints
@@ -207,19 +268,19 @@ guarda antes y las repone al terminar.
 | `POST /auth/logout` | Bearer | `paths/auth.yaml` | `204` sin cuerpo; idempotente; revoca sesión y quema sus tickets |
 | `POST /auth/stream-ticket` | Bearer | `paths/auth.yaml` | `201 StreamTicket`; 30 s, un uso, sólo para `GET /events` (S2) |
 | `GET /demo/profiles?regionKey=` | Bearer | `paths/profiles.yaml` | 10 perfiles ordenados por `demoSlot`; `403 REGION_MISMATCH` |
+| `PUT /presence` | Bearer | `paths/presence.yaml` | 200 `PresenceState`; `point` **o** `demoZoneKey`; `422 ZONE_UNKNOWN`/`VALIDATION_FAILED`; `404 PROFILE_NOT_FOUND` |
+| `DELETE /presence` | Bearer | `paths/presence.yaml` | `204` sin cuerpo; `409 PRESENCE_STALE` si no había presencia viva |
 | `POST /demo/reset` | — | **no** | reset global: borra sesiones e invitados, no el catálogo (§11) |
 | `POST /demo/reset/self` | Bearer | **no** | reset de la propia sesión; idempotente |
 
-### Takeover: por qué no está
+### Takeover: por qué es otra operation
 
-El plan (§3) nombra "claim y takeover", pero **el contrato no modela el takeover**:
-`DemoSessionRequest` es `additionalProperties: false` y sólo acepta `regionKey` y
-`demoSlot`; la única respuesta de conflicto declarada es `409 PROFILE_IN_USE`, y no
-existe operation de takeover. Implementarlo por fuera (un `takeover: true` o un
-`POST /auth/takeover`) sería inventar superficie y, además, romper el schema del
-request. Por eso hoy el servidor **nunca** desaloja a nadie: pedir un slot ocupado
-es 409 y el cliente elige otro. Si la demo necesita el gesto, primero se congela en
-`contract/` y después se implementa.
+El plan (§3) nombra "claim y takeover". El claim (`POST /auth/demo-session`) **no**
+desaloja: pedir un slot ocupado es `409 PROFILE_IN_USE`. El desalojo es explícito,
+`POST /auth/takeover` con `{regionKey, demoSlot}`, y desde el contrato v0.2 tiene
+sus propios desenlaces (slot ajeno/libre → 200, slot propio → 409, otra región →
+403). Un flag en el claim habría roto el `additionalProperties: false` del body y
+escondido el gesto más peligroso de la demo detrás de un booleano.
 
 ### `/demo/reset` fuera del contrato
 
@@ -257,8 +318,11 @@ DTOs de la demo. El shape es propio y sólo lo consumen Docker y el runbook.
 | **Ticket de stream hasheado** | Se guarda el sha256, no el valor: la tabla decide si el ticket sirve y una copia de la base no entrega tickets. El consumo es un solo `UPDATE` atómico (`consumed_at IS NULL AND expires_at > now()`), así dos usos simultáneos no ganan los dos. |
 | **Dos guards, a propósito** | `DemoSessionGuard` verifica firma **y** fila (lectura y emisión). `TeardownSessionGuard` verifica sólo firma y se usa únicamente en logout y reset propio: son desarmes, el contrato pide que sean idempotentes, y su único efecto sobre una sesión ya cerrada es un no-op. Un token revocado no lee ni emite nada. |
 | **Sin CORS todavía** | Lo agrega S6 con la allowlist de Pages/localhost; hoy el único origen es `localhost` y no hay cliente web en este batch. |
+| **TTL de presencia por filtro de lectura, sin cron** | `expires_at` es la única autoridad y toda consulta que cuente presencias filtra `expires_at > now()`. Un barrido siempre llega tarde (la presencia vencida seguiría contando hasta la próxima pasada) y la tabla tiene a lo sumo una fila por sesión viva, así que no hay nada que compactar. La fila se reusa por upsert y cae en cascada con la sesión (`logout`, reset, `down -v`). |
+| **La región de una presencia es la de la sesión** | `regionKey` no viene del body: es parte de la identidad (`JWT` + `sessions`). Un punto de la otra región cae en fallback (`zoneKey: null`, `fallbackRequired: true`) en vez de mudar la sesión, porque mudarla en silencio dejaría dos presencias de la misma sesión en dos regiones. Cambiar de región = abrir sesión nueva. |
+| **El punto se guarda, la coordenada no sale** | `presence.point` es `geometry(Point, 4326)` privado (lo va a necesitar S3 para distancia/rumbo). Ningún `SELECT` de la API lo proyecta y ningún log lo interpola: lo que sale es `regionKey`/`zoneKey`/`fallbackRequired`. |
 
-## Modelo de datos (S1)
+## Modelo de datos (S1 + S2)
 
 | Tabla | Clave | Invariante |
 |---|---|---|
@@ -267,6 +331,7 @@ DTOs de la demo. El shape es propio y sólo lo consumen Docker y el runbook.
 | `profiles` | `(region_key, profile_id)` | `demo_slot` único por región; `demo_slot IS NULL` ⇔ `source_type = 'guest'` |
 | `sessions` | `session_id` | un solo slot vivo por región (índice único parcial); invitado ⇔ slot `NULL` |
 | `stream_tickets` | `ticket_id` | hash del ticket, no el valor (S2) |
+| `presence` | `session_id` | **una fila por sesión** (upsert); `geometry(Point, 4326)` privado + `expires_at` de 12 s; zona ⇔ región por FK compuesto |
 | `demo_meta` | `key` | `seed_id` y `contract_id` aplicados |
 
 El slot se reclama con la base, no con un `SELECT` previo: si dos navegadores piden
@@ -326,5 +391,11 @@ caracteres (`src/config/env.ts` falla en el boot, no en la primera request).
   escribir, `node --watch` reinicia; no hay estado que se corrompa, pero el log
   puede mostrar un error de módulo por un instante.
 - **Puerto 3000 tomado**: `PORT=3100 docker compose up …` (el `.env` también sirve).
+- **Una presencia vencida deja la fila.** El TTL es de lectura: la fila sigue en
+  `presence` con `expires_at` en el pasado y no cuenta para nada (el siguiente
+  `PUT` la reusa, el `logout`/reset la borra en cascada). No es un leak: es una
+  fila por sesión, no una por latido. Si S5 quiere la tabla impecable, ahí sí
+  conviene un barrido — no antes, porque no resuelve nada que el filtro no
+  resuelva.
 - **Tests contra la base equivocada**: exportá `DATABASE_URL`/`API_BASE_URL`; los
   defaults apuntan al compose local.
