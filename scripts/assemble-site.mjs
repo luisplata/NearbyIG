@@ -5,10 +5,12 @@
  *   site/index.html            landing
  *   site/flutter/**            build web de Flutter
  *   site/expo/**               export web de Expo
+ *   site/contract/**           doc estático del contrato (`npm run contract:docs`)
  *   site/.nojekyll             sin procesamiento Jekyll
  *
  * En el mismo paso audita el artefacto: denylist (ZIP, keystore, .env, config Firebase,
- * node_modules, *.map), hosts prohibidos, secretos e `index.html` en las tres rutas.
+ * node_modules, *.map), hosts prohibidos, secretos, `index.html` de las tres demos y
+ * el doc del contrato en `/contract/`.
  *
  * Uso:
  *   node scripts/assemble-site.mjs                 # construye site/ desde los builds
@@ -17,7 +19,10 @@
  *   node scripts/assemble-site.mjs out-dir         # otro directorio de salida
  *
  * `--check-only` devuelve 0 si el único problema es un target todavía no construido
- * (lo informa como `pending`); con `--strict` eso también falla.
+ * (lo informa como `pending`); con `--strict` eso también falla. Las demos son el
+ * artefacto base; `/contract/` es una ruta adicional que sólo se exige cuando el
+ * artefacto es el de publicación (`--strict`) o cuando el ensamblado acaba de
+ * copiarla.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -27,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { auditText, deniedReason, isTextFile } from './lib/denylist.mjs';
 import { ALLOWED_REQUEST_HOSTS, compareHostSets } from './lib/request-hosts.mjs';
 import { datasetIdOf } from './lib/canonical.mjs';
+import { canonicalContractId, loadSpec } from '../contract/scripts/lib/spec.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -39,10 +45,43 @@ const outputDir = resolve(ROOT, positional[0] ?? 'site');
 const basePath = (process.env.PAGES_BASE_PATH ?? '').replace(/\/+$/, '');
 
 const SOURCES = [
-  { key: 'landing', label: 'landing', source: join(ROOT, 'demo', 'landing'), target: '' },
-  { key: 'flutter', label: 'flutter', source: join(ROOT, 'demo', 'flutter-demo', 'build', 'web'), target: 'flutter' },
-  { key: 'expo', label: 'expo', source: join(ROOT, 'demo', 'expo-demo', 'dist'), target: 'expo' },
+  {
+    key: 'landing',
+    label: 'landing',
+    source: join(ROOT, 'demo', 'landing'),
+    target: '',
+    hint: 'la landing es estática y vive en demo/landing',
+  },
+  {
+    key: 'flutter',
+    label: 'flutter',
+    source: join(ROOT, 'demo', 'flutter-demo', 'build', 'web'),
+    target: 'flutter',
+    hint: 'flutter build web (ver demo/README.md)',
+  },
+  {
+    key: 'expo',
+    label: 'expo',
+    source: join(ROOT, 'demo', 'expo-demo', 'dist'),
+    target: 'expo',
+    hint: 'npx expo export --platform web (ver demo/README.md)',
+  },
+  {
+    key: 'contract',
+    label: 'contract',
+    source: join(ROOT, 'contract', 'dist'),
+    target: 'contract',
+    hint: 'npm run contract:docs',
+  },
 ];
+
+/** Las tres demos son el artefacto base; el contrato es la ruta adicional. */
+const DEMO_INDEXES = [
+  { label: 'landing', path: 'index.html' },
+  { label: 'flutter', path: 'flutter/index.html' },
+  { label: 'expo', path: 'expo/index.html' },
+];
+const CONTRACT_INDEX = 'contract/index.html';
 
 const MAX_SCAN_BYTES = 8 * 1024 * 1024;
 
@@ -152,7 +191,14 @@ function audit(dir) {
     if (size > MAX_SCAN_BYTES) return;
 
     const text = readFileSync(absolute, 'utf8');
-    const result = auditText(text, { path: rel });
+    // El doc del contrato inlina el bundle standalone de Redoc: trae decenas de
+    // literales de host de features que nunca usa (CDN de íconos, telemetría,
+    // links de documentación) y mantenerlos en la allowlist sería frágil. Se
+    // audita con una regla más fuerte y propia: `checkContractDoc` exige que el
+    // doc no referencie **ningún** subrecurso y que la carpeta tenga un único
+    // archivo, así que no hay dónde esconder un pedido externo.
+    const insideContractDocs = relative(dir, absolute).split(sep).join('/').startsWith('contract/');
+    const result = auditText(text, { path: rel, hosts: !insideContractDocs });
     for (const finding of result.findings) {
       findings.push(`${rel}: ${finding.kind} prohibido "${finding.label}" (${finding.match})`);
     }
@@ -164,18 +210,18 @@ function audit(dir) {
   return { offenders, findings, hosts, files, bytes };
 }
 
+/**
+ * Las tres demos son el artefacto base: si falta una, el artefacto no está
+ * completo. `/contract/` es una ruta **adicional** esperada, que se publica con
+ * el doc generado; se informa aparte para que el mensaje diga qué falta y cómo
+ * arreglarlo, sin confundirla con una demo sin construir.
+ */
 function checkIndexes(dir) {
-  const required = [
-    { label: 'landing', path: join(dir, 'index.html') },
-    { label: 'flutter', path: join(dir, 'flutter', 'index.html') },
-    { label: 'expo', path: join(dir, 'expo', 'index.html') },
-  ];
-
-  const missing = [];
-  for (const entry of required) {
-    if (!existsSync(entry.path)) missing.push(entry.label);
-  }
-  return missing;
+  const missingDemos = DEMO_INDEXES.filter((entry) => !existsSync(join(dir, entry.path))).map(
+    (entry) => entry.label,
+  );
+  const contractMissing = !existsSync(join(dir, CONTRACT_INDEX));
+  return { missingDemos, contractMissing };
 }
 
 /** datasetId del contrato vigente: se recalcula, nunca se hardcodea. */
@@ -289,19 +335,83 @@ function checkBaseHref(dir) {
   }
 }
 
+/**
+ * El doc del contrato se publica en `/contract/` como **un único HTML
+ * autocontenido** generado por `npm run contract:docs`. Verifica las tres
+ * propiedades que ningún otro chequeo cubre:
+ *
+ *  1. Un solo archivo: el doc inlina su JS y su CSS, así que un hermano
+ *     (`openapi.yaml`, un `.js`, un `.map`) sobra o esconde un pedido externo.
+ *     Es lo que cierra el hueco de la excepción de hosts (ver `audit`).
+ *  2. Cero subrecursos: sin `src`/`href` en tags que cargan, sin `url(http…)` ni
+ *     `@import http…`. Más fuerte que la allowlist del artefacto.
+ *  3. Sin telemetría y con el contrato vigente adentro: si el HTML se generó con
+ *     otra revisión del spec, publica docs que no son los del `x-contract-id`.
+ */
+const CONTRACT_SUBRESOURCE_RULES = [
+  {
+    label: 'tag que carga un recurso',
+    pattern: /<(?:script|link|img|iframe|source|embed|object|video|audio|track)\b[^>]*?\b(?:src|href|srcset)\s*=/i,
+  },
+  { label: 'url() externa', pattern: /url\(\s*["']?https?:/i },
+  { label: '@import externo', pattern: /@import\s+(?:url\()?["']?https?:/i },
+];
+
+function checkContractDoc(dir, expectedContractId) {
+  const docsDir = join(dir, 'contract');
+  const indexPath = join(docsDir, 'index.html');
+  if (!existsSync(indexPath)) return;
+
+  const extra = readdirSync(docsDir).filter((name) => name !== 'index.html');
+  if (extra.length > 0) {
+    problem(`contract/ debe publicarse como un único index.html autocontenido: sobra ${extra.join(', ')}`);
+  }
+
+  const html = readFileSync(indexPath, 'utf8');
+  for (const rule of CONTRACT_SUBRESOURCE_RULES) {
+    const match = rule.pattern.exec(html);
+    if (match) {
+      problem(`contract/index.html no puede cargar subrecursos (${rule.label}): "${match[0].slice(0, 80)}"`);
+    }
+  }
+
+  if (!html.includes('"disableTelemetry":true')) {
+    problem('contract/index.html deja la telemetría de Redoc prendida (regenerá con npm run contract:docs)');
+  }
+  if (!html.includes(expectedContractId)) {
+    problem(
+      `contract/index.html no corresponde al contrato vigente (falta x-contract-id ${expectedContractId}): ` +
+        'regenerá con npm run contract:docs',
+    );
+  }
+}
+
 function report(dir) {
   const { offenders, findings, hosts, files, bytes } = audit(dir);
   for (const entry of offenders) problem(`archivo prohibido: ${entry}`);
   for (const entry of findings) problem(`contenido prohibido: ${entry}`);
 
   const expectedDatasetId = contractDatasetId();
+  const expectedContractId = canonicalContractId(loadSpec().spec);
   checkLanding(dir, expectedDatasetId);
+  checkContractDoc(dir, expectedContractId);
 
-  const missing = checkIndexes(dir);
-  for (const label of missing) {
+  const { missingDemos, contractMissing } = checkIndexes(dir);
+  for (const label of missingDemos) {
     if (label === 'landing') continue; // reported by checkLanding as a real problem
     const source = SOURCES.find((entry) => entry.key === label);
     pending.push(`${label} (falta ${source ? displayPath(source.source) : 'build'})`);
+  }
+
+  // La publicación está activa cuando el artefacto es el que se sube (`--strict`):
+  // ahí el contrato no puede faltar. En una auditoría parcial sin `--strict` se
+  // informa como `pending`, igual que una app todavía sin construir.
+  if (contractMissing) {
+    if (strict) {
+      problem('falta contract/index.html: el contrato es una ruta publicada (corré npm run contract:docs)');
+    } else {
+      pending.push('contract (falta contract/dist: npm run contract:docs)');
+    }
   }
 
   checkBaseHref(dir);
@@ -328,8 +438,11 @@ function report(dir) {
     }
   }
 
-  if (missing.length === 0) {
-    console.log('  index.html  landing, flutter y expo OK');
+  if (missingDemos.length === 0) {
+    console.log('  demos       landing, flutter y expo completas');
+  }
+  if (!contractMissing) {
+    console.log(`  contrato    contract/index.html · x-contract-id ${expectedContractId}`);
   }
   return { files, bytes };
 }
@@ -340,11 +453,11 @@ function main() {
   if (!checkOnly) {
     const missingSources = SOURCES.filter((entry) => !existsSync(entry.source));
     if (missingSources.length > 0) {
-      console.error('ERROR: faltan builds requeridos:');
+      console.error('ERROR: faltan artefactos requeridos:');
       for (const entry of missingSources) {
-        console.error(`  - ${entry.label}: ${displayPath(entry.source)}`);
+        console.error(`  - ${entry.label}: ${displayPath(entry.source)} (${entry.hint})`);
       }
-      console.error('\n  Construí las apps primero (ver demo/README.md) o usá --check-only para auditar.');
+      console.error('\n  Construí las demos y generá el doc del contrato, o usá --check-only para auditar.');
       process.exit(1);
     }
 
@@ -363,7 +476,7 @@ function main() {
     console.log('  .nojekyll escrito');
   } else if (!existsSync(outputDir)) {
     console.log(`site/ no existe todavía (${displayPath(outputDir)}).`);
-    console.log('Nada que auditar: los targets se ensamblan después de construir Flutter y Expo.');
+    console.log('Nada que auditar: los targets se ensamblan después de construir Flutter, Expo y los docs.');
     console.log(`pending: ${SOURCES.map((entry) => entry.label).join(', ')}`);
     if (strict) {
       console.error('ERROR: --strict exige un artefacto ensamblado.');
@@ -378,7 +491,7 @@ function main() {
 
   if (pending.length > 0) {
     console.log(`\n  pending   ${pending.join('; ')}`);
-    console.log('            (esperado hasta que ambas apps estén construidas)');
+    console.log('            (esperado hasta que las demos y el doc del contrato estén construidos)');
   }
 
   if (problems.length > 0) {
