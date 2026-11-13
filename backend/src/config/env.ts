@@ -94,13 +94,17 @@ export const DEV_DATABASE_URL = 'postgres://nearbyig:nearbyig@localhost:5432/nea
  *   * `4173` — `npx serve@14 site -l 4173` (el export servido, `demo/README.md`),
  *   * `8080` — el puerto de un `http.server`/`serve` cualquiera sobre el export.
  *
- * El origen de GitHub Pages no está acá a propósito: es de S6, cambia por
- * despliegue y se agrega por entorno (`CORS_ALLOWED_ORIGINS=https://usuario.github.io`).
+ * El origen de GitHub Pages sí está: la demo se prueba desde
+ * `https://luisplata.github.io/NearbyIG/expo/` con el backend en un túnel, y el
+ * navegador compara el `Origin` de la página (sin path) contra esta lista. Si el
+ * despliegue cambia de cuenta u organización, se agrega por entorno
+ * (`CORS_ALLOWED_ORIGINS=https://otro.github.io`).
  */
 export const DEV_CORS_ORIGINS: readonly string[] = [
   'http://localhost:8081',
   'http://localhost:4173',
   'http://localhost:8080',
+  'https://luisplata.github.io',
 ];
 
 /**

@@ -47,7 +47,13 @@ async function bootstrap(): Promise<void> {
         callback(null, allowed);
       },
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['authorization', 'content-type', 'last-event-id'],
+      allowedHeaders: [
+        'authorization',
+        'content-type',
+        'last-event-id',
+        // ngrok free: el cliente lo manda para saltear el interstitial HTML.
+        'ngrok-skip-browser-warning',
+      ],
       maxAge: 600,
       credentials: false,
     });
