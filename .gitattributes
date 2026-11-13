@@ -1,5 +1,9 @@
 * text=auto eol=lf
 
+# Generated artifacts: real code, but review them by their source.
+contract/generated/** linguist-generated=true
+contract/event/sample-log.json linguist-generated=true
+
 # Binaries (never normalized, never diffed as text)
 *.ttf binary
 *.otf binary
