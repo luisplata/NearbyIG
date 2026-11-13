@@ -16,6 +16,8 @@
     "check": "node scripts/validate-fixtures.mjs && node scripts/sync-demo-assets.mjs && git diff --exit-code"
   },
   "devDependencies": {
-    "@resvg/resvg-js": "2.6.2"
+    "@redocly/cli": "2.78.0",
+    "@resvg/resvg-js": "2.6.2",
+    "yaml": "2.9.1"
   }
 }
