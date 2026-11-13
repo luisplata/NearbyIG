@@ -10,7 +10,7 @@ import type { SourceType } from '../auth/session.types';
  *
  * `in_use` no es una columna: lo calcula el `EXISTS` del SELECT contra
  * `sessions`. Es lo único de esta fila que es estado y no catálogo. */
-interface ProfileRow {
+export interface ProfileRow {
   profile_id: string;
   region_key: string;
   demo_slot: number | null;

@@ -47,11 +47,18 @@ interface EventRow {
  * porque sirve para depurar, pero no ordena nada: entre requests concurrentes el
  * reloj puede invertirse.
  *
- * **Visibilidad.** El log es de la región; la proyección es del observador: sólo
- * pasan los humanos de la región (menos él) y sus bots visibles, cortados en el
- * cap de 6. Los bots propios nunca entran, y los de un dueño en ghost tampoco
- * —ni los nuevos ni los que ya estaban en el log—, porque el filtro es de
- * lectura y no de escritura.
+ * **Visibilidad.** El log es de la región; la proyección es del observador: pasan
+ * los humanos de la región (menos él) y sus bots visibles, propios incluidos y
+ * cortados en el cap de 6 (`BotsService.visibleBotIds`, la misma definición que
+ * `GET /discovery`). Los bots de un dueño en ghost no pasan —ni los nuevos ni los
+ * que ya estaban en el log— porque el filtro es de lectura y no de escritura.
+ *
+ * **Frame de las medidas.** `profile.moved` lleva `distanceM`/`bearingDeg` contra
+ * el ancla de la zona (el frame del mundo), no contra el observador: el log es
+ * uno y append-only, así que un payload por receptor exigiría guardar una
+ * coordenada o recalcular en lectura (y el mismo `seq` dejaría de valer lo
+ * mismo). `GET /discovery` es la proyección por observador; el detalle y la
+ * consecuencia para el cliente están en el README, "Frames de distancia".
  */
 @Injectable()
 export class EventsService {

@@ -178,12 +178,49 @@ export class BotsService {
   }
 
   /**
-   * Sujetos visibles para un observador: los humanos de su región (menos él) y
-   * los bots ajenos con dueño visible, cortados en el cap de 6.
+   * Bots visibles para un observador, **incluidos los propios**, cortados en el
+   * cap de 6.
    *
-   * El corte es determinista (orden por `bot_profile_id`) para que dos lecturas
-   * del mismo instante devuelvan el mismo subconjunto: sin eso, la paridad
-   * SSE↔polling dependería del orden que devuelva Postgres.
+   * **Por qué los propios.** El plan (§4, validación del Sprint 2) promete que
+   * con dos humanos en la misma región cada uno ve "1 humano + 4 bots = 5
+   * perfiles". Ese 5 sólo cierra si el observador ve **sus** 2 bots: 1 humano
+   * ajeno + 2 propios + 2 del otro. Un bot es una proyección del dueño, no un
+   * desconocido, y esconderlo convertiría la densidad prometida en 1 + 2.
+   *
+   * **Por qué `bot_profile_id` y no `profileId` del dueño.** Los bots propios
+   * entran sólo como bots: el humano sigue sin verse a sí mismo (eso lo decide
+   * `visibleSubjects`, que excluye al perfil propio y deja entrar a sus bots).
+   *
+   * **Prioridad.** Los propios se ordenan primero y después por
+   * `bot_profile_id`, así el cap nunca los recorta y el corte sigue siendo
+   * determinista: dos lecturas del mismo instante devuelven el mismo
+   * subconjunto. Sin eso, la paridad SSE↔polling dependería del orden que
+   * devuelva Postgres y un observador podría perder sus propios bots cuando la
+   * región se llena.
+   *
+   * Esta es la **única** definición de "bots visibles": el stream
+   * (`visibleSubjects`) y `GET /discovery` la comparten, así que discovery no
+   * puede mostrar un bot que el stream no mueve.
+   */
+  async visibleBotIds(regionKey: string, observerProfileId: string): Promise<readonly string[]> {
+    const { rows } = await this.pool.query<{ bot_profile_id: string }>(
+      `SELECT b.bot_profile_id
+         FROM bots b
+        WHERE b.region_key = $1
+          AND ${OWNER_VISIBLE}
+        ORDER BY (b.owner_profile_id = $2) DESC, b.bot_profile_id
+        LIMIT $3`,
+      [regionKey, observerProfileId, this.config.observerBotCap],
+    );
+    return rows.map((row) => row.bot_profile_id);
+  }
+
+  /**
+   * Sujetos visibles para un observador: los humanos de su región (menos él) y
+   * los bots visibles de `visibleBotIds` (propios incluidos, cap 6).
+   *
+   * El humano no se ve a sí mismo, pero sí ve sus bots: son la densidad que la
+   * demo promete y lo que el radar dibuja alrededor del propio punto.
    */
   async visibleSubjects(session: AuthContext): Promise<VisibleSubjects> {
     const [humans, bots] = await Promise.all([
@@ -196,21 +233,12 @@ export class BotsService {
           ORDER BY profile_id`,
         [session.regionKey, session.profileId],
       ),
-      this.pool.query<{ bot_profile_id: string }>(
-        `SELECT b.bot_profile_id
-           FROM bots b
-          WHERE b.region_key = $1
-            AND b.owner_profile_id <> $2
-            AND ${OWNER_VISIBLE}
-          ORDER BY b.bot_profile_id
-          LIMIT $3`,
-        [session.regionKey, session.profileId, this.config.observerBotCap],
-      ),
+      this.visibleBotIds(session.regionKey, session.profileId),
     ]);
 
     return {
       humans: humans.rows.map((row) => row.profile_id),
-      bots: bots.rows.map((row) => row.bot_profile_id),
+      bots,
     };
   }
 

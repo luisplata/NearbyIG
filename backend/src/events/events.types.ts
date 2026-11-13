@@ -53,9 +53,9 @@ export interface EventsPage {
  * Sujetos que este observador puede ver en el stream.
  *
  * Los humanos de la región se ven siempre (un `profile.presence` de alguien que
- * se apagó tiene que llegar); los bots sólo si su dueño tiene presencia viva y
- * entran en el cap de 6. Nunca entran los bots propios ni el propio perfil: el
- * humano no se ve a sí mismo.
+ * se apagó tiene que llegar); los bots entran según `BotsService.visibleBotIds`:
+ * los propios **sí** (el observador ve sus 2 bots), los ajenos si su dueño tiene
+ * presencia viva, todos cortados en el cap de 6. El propio humano nunca entra.
  */
 export interface VisibleSubjects {
   readonly humans: readonly string[];

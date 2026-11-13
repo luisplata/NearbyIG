@@ -26,11 +26,12 @@ import {
  *    distinto del humano;
  *  - los bots se mueven por sus waypoints y lo publiques como `profile.moved`
  *    con `distanceM`/`bearingDeg`, sin una sola coordenada;
- *  - el stream de un humano **no** incluye sus propios bots, pero sus bots sí
- *    aparecen para los demás;
+ *  - el stream de un humano **incluye sus propios bots** (S3: son la densidad que
+ *    la demo promete) y, por supuesto, los ajenos;
  *  - ghost = `DELETE /presence`: los bots propios desaparecen para el otro, en
  *    la lectura y en la tabla;
- *  - cap de 6 bots por observador, con el corte determinista;
+ *  - cap de 6 bots por observador, con el corte determinista y los propios
+ *    siempre adentro;
  *  - aislamiento por región: mx no ve co.
  *
  * `extendPresence` empuja el vencimiento de las presencias del escenario: el TTL
@@ -129,7 +130,8 @@ describe('bots: identidad, waypoints y cap', () => {
       );
     }
 
-    // El observador (slot 2) ve los bots ajenos moverse; sus propios bots no.
+    // El observador (slot 2) ve moverse sus 2 bots y los ajenos que entren en el
+    // cap de 6: desde S3 los propios forman parte del stream, no un caso aparte.
     const observer = humans[0];
     const page = await waitFor(
       async () => {
@@ -139,10 +141,18 @@ describe('bots: identidad, waypoints y cap', () => {
           ? response.body
           : null;
       },
-      { label: 'eventos profile.moved ajenos' },
+      { label: 'eventos profile.moved de los bots visibles' },
     );
 
     const ownBots = botIdsOf(observer.profileId);
+    const movedIds = new Set(
+      page.events.filter((event) => event.type === 'profile.moved').map((event) => event.payload.profileId),
+    );
+    assert.ok(
+      ownBots.some((id) => movedIds.has(id)),
+      'el stream propio no trajo ninguno de sus 2 bots',
+    );
+    assert.ok(movedIds.size <= 6, `el stream propio trajo ${movedIds.size} bots: cap de 6`);
     const payloadFields = ['bearingDeg', 'distanceM', 'profileId'];
     for (const event of page.events) {
       assert.match(event.id, /^mx:[0-9]{12}$/, `id del envelope: ${event.id}`);
@@ -151,13 +161,12 @@ describe('bots: identidad, waypoints y cap', () => {
       assert.doesNotMatch(JSON.stringify(event), /"(?:lat|lng|lon|latitude|longitude)"/i, 'coordenadas en el payload');
       if (event.type !== 'profile.moved') continue;
       assert.deepEqual(Object.keys(event.payload).sort(), payloadFields, 'payload exacto');
-      assert.ok(!ownBots.includes(event.payload.profileId), 'el stream propio trae un bot propio');
       assert.ok(event.payload.distanceM >= 200 && event.payload.distanceM <= 5000);
       assert.ok(event.payload.bearingDeg >= 0 && event.payload.bearingDeg <= 359);
     }
   });
 
-  test('el humano no se ve a sí mismo, pero sus bots sí aparecen a los demás', async () => {
+  test('el humano no se ve a sí mismo, pero sus bots y los ajenos sí', async () => {
     await extendPresence(humans.map((human) => human.sessionId));
     const [observer, neighbour] = humans;
 
@@ -176,17 +185,22 @@ describe('bots: identidad, waypoints y cap', () => {
 
     const profiles = page.events.map((event) => event.payload.profileId);
     assert.ok(!profiles.includes(observer.profileId), 'el observador aparece en su propio stream');
-    assert.ok(!profiles.some((id) => botIdsOf(observer.profileId).includes(id)), 'bots propios en el stream propio');
     assert.ok(profiles.includes(`${neighbour.profileId}-b1`), 'los bots ajenos sí se ven');
+    // S3: sus propios bots sí entran. No es "verse a sí mismo": el perfil humano
+    // sigue excluido; los bots son la densidad alrededor del propio punto.
+    assert.ok(
+      botIdsOf(observer.profileId).some((id) => profiles.includes(id)),
+      'el stream propio no trae sus propios bots',
+    );
 
     // Desde el otro lado también: el vecino ve al observador, no a sí mismo.
     const mirror = await pollEvents(neighbour.token, { limit: 100 });
     const mirrored = mirror.body.events.map((event) => event.payload.profileId);
-    assert.ok(!mirrored.some((id) => botIdsOf(neighbour.profileId).includes(id)));
+    assert.ok(!mirrored.includes(neighbour.profileId), 'el vecino aparece en su propio stream');
     assert.ok(mirrored.includes(`${observer.profileId}-b1`));
   });
 
-  test('con 3 humanos el observador ve 4 bots (por debajo del cap de 6)', async () => {
+  test('con 3 humanos el observador ve 6 bots: los suyos y los 4 ajenos', async () => {
     await extendPresence(humans.map((human) => human.sessionId));
     const observer = humans[0];
     const [first, second] = humans.slice(1);
@@ -206,20 +220,20 @@ describe('bots: identidad, waypoints y cap', () => {
       async () => {
         const response = await pollEvents(observer.token, { cursor, limit: 100 });
         const moved = response.body.events.filter((event) => event.type === 'profile.moved');
-        return moved.length >= 4 ? moved : null;
+        return moved.length >= 6 ? moved : null;
       },
-      { label: 'los 4 bots de 3 humanos' },
+      { label: 'los 6 bots de 3 humanos' },
     );
 
     const visible = new Set(page.map((event) => event.payload.profileId));
     assert.deepEqual(
       [...visible].sort(),
-      [...botIdsOf(first.profileId), ...botIdsOf(second.profileId)].sort(),
-      '3 humanos ⇒ 2 dueños ajenos ⇒ 4 bots, y ningún bot propio',
+      [...botIdsOf(observer.profileId), ...botIdsOf(first.profileId), ...botIdsOf(second.profileId)].sort(),
+      '3 humanos ⇒ 2 propios + 4 ajenos = 6 bots',
     );
     assert.ok(visible.size <= 6, 'cap de 6 respetado');
 
-    // Vuelven los dos humanos: 8 bots en la región.
+    // Vuelven los dos humanos: 10 bots en la región, 6 visibles.
     for (const human of humans.slice(3)) {
       assert.equal((await updatePresence(human.token, MX_ZONE)).status, 200);
     }
@@ -228,7 +242,7 @@ describe('bots: identidad, waypoints y cap', () => {
     });
   });
 
-  test('cap de 6 bots por observador: 5 humanos, 8 bots ajenos, 6 visibles', async () => {
+  test('cap de 6 bots por observador: 5 humanos, 10 bots, 6 visibles y los propios adentro', async () => {
     await extendPresence(humans.map((human) => human.sessionId));
     const observer = humans[0];
     const others = humans.slice(1);
@@ -250,13 +264,17 @@ describe('bots: identidad, waypoints y cap', () => {
     const visible = [...new Set(page.map((event) => event.payload.profileId))].sort();
     assert.equal(visible.length, 6, `el observador ve ${visible.length} bots, no 6`);
 
-    // El corte es determinista: los 6 primeros por id, no "los que llegaron".
-    const expected = others
-      .flatMap((human) => botIdsOf(human.profileId))
-      .sort()
-      .slice(0, 6);
+    // El corte es determinista y los propios van primero: 2 propios + los 4
+    // primeros ajenos por id, no "los que llegaron".
+    const expected = [
+      ...botIdsOf(observer.profileId),
+      ...others.flatMap((human) => botIdsOf(human.profileId)).sort().slice(0, 4),
+    ].sort();
     assert.deepEqual(visible, expected, 'el cap no es determinista');
-    assert.ok(visible.every((id) => !id.startsWith(observer.profileId)), 'el cap incluyó bots propios');
+    assert.ok(
+      botIdsOf(observer.profileId).every((id) => visible.includes(id)),
+      'el cap dejó afuera los bots propios',
+    );
   });
 
   test('aislamiento por región: dos humanos en mx y dos en co no se ven', async () => {

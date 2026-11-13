@@ -262,6 +262,23 @@ export async function pollEvents(token, { cursor, limit } = {}) {
   return api(`/events/poll${query === '' ? '' : `?${query}`}`, { token });
 }
 
+/**
+ * `GET /discovery`. Los filtros se mandan tal cual —incluidos valores inválidos y
+ * repetidos— porque los casos de validación tienen que poder provocarse.
+ *
+ * Un valor de array se manda repetido a propósito: es el pedido ambiguo que el
+ * server tiene que rechazar, no "el primero".
+ */
+export async function listDiscovery(token, filters = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (Array.isArray(value)) for (const entry of value) params.append(key, String(entry));
+    else params.set(key, String(value));
+  }
+  const query = params.toString();
+  return api(`/discovery${query === '' ? '' : `?${query}`}`, { token });
+}
+
 /** `id` del envelope → `seq`. Sólo para comparar, igual que hace el cliente. */
 export function seqOfId(id) {
   const match = /^[a-z]{2}:([0-9]{12})$/.exec(id ?? '');

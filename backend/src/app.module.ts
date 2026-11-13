@@ -3,6 +3,7 @@ import { AuthModule } from './auth/auth.module';
 import { BotsModule } from './bots/bots.module';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './db/database.module';
+import { DiscoveryModule } from './discovery/discovery.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
 import { PresenceModule } from './presence/presence.module';
@@ -19,6 +20,7 @@ import { ResetModule } from './reset/reset.module';
  *   AuthModule     → sesión demo, logout, ticket de stream y sus guards
  *   BotsModule     → los 2 bots derivados de cada humano vivo (geometría y cap)
  *   EventsModule   → log de eventos, SSE, polling y ticker del mundo
+ *   DiscoveryModule→ GET /discovery (radio, filtros y medidas por observador)
  *   PresenceModule → PUT y DELETE /presence (región y zona derivadas)
  *   ProfilesModule → GET /demo/profiles
  *   ResetModule    → POST /demo/reset y /demo/reset/self (fuera del contrato)
@@ -31,6 +33,7 @@ import { ResetModule } from './reset/reset.module';
     AuthModule,
     BotsModule,
     EventsModule,
+    DiscoveryModule,
     PresenceModule,
     ProfilesModule,
     ResetModule,
