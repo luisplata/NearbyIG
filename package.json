@@ -14,7 +14,9 @@
     "assemble": "node scripts/assemble-site.mjs",
     "test:scripts": "node --test \"scripts/lib/*.test.mjs\"",
     "check": "node scripts/validate-fixtures.mjs && node scripts/sync-demo-assets.mjs && git diff --exit-code",
-    "contract:validate": "node contract/scripts/validate-spec.mjs"
+    "contract:validate": "node contract/scripts/validate-spec.mjs",
+    "contract:test": "node --test \"contract/test/*.test.mjs\"",
+    "contract:check": "npm run contract:validate && npm run contract:test && git diff --exit-code"
   },
   "devDependencies": {
     "@redocly/cli": "2.78.0",
