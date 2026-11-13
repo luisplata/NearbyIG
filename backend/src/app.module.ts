@@ -4,6 +4,7 @@ import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './db/database.module';
 import { HealthModule } from './health/health.module';
 import { ProfilesModule } from './profiles/profiles.module';
+import { ResetModule } from './reset/reset.module';
 
 /**
  * Grafo de la API. Modular por capacidad, no por tipo de archivo: cada módulo
@@ -12,10 +13,11 @@ import { ProfilesModule } from './profiles/profiles.module';
  *   ConfigModule   → configuración validada (global)
  *   DatabaseModule → Pool de `pg` (global)
  *   HealthModule   → /health y /health/ready (fuera del contrato)
- *   AuthModule     → POST /auth/demo-session + guard `demoSession`
+ *   AuthModule     → sesión demo, logout, ticket de stream y sus guards
  *   ProfilesModule → GET /demo/profiles
+ *   ResetModule    → POST /demo/reset y /demo/reset/self (fuera del contrato)
  */
 @Module({
-  imports: [ConfigModule, DatabaseModule, HealthModule, AuthModule, ProfilesModule],
+  imports: [ConfigModule, DatabaseModule, HealthModule, AuthModule, ProfilesModule, ResetModule],
 })
 export class AppModule {}
