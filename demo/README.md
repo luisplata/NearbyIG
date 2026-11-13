@@ -135,8 +135,8 @@ npm run test:scripts
 **Resultado:** la misma demo con el descubrimiento del backend, sin cambiar el
 artefacto publicado. Por defecto arranca en **mock** (el dataset del build, cero
 llamadas de red); el modo live es opt-in y pide dos cosas: el backend arriba y
-`EXPO_PUBLIC_API_URL` en el entorno del build. Sin esa variable, el switch **Live**
-queda deshabilitado y nada más cambia.
+`EXPO_PUBLIC_API_URL` en el entorno del build. Sin esa variable la barra de modo
+no se monta y el build queda igual que siempre.
 
 ```bash
 # 1. backend (otra terminal)

@@ -32,6 +32,12 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
   const session = liveSessionText(live.state);
   const transport = liveTransportText(live.state);
 
+  // Sin base de API en el build no hay nada que elegir: la barra no se monta y
+  // el artefacto publicado queda igual que antes (CONTRACT.md §6 y §9).
+  if (!live.available) {
+    return null;
+  }
+
   return (
     <View style={styles.bar}>
       <View style={styles.row}>
@@ -39,28 +45,22 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
           label={liveText('mock')}
           selected={!isLive}
           onPress={() => {
+            // Ya en mock no hay nada que hacer: tocar el chip activo no
+            // arranca una sesión que el usuario no pidió.
             if (isLive) {
               void live.disable();
-              return;
             }
-            void live.enable();
           }}
         />
-        {live.available ? (
-          <Chip
-            label={liveText('live')}
-            selected={isLive}
-            onPress={() => {
-              if (!isLive) {
-                void live.enable();
-              }
-            }}
-          />
-        ) : (
-          <View style={styles.unavailable}>
-            <Text style={styles.unavailableText}>{liveText('notConfigured')}</Text>
-          </View>
-        )}
+        <Chip
+          label={liveText('live')}
+          selected={isLive}
+          onPress={() => {
+            if (!isLive) {
+              void live.enable();
+            }
+          }}
+        />
         <Text numberOfLines={1} style={[text.small, styles.status]}>
           {liveStatusText(state.source, live.state)}
         </Text>
@@ -108,13 +108,5 @@ const styles = StyleSheet.create({
   },
   notice: {
     color: colors.danger,
-  },
-  unavailable: {
-    justifyContent: 'center',
-    paddingHorizontal: space[1],
-  },
-  unavailableText: {
-    color: colors.muted,
-    fontSize: fontSize[0],
   },
 });
