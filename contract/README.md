@@ -12,7 +12,7 @@ que sale de este directorio hacia el artefacto publicado es el doc HTML de
 | Sí hay | No hay (todavía) |
 |---|---|
 | OpenAPI 3.1 a mano + lint + tests | Server, DB, Docker, NestJS |
-| Superficie congelada S1–S3 con sprint por operation | Ninguna operation implementada |
+| Superficie congelada S1–S4 con sprint por operation | Ninguna operation implementada |
 | `ErrorCode` cerrado, envelope de eventos, catálogo MX/CO | Firebase, OAuth, secretos |
 | Cliente TS type-only generado y commiteado | Cliente runtime |
 
@@ -114,12 +114,14 @@ contract/
   paths/profiles.yaml       GET /demo/profiles (S1), sin geometría
   paths/presence.yaml       PUT y DELETE /presence (S2): la única entrada con coordenadas
   paths/discovery.yaml      GET /discovery (S3): radio y filtros, sin geometría
+  paths/pings.yaml          POST y GET /pings, accept y reject (S4)
   schemas/auth.yaml         DemoSession, DemoSessionRequest, TakeoverRequest, StreamTicket
   schemas/events.yaml       envelope, los 6 tipos, los 6 payloads, EventsPage
   schemas/region.yaml       Region, RegionList, ZoneSummary, ZoneList
   schemas/profile.yaml      ProfileSummary, ProfileList, SelfProfile
   schemas/presence.yaml     PresenceUpdate (no montado), PrivatePoint (no montado), PresenceState
   schemas/discovery.yaml    DiscoveryQuery, DiscoveryResult
+  schemas/pings.yaml        Ping, PingList (con PingPeer), PingCreate y Match
   schemas/common.yaml       RegionKey, SourceType, Gender, Intention, KeyLabel, Page
   catalog/regions.json      dos regiones: mx, co (con defaultZoneKey)
   catalog/zones.json        geometría de CDMX y Bogotá: anillos [lng, lat]
@@ -172,11 +174,12 @@ demo-session:
     x-implementation-sprint: 1
 ```
 
-## Superficie congelada (S1–S3)
+## Superficie congelada (S1–S4)
 
 Lo que está adentro es la superficie de la demo. Lo que está afuera se congela
-cuando exista un diseño que lo congele: pings, matches, chat, block, report y
-`/health` no tienen path.
+cuando exista un diseño que lo congele: chat, block, report y `/health` no tienen
+path. `matches` no es un path: el match se entrega en el `200` de aceptar y se
+descubre por `Ping.matchId` (ver [Pings y matches](#pings-y-matches-delta-v03)).
 
 | Operation | Sprint | Archivo | Entra en |
 |---|---:|---|---|
@@ -189,6 +192,8 @@ cuando exista un diseño que lo congele: pings, matches, chat, block, report y
 | `GET /demo/regions`, `GET /demo/zones` | 2 | `paths/catalog.yaml` | PR4 |
 | `PUT /presence`, `DELETE /presence` | 2 | `paths/presence.yaml` | PR6 |
 | `GET /discovery` | 3 | `paths/discovery.yaml` | PR6 |
+| `POST /pings`, `GET /pings` | 4 | `paths/pings.yaml` | **v0.3** |
+| `POST /pings/{pingId}/accept`, `POST /pings/{pingId}/reject` | 4 | `paths/pings.yaml` | **v0.3** |
 
 ## Ocupación y takeover (delta v0.2)
 
@@ -229,6 +234,70 @@ slot ocupado sigue siendo `409 PROFILE_IN_USE`.
 
 `inUse` viaja también en `DiscoveryResult`, que reusa `ProfileSummary`: es el
 mismo dato (¿hay alguien en ese slot?) y no se agrega un DTO nuevo para esconderlo.
+
+## Pings y matches (delta v0.3)
+
+Sprint 4 entra con el slice mínimo que hace que la demo se sienta viva: enviar
+un ping, verlo en la bandeja, aceptarlo o rechazarlo, y que el match exista. No
+hay chat, ni `GET /matches`, ni bloqueo.
+
+| Operation | Sprint | Respuesta | Qué hace |
+|---|---:|---|---|
+| `POST /pings` | 4 | 201 `Ping` | Crea el ping `A → B`. Si `B` es un bot, vuelve `accepted` con `matchId` |
+| `GET /pings?box=inbox\|sent` | 4 | 200 `PingList` | Bandeja: `createdAt` desc, con la proyección del otro perfil |
+| `POST /pings/{pingId}/accept` | 4 | 200 `Match` | Sólo el destinatario. Un match por par |
+| `POST /pings/{pingId}/reject` | 4 | 204 | Sólo el destinatario. Sin match |
+
+**La máquina de estados.** `pending` es el único estado del que se sale; los
+otros tres son terminales. La transición la decide el server, no el reloj del
+cliente:
+
+| Caso | Respuesta | Por qué |
+|---|---|---|
+| ping a sí mismo | 422 `VALIDATION_FAILED` | El body está bien; el pedido no |
+| destino de otra región, inexistente o bot sin dueño vivo | 404 `PROFILE_NOT_FOUND` | Un ping no cruza regiones y un bot sin presencia no está |
+| ya hay un pendiente en ese par dirigido | 409 `PING_DUPLICATE` | Un pendiente por par (`A → B` y `B → A` son distintos) |
+| el pendiente del par ya venció | 410 `PING_EXPIRED` | Se cierra el viejo; reintentar crea uno nuevo |
+| cuota de envíos agotada | 429 `RATE_LIMITED` | El body no se corrige, se espera |
+| aceptar/rechazar un ping ajeno | 403 `PING_FORBIDDEN` | Sólo el destinatario resuelve |
+| aceptar/rechazar uno ya resuelto | 409 `PING_RESOLVED` | Idempotencia explícita: el cliente sabe que no cambió nada |
+| aceptar/rechazar uno vencido | 410 `PING_EXPIRED` | Y no se crea match |
+| `pingId` que no es uuid | 422 `VALIDATION_FAILED` | Mal escrito antes de faltar |
+
+**El bot acepta solo.** Si el destinatario es un bot (`<owner>-b1`), el ping
+vuelve ya `accepted` con `matchId` en la misma transacción. No hay job que
+despierte bots a los 2 s: la demo se siente viva y el cliente no tiene un caso
+especial, porque mira el mismo `Ping`.
+
+**Un match por par, y lo dice la base.** `matches` tiene `UNIQUE (region_key,
+profile_a_id, profile_b_id)` con el par ordenado (`a < b`): dos pings aceptados
+en direcciones opuestas no producen dos matches. La aplicación acepta el ping con
+un `UPDATE … WHERE status = 'pending'`, así que de dos aceptaciones simultáneas
+sólo una gana y la otra es 409.
+
+**Cómo ve el match el emisor.** No hay `GET /matches`: el `Match` viaja en el
+`200` de aceptar y `Ping.matchId` lo publica en la bandeja. `A` lo descubre
+poleando `GET /pings?box=sent` y viendo el ping en `accepted` con su `matchId`.
+Es el mínimo que permite mostrar "¡Match!" de los dos lados sin inventar
+superficie.
+
+**`PingList` no es un array de `Ping`.** Cada fila es `PingListItem { ping,
+peer }`: el ping y el otro perfil (nickname, iniciales, foto, intención,
+`sourceType`). Sin eso, la bandeja obligaría al cliente a cruzar el ping contra
+`/demo/profiles`, que además no conoce a los bots. El `peer` de un bot hereda la
+proyección de su dueño, igual que en `GET /discovery`.
+
+**Tres códigos nuevos y dos que dejan de estar reservados.** `PING_DUPLICATE` y
+`PING_EXPIRED` salen de `x-reserved` porque ahora tienen operation. Se suman
+`PING_FORBIDDEN` (403), `PING_NOT_FOUND` (404) y `PING_RESOLVED` (409) porque
+son tres decisiones distintas del cliente: "no es tuyo", "no existe" y "ya está
+resuelto" no se pueden colapsar en un código sin que el cliente mienta.
+`MATCH_NOT_FOUND` y `CHAT_BLOCKED` siguen reservados para S5.
+
+**TTL.** Un ping pendiente vence a las 24 h (`expiresAt` en la fila). El
+vencimiento es perezoso: se aplica al leer la bandeja y al resolver, no con un
+cron. La demo no tiene volumen para un job de barrido y un ping vencido sólo
+importa cuando alguien lo mira.
 
 ## Regiones y zonas: la geometría existe y nunca viaja
 
@@ -547,7 +616,7 @@ Consecuencias que importan al revisar:
 ## Cómo extender en Sprint 1
 
 1. Declarar el path item en `paths/<recurso>.yaml`: clave sin `/`, `operationId`
-   único, `summary`, `description`, `tags` y `x-implementation-sprint` (1, 2 o 3).
+   único, `summary`, `description`, `tags` y `x-implementation-sprint` (1, 2, 3 o 4).
 2. Montarlo en `openapi.yaml` → `paths`.
 3. Si hay DTO nuevo, `schemas/<recurso>.yaml` con `additionalProperties: false` y
    los nombres del dataset (no `distanceMeters`, no `intent`).
@@ -566,8 +635,8 @@ Consecuencias que importan al revisar:
 - **El generado no se edita.** `generated/api.ts` y `event/sample-log.json` se
   regeneran con `contract:generate` y `contract:event-log`; los gates comparan
   bytes, así que una edición a mano no sobrevive ni al primer `contract:test`.
-- **Sprint por operation.** `x-implementation-sprint` ∈ {1,2,3}. Ninguna operation
-  declara 0, 4 o 5.
+- **Sprint por operation.** `x-implementation-sprint` ∈ {1,2,3,4}. Ninguna
+  operation declara 0 ni 5.
 - **Errores en `application/problem+json`** (RFC 9457) con `code` del enum cerrado.
   `operation-4xx-response` está activa en `redocly.yaml`, pero su severidad es
   `warning`: el gate duro son los tests "toda operation declara ≥1 error 4xx/5xx" y

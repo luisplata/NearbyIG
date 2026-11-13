@@ -36,12 +36,16 @@ const EXPECTED_OPERATIONS = [
   'PUT /presence',
   'DELETE /presence',
   'GET /discovery',
+  'POST /pings',
+  'GET /pings',
+  'POST /pings/{pingId}/accept',
+  'POST /pings/{pingId}/reject',
 ];
 
-/** Paths que la superficie congelada S1–S3 deja afuera a propósito. */
-const FORBIDDEN_PATHS = /ping|match|chat|block|report|\/health/;
+/** Paths que la superficie congelada S1–S4 deja afuera a propósito. */
+const FORBIDDEN_PATHS = /chat|block|report|\/health/;
 
-const SUPPORTED_SPRINTS = [1, 2, 3];
+const SUPPORTED_SPRINTS = [1, 2, 3, 4];
 const operations = listOperations(spec);
 const label = ({ method, path }) => `${method.toUpperCase()} ${path}`;
 
@@ -55,7 +59,7 @@ test('el documento parsea como OpenAPI 3.1 y resuelve todos los $ref', () => {
   assert.equal(JSON.stringify(spec).includes('"$ref"'), false, 'quedó un $ref sin expandir');
 });
 
-test('toda operation declara x-implementation-sprint entero en 1..3', () => {
+test('toda operation declara x-implementation-sprint entero en 1..4', () => {
   assert.ok(operations.length > 0, 'el contrato no declara ninguna operation');
 
   for (const operation of operations) {
@@ -63,7 +67,7 @@ test('toda operation declara x-implementation-sprint entero en 1..3', () => {
     assert.ok(Number.isInteger(sprint), `${label(operation)}: x-implementation-sprint no es entero`);
     assert.ok(
       SUPPORTED_SPRINTS.includes(sprint),
-      `${label(operation)}: sprint ${sprint} fuera de 1..3`,
+      `${label(operation)}: sprint ${sprint} fuera de 1..4`,
     );
   }
 });
@@ -106,12 +110,12 @@ test('ningún path lleva prefijo de versión', () => {
   }
 });
 
-test('la superficie no incluye ping, match, chat, block, report ni health', () => {
+test('la superficie no incluye chat, block, report ni health', () => {
   for (const path of Object.keys(spec.paths ?? {})) {
     assert.doesNotMatch(
       path,
       FORBIDDEN_PATHS,
-      `${path}: esa superficie no está congelada; entra cuando exista un diseño que la congele (S4/S5)`,
+      `${path}: esa superficie no está congelada; entra cuando exista un diseño que la congele (S5)`,
     );
   }
 });

@@ -3,7 +3,7 @@
  *
  * Source: contract/openapi.yaml
  * Generator: openapi-typescript 7.13.0 (pinned exact in package.json)
- * Contract: x-contract-id 7203b8216b58
+ * Contract: x-contract-id 8f239137c03c
  *
  * Type-only client: no runtime code and no imports. Regenerate with
  * `npm run contract:generate`. The drift gate is `npm run contract:generate:check`.
@@ -323,6 +323,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lista la bandeja de pings
+         * @description Los pings del perfil de la sesión, más nuevo primero (`createdAt`
+         *     descendente). `box` elige el lado de la dirección:
+         *
+         *     * `inbox` — los que recibió (`toProfileId` = la sesión);
+         *     * `sent` — los que envió (`fromProfileId` = la sesión).
+         *
+         *     Cada fila es `PingListItem`: el ping y la proyección del **otro** perfil
+         *     (nickname, iniciales, foto e intención). Ni coordenadas ni distancias: la
+         *     bandeja cuenta quién escribió, no dónde está.
+         *
+         *     **Vencimiento perezoso.** Antes de listar, el server marca `expired` los
+         *     pendientes cuya hora pasó. El cliente no tiene que recalcular nada: si ve
+         *     `pending`, todavía se puede aceptar.
+         *
+         *     Sin cursor: devuelve hasta las 100 más recientes (`maxItems` del schema).
+         *     La demo no tiene volumen para paginar y un cursor inventado obligaría al
+         *     cliente a un loop que no necesita.
+         */
+        get: operations["listPings"];
+        put?: never;
+        /**
+         * Envía un ping a un perfil
+         * @description Crea un ping del perfil de la sesión hacia `targetProfileId` y devuelve la
+         *     fila con su estado. `201`, no `200`: el ping es un recurso nuevo con
+         *     identidad propia.
+         *
+         *     **Destinatario.** Tiene que existir en la región de la sesión: un humano
+         *     del catálogo o un bot con dueño vivo. Un `profileId` de otra región, uno
+         *     inexistente y un bot cuyo dueño ya no tiene presencia son todos `404
+         *     PROFILE_NOT_FOUND`: el ping no cruza regiones y un bot sin presencia no
+         *     está.
+         *
+         *     **Uno pendiente por par dirigido.** `A → B` y `B → A` son dos pings
+         *     distintos, pero `A → B` no puede tener dos pendientes a la vez: el segundo
+         *     es `409 PING_DUPLICATE` y el cliente muestra "ya le mandaste un ping". La
+         *     carrera la resuelve un índice único parcial, no un chequeo previo.
+         *
+         *     **Vencimiento.** Si el par tenía un pendiente que ya venció, la respuesta
+         *     es `410 PING_EXPIRED`: el anterior quedó cerrado y el cliente reintenta para
+         *     crear uno nuevo. Devuelve `410` y no `409` porque el ping que estorba ya no
+         *     existe como pendiente: lo que se perdió es la ventana, no el derecho.
+         *
+         *     **Bot.** Un bot acepta solo. El ping vuelve ya `accepted`, con `matchId` y
+         *     sin que ningún humano toque nada: es el camino que hace que la demo se
+         *     sienta viva.
+         *
+         *     **Cuota.** Hay un tope de envíos por ventana. Superarlo es `429
+         *     RATE_LIMITED`: el pedido está bien, falta cuota.
+         */
+        post: operations["createPing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pings/{pingId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acepta un ping y crea el match
+         * @description Sólo el destinatario (`toProfileId`) puede aceptar. El ping pasa a
+         *     `accepted` y nace un `Match` —uno por par, no uno por ping— que se devuelve
+         *     en el `200`.
+         *
+         *     **Idempotencia explícita.** Repetir el accept de un ping ya resuelto es
+         *     `409 PING_RESOLVED`, no un `200` con el match: el cliente tiene que saber
+         *     que su acción no cambió nada. Aun así, la base garantiza que no haya un
+         *     segundo match para el mismo par: el único lo impone la tabla, no la
+         *     aplicación.
+         *
+         *     Si el ping venció antes de llegar la aceptación, es `410 PING_EXPIRED` y no
+         *     se crea match.
+         */
+        post: operations["acceptPing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pings/{pingId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rechaza un ping
+         * @description Sólo el destinatario puede rechazar. El ping pasa a `rejected` y **no se
+         *     crea match**: `204`, sin body, porque no hay recurso nuevo que devolver.
+         *
+         *     Mismas guardas que aceptar: `403` si el ping no es tuyo, `404` si no
+         *     existe, `410` si venció y `409` si ya estaba resuelto. Rechazar dos veces
+         *     no es un `204` silencioso: es `409 PING_RESOLVED`, para que el cliente
+         *     sepa que el segundo toque no hizo nada.
+         */
+        post: operations["rejectPing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -492,7 +614,7 @@ export interface components {
             profileId: string;
         };
         /**
-         * @description Motivo del error, cerrado a estos 18 valores. `code` es el discriminante
+         * @description Motivo del error, cerrado a estos 21 valores. `code` es el discriminante
          *     estable: el cliente decide con él, nunca con `title` ni con `detail` (esos
          *     son texto para humanos, traducible y variable).
          *
@@ -501,7 +623,7 @@ export interface components {
          *     corresponde cada uno— vive en la spec del change.
          * @enum {string}
          */
-        ErrorCode: "UNAUTHENTICATED" | "TICKET_EXPIRED" | "TICKET_REUSED" | "REGION_MISMATCH" | "CHAT_BLOCKED" | "PROFILE_NOT_FOUND" | "MATCH_NOT_FOUND" | "PROFILE_IN_USE" | "PRESENCE_STALE" | "PING_DUPLICATE" | "CURSOR_EXPIRED" | "PING_EXPIRED" | "RATE_LIMITED" | "REGION_UNAVAILABLE" | "ZONE_UNKNOWN" | "VALIDATION_FAILED" | "INTERNAL" | "NOT_IMPLEMENTED";
+        ErrorCode: "UNAUTHENTICATED" | "TICKET_EXPIRED" | "TICKET_REUSED" | "REGION_MISMATCH" | "CHAT_BLOCKED" | "PING_FORBIDDEN" | "PROFILE_NOT_FOUND" | "MATCH_NOT_FOUND" | "PING_NOT_FOUND" | "PROFILE_IN_USE" | "PRESENCE_STALE" | "PING_DUPLICATE" | "PING_RESOLVED" | "CURSOR_EXPIRED" | "PING_EXPIRED" | "RATE_LIMITED" | "REGION_UNAVAILABLE" | "ZONE_UNKNOWN" | "VALIDATION_FAILED" | "INTERNAL" | "NOT_IMPLEMENTED";
         /**
          * @description Cuerpo único de error, RFC 9457 (`application/problem+json`). Toda respuesta
          *     4xx/5xx del contrato devuelve exactamente esto: un shape cerrado, sin campos
@@ -856,6 +978,153 @@ export interface components {
             results: components["schemas"]["ProfileSummary"][];
         };
         /**
+         * @description Estado del ping. `pending` es el único estado del que se puede salir; los
+         *     otros tres son terminales.
+         *
+         *     `expired` es el paso del tiempo, no una decisión de nadie: el server lo
+         *     aplica cuando `expiresAt` ya pasó, tanto al leer la bandeja como al intentar
+         *     resolver. Un ping vencido que nadie miró nunca no queda `pending` para
+         *     siempre.
+         *
+         *     La transición es la autoridad del estado, no el reloj del cliente: aceptar
+         *     un ping ya resuelto es `409 PING_RESOLVED` y aceptar uno vencido es
+         *     `410 PING_EXPIRED`, aunque el cliente crea que llegó a tiempo.
+         * @enum {string}
+         */
+        PingStatus: "pending" | "accepted" | "rejected" | "expired";
+        /**
+         * @description Body de `POST /pings`. Nombra el destinatario y nada más: el emisor es la
+         *     sesión (no se puede mandar un ping "de otro") y el TTL lo fija el server.
+         *
+         *     No hay mensaje, emoji ni contra-ping: el contenido del primer contacto no es
+         *     parte de esta versión del contrato. Un ping es una señal, no un chat.
+         */
+        PingCreate: {
+            /**
+             * @description `profileId` del destinatario tal como lo devolvió `GET /discovery`: un
+             *     humano del catálogo (`mx-p01`) o un bot (`mx-p01-b1`). Un `profileId` de
+             *     otra región es `404 PROFILE_NOT_FOUND` (el ping no cruza regiones) y el
+             *     propio es `422 VALIDATION_FAILED` (no se pinguea a sí mismo).
+             */
+            targetProfileId: string;
+        };
+        /**
+         * @description Un ping y su estado. Es lo que devuelve `201` de `POST /pings` y lo que
+         *     viaja adentro de cada fila de la bandeja.
+         *
+         *     `fromProfileId`/`toProfileId` son la dirección del ping y no cambian nunca.
+         *     `matchId` es el puente al `Match`: `null` mientras no haya match y el id del
+         *     match cuando `status` es `accepted`. Es lo que le permite al emisor enterarse
+         *     de que su ping fue aceptado y con qué match, sin un `GET /matches`.
+         */
+        Ping: {
+            /**
+             * Format: uuid
+             * @description Identidad del ping. Opaca para el cliente.
+             */
+            id: string;
+            /** @description Quien envió el ping. Para la bandeja de entrada, es "el otro". */
+            fromProfileId: string;
+            /** @description Quien lo recibió. Para la bandeja de enviados, es "el otro". */
+            toProfileId: string;
+            status: components["schemas"]["PingStatus"];
+            /**
+             * Format: date-time
+             * @description Cuándo se envió (RFC 3339 UTC con ms).
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description Cuándo deja de estar pendiente si nadie lo resuelve. Después de este
+             *     instante el ping es `expired` y aceptarlo o rechazarlo es
+             *     `410 PING_EXPIRED`.
+             */
+            expiresAt: string;
+            /**
+             * @description `Match` creado al aceptar, o `null` si todavía no hay match. Un ping
+             *     `rejected` o `expired` nunca tiene `matchId`.
+             */
+            matchId: string | null;
+        };
+        /**
+         * @description El otro lado del ping, reducido a lo que la bandeja dibuja: quién es y cómo
+         *     se ve. Nada de `distanceM`/`bearingDeg` (un ping no es un resultado de
+         *     descubrimiento y la distancia de hace horas no dice nada), nada de
+         *     coordenadas y nada del dataset que la fila no use.
+         *
+         *     Un bot hereda la proyección de su dueño (`nickname`, `initials`, `photoId`,
+         *     `intention`) y se distingue por `profileId` + `sourceType: bot`, igual que en
+         *     `GET /discovery`: no existe un segundo catálogo de personas para rellenar la
+         *     demo.
+         */
+        PingPeer: {
+            /** @description El `profileId` del otro perfil (humano o bot). */
+            profileId: string;
+            /** @description Nombre visible. */
+            nickname: string;
+            /** @description Iniciales para el avatar sin foto. */
+            initials: string;
+            intention: components["schemas"]["Intention"];
+            /**
+             * @description Id de la foto. El avatar se resuelve contra el bundle de la demo, igual
+             *     que en `ProfileSummary`: la imagen no viaja.
+             */
+            photoId: string;
+            sourceType: components["schemas"]["SourceType"];
+        };
+        /**
+         * @description Una fila de la bandeja: el ping y el otro perfil. La bandeja no repite el
+         *     shape del ping: lo anida, así el `Ping` sigue teniendo un solo lugar donde
+         *     declararse.
+         */
+        PingListItem: {
+            ping: components["schemas"]["Ping"];
+            peer: components["schemas"]["PingPeer"];
+        };
+        /**
+         * @description Respuesta de `GET /pings`: objeto con array adentro —mismo idioma que
+         *     `ProfileList`, `ZoneList` y `DiscoveryResult`—, no un array pelado.
+         *
+         *     Orden: `createdAt` descendente, que es "lo más nuevo arriba". Sin cursor: la
+         *     demo tiene pocos pings por perfil y el server corta en las 100 filas más
+         *     recientes (`maxItems`). Cuando la bandeja real necesite paginar, el cursor se
+         *     agrega con la misma forma que `GET /events/poll`.
+         */
+        PingList: {
+            pings: components["schemas"]["PingListItem"][];
+        };
+        /**
+         * @description El match que nace cuando el destinatario acepta un ping. Es **uno por par**:
+         *     dos personas pueden mandarse pings en las dos direcciones, pero el par
+         *     aceptado produce un solo match (`profileIds` es un conjunto, no una
+         *     secuencia).
+         *
+         *     `profileIds` viene ordenado por `profileId` ascendente, no `[yo, el otro]`:
+         *     los dos lados reciben exactamente el mismo objeto y el cliente sabe cuál es
+         *     el propio porque ya conoce su `profileId`.
+         *
+         *     No hay `GET /matches` ni chat en esta versión: el `Match` se entrega en el
+         *     `200` de aceptar y el emisor lo descubre por `Ping.matchId`. La conversación
+         *     llega en S5.
+         */
+        Match: {
+            /**
+             * Format: uuid
+             * @description Identidad del match. Opaca para el cliente.
+             */
+            id: string;
+            /**
+             * @description Los dos perfiles del match, ordenados por `profileId` ascendente. El
+             *     orden es parte del contrato: es lo que hace determinista el objeto.
+             */
+            profileIds: string[];
+            /**
+             * Format: date-time
+             * @description Cuándo se aceptó el ping que lo creó (RFC 3339 UTC con ms).
+             */
+            createdAt: string;
+        };
+        /**
          * @description Punto privado de la sesión, en grados decimales WGS 84. Es la contraparte de
          *     los vértices de `contract/catalog/zones.json`, que se guardan posicionales y
          *     en orden `[lng, lat]`; acá las dos componentes llevan nombre para que el body
@@ -1086,6 +1355,89 @@ export interface components {
             };
         };
         /**
+         * @description El ping existe pero la sesión no es su destinatario (`PING_FORBIDDEN`).
+         *     Es un 403 y no un 404: el recurso está, lo que falta es el derecho a
+         *     resolverlo. También es el 403 de `POST /pings` cuando la sesión no tiene
+         *     perfil propio (invitado de relleno): un invitado no es una persona a la
+         *     que otro pueda contestarle.
+         */
+        PingForbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El destinatario de `POST /pings` no existe para esta sesión
+         *     (`PROFILE_NOT_FOUND`): `profileId` de otra región, id inexistente, o un
+         *     bot cuyo dueño ya no tiene presencia viva. Un ping no cruza regiones y un
+         *     bot sin presencia no está.
+         */
+        PingTargetNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El `pingId` del path no existe (`PING_NOT_FOUND`). Un id malformado (no
+         *     uuid) es 422 `VALIDATION_FAILED`, no un 404: el pedido está mal escrito
+         *     antes de que el recurso falte.
+         */
+        PingNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El par dirigido ya tiene un ping pendiente (`PING_DUPLICATE`). No es un
+         *     error del cliente que se corrige con un body distinto: hay que esperar a
+         *     que el otro conteste o venza. La carrera entre dos envíos simultáneos la
+         *     resuelve un índice único parcial, no un chequeo previo.
+         */
+        PingDuplicate: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El ping ya no está pendiente (`PING_RESOLVED`): lo aceptaron, lo
+         *     rechazaron o lo cerró una aceptación previa. Repetir la acción no es un
+         *     no-op silencioso; el cliente se entera y deja de reintentar.
+         */
+        PingResolved: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El ping venció (`PING_EXPIRED`). En `POST /pings` es el pendiente del par
+         *     que ya pasó su `expiresAt`: queda cerrado y el próximo envío crea uno
+         *     nuevo. En `accept`/`reject` es un ping que se resolvió tarde: no hay
+         *     match. El reloj del server es la autoridad, no el del cliente.
+         */
+        PingExpired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
          * @description El pedido choca con el estado del slot demo (`PROFILE_IN_USE`). En
          *     `POST /auth/demo-session` es un slot que ya ocupa otra sesión viva: el
          *     claim no desaloja, así que el cliente tiene que elegir otro o pedir el
@@ -1257,6 +1609,89 @@ export interface components {
          *     implementación no. Así `x-implementation-sprint` es accionable.
          */
         "responses-NotImplemented": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El ping existe pero la sesión no es su destinatario (`PING_FORBIDDEN`).
+         *     Es un 403 y no un 404: el recurso está, lo que falta es el derecho a
+         *     resolverlo. También es el 403 de `POST /pings` cuando la sesión no tiene
+         *     perfil propio (invitado de relleno): un invitado no es una persona a la
+         *     que otro pueda contestarle.
+         */
+        "responses-PingForbidden": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El destinatario de `POST /pings` no existe para esta sesión
+         *     (`PROFILE_NOT_FOUND`): `profileId` de otra región, id inexistente, o un
+         *     bot cuyo dueño ya no tiene presencia viva. Un ping no cruza regiones y un
+         *     bot sin presencia no está.
+         */
+        "responses-PingTargetNotFound": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El par dirigido ya tiene un ping pendiente (`PING_DUPLICATE`). No es un
+         *     error del cliente que se corrige con un body distinto: hay que esperar a
+         *     que el otro conteste o venza. La carrera entre dos envíos simultáneos la
+         *     resuelve un índice único parcial, no un chequeo previo.
+         */
+        "responses-PingDuplicate": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El ping venció (`PING_EXPIRED`). En `POST /pings` es el pendiente del par
+         *     que ya pasó su `expiresAt`: queda cerrado y el próximo envío crea uno
+         *     nuevo. En `accept`/`reject` es un ping que se resolvió tarde: no hay
+         *     match. El reloj del server es la autoridad, no el del cliente.
+         */
+        "responses-PingExpired": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El `pingId` del path no existe (`PING_NOT_FOUND`). Un id malformado (no
+         *     uuid) es 422 `VALIDATION_FAILED`, no un 404: el pedido está mal escrito
+         *     antes de que el recurso falte.
+         */
+        "responses-PingNotFound": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El ping ya no está pendiente (`PING_RESOLVED`): lo aceptaron, lo
+         *     rechazaron o lo cerró una aceptación previa. Repetir la acción no es un
+         *     no-op silencioso; el cliente se entera y deja de reintentar.
+         */
+        "responses-PingResolved": {
             headers: {
                 [name: string]: unknown;
             };
@@ -1599,6 +2034,128 @@ export interface operations {
             429: components["responses"]["responses-RateLimited"];
             500: components["responses"]["responses-Internal"];
             501: components["responses"]["responses-NotImplemented"];
+        };
+    };
+    listPings: {
+        parameters: {
+            query: {
+                /**
+                 * @description Lado de la bandeja. Obligatorio a propósito: un default implícito haría
+                 *     que el cliente que olvida el parámetro crea que su inbox está vacío.
+                 */
+                box: "inbox" | "sent";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description La bandeja pedida, más nuevo primero. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PingList"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            422: components["responses"]["responses-Unprocessable"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    createPing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PingCreate"];
+            };
+        };
+        responses: {
+            /**
+             * @description Ping creado. `status` es `pending` o, si el destinatario es un bot,
+             *     `accepted` con `matchId` ya resuelto.
+             */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ping"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-PingForbidden"];
+            404: components["responses"]["responses-PingTargetNotFound"];
+            409: components["responses"]["responses-PingDuplicate"];
+            410: components["responses"]["responses-PingExpired"];
+            422: components["responses"]["responses-Unprocessable"];
+            429: components["responses"]["responses-RateLimited"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    acceptPing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Id del ping a aceptar. Un id malformado es 422, no 404. */
+                pingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ping aceptado y match resultante (el mismo para los dos perfiles). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Match"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-PingForbidden"];
+            404: components["responses"]["responses-PingNotFound"];
+            409: components["responses"]["responses-PingResolved"];
+            410: components["responses"]["responses-PingExpired"];
+            422: components["responses"]["responses-Unprocessable"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    rejectPing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Id del ping a rechazar. Un id malformado es 422, no 404. */
+                pingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ping rechazado. No hay match ni body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-PingForbidden"];
+            404: components["responses"]["responses-PingNotFound"];
+            409: components["responses"]["responses-PingResolved"];
+            410: components["responses"]["responses-PingExpired"];
+            422: components["responses"]["responses-Unprocessable"];
+            500: components["responses"]["responses-Internal"];
         };
     };
 }

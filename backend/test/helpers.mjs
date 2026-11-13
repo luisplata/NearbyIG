@@ -279,6 +279,73 @@ export async function listDiscovery(token, filters = {}) {
   return api(`/discovery${query === '' ? '' : `?${query}`}`, { token });
 }
 
+/**
+ * `POST /pings`. El body se manda tal cual: los casos de validación tienen que
+ * poder provocarse desde el test.
+ */
+export async function createPing(token, body) {
+  return api('/pings', { method: 'POST', token, body });
+}
+
+/** `GET /pings?box=`. `box` se manda tal cual (vacíos incluidos). */
+export async function listPings(token, box) {
+  const query = box === undefined ? '' : `?box=${encodeURIComponent(box)}`;
+  return api(`/pings${query}`, { token });
+}
+
+export async function acceptPing(token, pingId) {
+  return api(`/pings/${encodeURIComponent(pingId)}/accept`, { method: 'POST', token });
+}
+
+export async function rejectPing(token, pingId) {
+  return api(`/pings/${encodeURIComponent(pingId)}/reject`, { method: 'POST', token });
+}
+
+/** Vence un ping sin esperar 24 h: mueve `expires_at` al pasado. */
+export async function expirePing(pingId) {
+  await withDb((client) =>
+    client.query(
+      `UPDATE pings
+          SET created_at = now() - interval '2 days',
+              expires_at = now() - interval '1 day'
+        WHERE ping_id = $1`,
+      [pingId],
+    ),
+  );
+}
+
+/** Borra los pings y matches de un escenario. Pings primero por la FK. */
+export async function deletePingsOf(regionKey, profileIds) {
+  await withDb(async (client) => {
+    await client.query(
+      `DELETE FROM pings
+        WHERE region_key = $1
+          AND (from_profile_id = ANY($2::text[]) OR to_profile_id = ANY($2::text[]))`,
+      [regionKey, profileIds],
+    );
+    await client.query(
+      `DELETE FROM matches
+        WHERE region_key = $1
+          AND (profile_a_id = ANY($2::text[]) OR profile_b_id = ANY($2::text[]))`,
+      [regionKey, profileIds],
+    );
+  });
+}
+
+/** Cantidad de matches del par no dirigido, para probar "uno por par". */
+export async function countMatchesOf(regionKey, firstProfileId, secondProfileId) {
+  const [a, b] = [firstProfileId, secondProfileId].sort();
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT count(*)::int AS count
+         FROM matches
+        WHERE region_key = $1 AND profile_a_id = $2 AND profile_b_id = $3`,
+      [regionKey, a, b],
+    );
+    return rows[0].count;
+  });
+}
+
 /** `id` del envelope → `seq`. Sólo para comparar, igual que hace el cliente. */
 export function seqOfId(id) {
   const match = /^[a-z]{2}:([0-9]{12})$/.exec(id ?? '');

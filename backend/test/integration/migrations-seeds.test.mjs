@@ -1,7 +1,27 @@
 import assert from 'node:assert/strict';
-import { readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { before, describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { runScript, withDb } from '../helpers.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * El manifiesto del seed, resuelto como lo hace `scripts/seed.mjs`: en el host es
+ * `../../contract` y dentro del contenedor es `/seed` (bind mount de compose.dev).
+ * Se lee del archivo en vez de clavar el `contract_id`: un contrato nuevo no
+ * tiene que poner este test en rojo.
+ */
+async function seedManifest() {
+  const candidates = process.env.SEED_DIR
+    ? [resolve(process.env.SEED_DIR)]
+    : [resolve(HERE, '..', '..', '..', 'contract'), '/seed'];
+  const root = candidates.find((candidate) => existsSync(join(candidate, 'seed', 'manifest.json')));
+  assert.ok(root !== undefined, `no encuentro seed/manifest.json (probé ${candidates.join(', ')})`);
+  return JSON.parse(await readFile(join(root, 'seed', 'manifest.json'), 'utf8'));
+}
 
 /**
  * Migraciones y seeds: el criterio de aceptación es "correrlo dos veces no
@@ -129,11 +149,12 @@ describe('migraciones y seeds', () => {
   });
 
   test('la base recuerda qué seed se aplicó', async () => {
+    const manifest = await seedManifest();
     const { rows } = await withDb((client) =>
       client.query("SELECT key, value FROM demo_meta WHERE key IN ('seed_id', 'contract_id') ORDER BY key"),
     );
     const meta = Object.fromEntries(rows.map((row) => [row.key, row.value]));
-    assert.equal(meta.contract_id, '7203b8216b58');
-    assert.equal(meta.seed_id, 'seed-19573897bae5');
+    assert.equal(meta.contract_id, manifest.contractId, 'la base corrió el contrato vigente');
+    assert.equal(meta.seed_id, manifest.seedId, 'la base corrió el seed vigente');
   });
 });

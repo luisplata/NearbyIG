@@ -15,14 +15,15 @@ import type { AuthContext, SourceType } from '../auth/session.types';
  * que su shape es propio y nadie lo consume como cliente.
  *
  * Qué borra y qué no:
- *   * Borra `sessions` (invitados incluidos), `stream_tickets`, `bots`, `events`
- *     y `event_seq`: es el estado que ocupa slots, que sobrevive a un refresh y
- *     que hace que el stream de una corrida no se mezcle con el de la anterior.
+ *   * Borra `sessions` (invitados incluidos), `stream_tickets`, `bots`, `events`,
+ *     `event_seq`, `pings` y `matches`: es el estado que ocupa slots, que
+ *     sobrevive a un refresh, que hace que el stream de una corrida no se mezcle
+ *     con el de la anterior y que deja la bandeja de pings vacía.
  *   * **No** borra `regions`, `zones`, `profiles`, `presence` ni `demo_meta`: el
  *     catálogo lo escribe el seed y la presencia cae en cascada con la sesión.
  *     Los 10 slots quedan libres sólo porque no hay sesiones vivas.
- *   * Pings, matches y chat todavía no existen (S4+). Cuando existan, se suman
- *     acá: éste es el único punto de limpieza de datos de demo.
+ *   * Chat todavía no existe (S4+). Cuando exista, se suma acá: éste es el único
+ *     punto de limpieza de datos de demo.
  */
 export interface ResetSelfResult {
   readonly scope: 'self';
@@ -121,6 +122,10 @@ export class ResetService {
       // El log de eventos y los bots son estado de demo: un reset global tiene
       // que dejar la demo como recién migrada, con el stream vacío y el `seq` de
       // cada región volviendo a 1. La presencia cae en cascada con las sesiones.
+      // Pings antes que matches: `pings.match_id` apunta a `matches`, así que
+      // las dos tablas no se pueden vaciar en cualquier orden.
+      const pings = await client.query('DELETE FROM pings');
+      const matches = await client.query('DELETE FROM matches');
       await client.query('DELETE FROM bots');
       await client.query('DELETE FROM events');
       await client.query('DELETE FROM event_seq');
@@ -145,7 +150,7 @@ export class ResetService {
         })),
       };
       this.logger.log(
-        `reset global sessions=${result.sessionsDeleted} guests=${result.guestsDeleted} tickets=${result.ticketsDeleted}`,
+        `reset global sessions=${result.sessionsDeleted} guests=${result.guestsDeleted} tickets=${result.ticketsDeleted} pings=${pings.rowCount ?? 0} matches=${matches.rowCount ?? 0}`,
       );
       return result;
     } catch (error) {

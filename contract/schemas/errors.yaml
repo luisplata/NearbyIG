@@ -16,13 +16,16 @@ ErrorCode:
     # 403 — región y bloqueo
     - REGION_MISMATCH
     - CHAT_BLOCKED
+    - PING_FORBIDDEN
     # 404 — recurso
     - PROFILE_NOT_FOUND
     - MATCH_NOT_FOUND
+    - PING_NOT_FOUND
     # 409 — estado que el cliente no esperaba
     - PROFILE_IN_USE
     - PRESENCE_STALE
     - PING_DUPLICATE
+    - PING_RESOLVED
     # 410 — lo que estaba ya no está
     - CURSOR_EXPIRED
     - PING_EXPIRED
@@ -36,7 +39,7 @@ ErrorCode:
     - INTERNAL
     - NOT_IMPLEMENTED
   description: |
-    Motivo del error, cerrado a estos 18 valores. `code` es el discriminante
+    Motivo del error, cerrado a estos 21 valores. `code` es el discriminante
     estable: el cliente decide con él, nunca con `title` ni con `detail` (esos
     son texto para humanos, traducible y variable).
 
@@ -53,11 +56,14 @@ ErrorCode:
     TICKET_REUSED: 401
     REGION_MISMATCH: 403
     CHAT_BLOCKED: 403
+    PING_FORBIDDEN: 403
     PROFILE_NOT_FOUND: 404
     MATCH_NOT_FOUND: 404
+    PING_NOT_FOUND: 404
     PROFILE_IN_USE: 409
     PRESENCE_STALE: 409
     PING_DUPLICATE: 409
+    PING_RESOLVED: 409
     CURSOR_EXPIRED: 410
     PING_EXPIRED: 410
     RATE_LIMITED: 429
@@ -67,16 +73,18 @@ ErrorCode:
     INTERNAL: 500
     NOT_IMPLEMENTED: 501
 
-  # Códigos que existen para S4/S5 (chat, matches, pings) y todavía no tienen
-  # operation en la superficie congelada S1–S3. La marca no es decorativa: es lo
-  # único que permite exigir "cada código no reservado se usa al menos una vez"
-  # sin inventar paths que la spec prohíbe. Cuando S4/S5 cablee su path, el
-  # código se saca de acá y queda sujeto a la regla de uso como cualquier otro.
+  # Códigos que existen para S5 (chat y matches como recurso propio) y todavía
+  # no tienen operation. La marca no es decorativa: es lo único que permite
+  # exigir "cada código no reservado se usa al menos una vez" sin inventar paths
+  # que la spec prohíbe. Cuando S5 cablee su path, el código se saca de acá y
+  # queda sujeto a la regla de uso como cualquier otro.
+  #
+  # v0.3 sacó `PING_DUPLICATE` y `PING_EXPIRED`: los pings ya tienen operations y
+  # los dos códigos se usan de verdad. `MATCH_NOT_FOUND` sigue reservado porque
+  # todavía no hay `GET /matches/{id}`, y `CHAT_BLOCKED` porque no hay chat.
   x-reserved:
     CHAT_BLOCKED: true
     MATCH_NOT_FOUND: true
-    PING_DUPLICATE: true
-    PING_EXPIRED: true
 
 Problem:
   type: object

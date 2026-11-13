@@ -1,0 +1,237 @@
+# Pings (Sprint 4): enviar, mirar la bandeja y resolver.
+#
+# Cuatro operations, una máquina de estados:
+#
+#   POST /pings                      → 201 Ping (pending, o accepted si el destino es un bot)
+#   GET  /pings?box=inbox|sent       → 200 PingList, más nuevo primero
+#   POST /pings/{pingId}/accept      → 200 Match (uno por par)
+#   POST /pings/{pingId}/reject      → 204, sin match
+#
+# Reglas que el contrato fija y el server no reinterpreta:
+#
+# | Caso | Respuesta | Por qué |
+# |---|---|---|
+# | ping a sí mismo | 422 VALIDATION_FAILED | El body está bien; el pedido no |
+# | destino de otra región o inexistente | 404 PROFILE_NOT_FOUND | Un ping no cruza regiones |
+# | destino es un bot sin dueño vivo | 404 PROFILE_NOT_FOUND | Sin presencia el bot no existe |
+# | par ya tiene un ping pendiente | 409 PING_DUPLICATE | Un pendiente por par dirigido |
+# | el pendiente del par ya venció | 410 PING_EXPIRED | El anterior se cerró; reintentar crea uno nuevo |
+# | cuota de envíos agotada | 429 RATE_LIMITED | El body no se corrige, se espera |
+# | aceptar/rechazar un ping ajeno | 403 PING_FORBIDDEN | Sólo el destinatario resuelve |
+# | aceptar/rechazar un ping ya resuelto | 409 PING_RESOLVED | Un solo match por par |
+# | aceptar/rechazar un ping vencido | 410 PING_EXPIRED | El reloj del server es la autoridad |
+#
+# **Bot.** Si el destinatario es un bot, el server acepta el ping en la misma
+# transacción y devuelve `201` con `status: accepted` y `matchId`. La demo se
+# siente viva sin un job que despierte bots a los 2 s, y el cliente no tiene un
+# caso especial: mira el mismo `Ping`.
+#
+# **Sin coordenadas.** Ninguna response de este archivo lleva `lat`/`lng` ni
+# `distanceM`/`bearingDeg`.
+
+pings:
+  post:
+    operationId: createPing
+    summary: Envía un ping a un perfil
+    description: |
+      Crea un ping del perfil de la sesión hacia `targetProfileId` y devuelve la
+      fila con su estado. `201`, no `200`: el ping es un recurso nuevo con
+      identidad propia.
+
+      **Destinatario.** Tiene que existir en la región de la sesión: un humano
+      del catálogo o un bot con dueño vivo. Un `profileId` de otra región, uno
+      inexistente y un bot cuyo dueño ya no tiene presencia son todos `404
+      PROFILE_NOT_FOUND`: el ping no cruza regiones y un bot sin presencia no
+      está.
+
+      **Uno pendiente por par dirigido.** `A → B` y `B → A` son dos pings
+      distintos, pero `A → B` no puede tener dos pendientes a la vez: el segundo
+      es `409 PING_DUPLICATE` y el cliente muestra "ya le mandaste un ping". La
+      carrera la resuelve un índice único parcial, no un chequeo previo.
+
+      **Vencimiento.** Si el par tenía un pendiente que ya venció, la respuesta
+      es `410 PING_EXPIRED`: el anterior quedó cerrado y el cliente reintenta para
+      crear uno nuevo. Devuelve `410` y no `409` porque el ping que estorba ya no
+      existe como pendiente: lo que se perdió es la ventana, no el derecho.
+
+      **Bot.** Un bot acepta solo. El ping vuelve ya `accepted`, con `matchId` y
+      sin que ningún humano toque nada: es el camino que hace que la demo se
+      sienta viva.
+
+      **Cuota.** Hay un tope de envíos por ventana. Superarlo es `429
+      RATE_LIMITED`: el pedido está bien, falta cuota.
+    tags:
+      - pings
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/pings.yaml#/PingCreate'
+    responses:
+      '201':
+        description: |
+          Ping creado. `status` es `pending` o, si el destinatario es un bot,
+          `accepted` con `matchId` ya resuelto.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/pings.yaml#/Ping'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/PingForbidden'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/PingTargetNotFound'
+      '409':
+        $ref: '../openapi.yaml#/components/responses/PingDuplicate'
+      '410':
+        $ref: '../openapi.yaml#/components/responses/PingExpired'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '429':
+        $ref: '../openapi.yaml#/components/responses/RateLimited'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 4
+
+  get:
+    operationId: listPings
+    summary: Lista la bandeja de pings
+    description: |
+      Los pings del perfil de la sesión, más nuevo primero (`createdAt`
+      descendente). `box` elige el lado de la dirección:
+
+      * `inbox` — los que recibió (`toProfileId` = la sesión);
+      * `sent` — los que envió (`fromProfileId` = la sesión).
+
+      Cada fila es `PingListItem`: el ping y la proyección del **otro** perfil
+      (nickname, iniciales, foto e intención). Ni coordenadas ni distancias: la
+      bandeja cuenta quién escribió, no dónde está.
+
+      **Vencimiento perezoso.** Antes de listar, el server marca `expired` los
+      pendientes cuya hora pasó. El cliente no tiene que recalcular nada: si ve
+      `pending`, todavía se puede aceptar.
+
+      Sin cursor: devuelve hasta las 100 más recientes (`maxItems` del schema).
+      La demo no tiene volumen para paginar y un cursor inventado obligaría al
+      cliente a un loop que no necesita.
+    tags:
+      - pings
+    parameters:
+      - name: box
+        in: query
+        required: true
+        description: |
+          Lado de la bandeja. Obligatorio a propósito: un default implícito haría
+          que el cliente que olvida el parámetro crea que su inbox está vacío.
+        schema:
+          type: string
+          enum:
+            - inbox
+            - sent
+    responses:
+      '200':
+        description: La bandeja pedida, más nuevo primero.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/pings.yaml#/PingList'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 4
+
+pings-accept:
+  post:
+    operationId: acceptPing
+    summary: Acepta un ping y crea el match
+    description: |
+      Sólo el destinatario (`toProfileId`) puede aceptar. El ping pasa a
+      `accepted` y nace un `Match` —uno por par, no uno por ping— que se devuelve
+      en el `200`.
+
+      **Idempotencia explícita.** Repetir el accept de un ping ya resuelto es
+      `409 PING_RESOLVED`, no un `200` con el match: el cliente tiene que saber
+      que su acción no cambió nada. Aun así, la base garantiza que no haya un
+      segundo match para el mismo par: el único lo impone la tabla, no la
+      aplicación.
+
+      Si el ping venció antes de llegar la aceptación, es `410 PING_EXPIRED` y no
+      se crea match.
+    tags:
+      - pings
+    parameters:
+      - name: pingId
+        in: path
+        required: true
+        description: Id del ping a aceptar. Un id malformado es 422, no 404.
+        schema:
+          type: string
+          format: uuid
+    responses:
+      '200':
+        description: Ping aceptado y match resultante (el mismo para los dos perfiles).
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/pings.yaml#/Match'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/PingForbidden'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/PingNotFound'
+      '409':
+        $ref: '../openapi.yaml#/components/responses/PingResolved'
+      '410':
+        $ref: '../openapi.yaml#/components/responses/PingExpired'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 4
+
+pings-reject:
+  post:
+    operationId: rejectPing
+    summary: Rechaza un ping
+    description: |
+      Sólo el destinatario puede rechazar. El ping pasa a `rejected` y **no se
+      crea match**: `204`, sin body, porque no hay recurso nuevo que devolver.
+
+      Mismas guardas que aceptar: `403` si el ping no es tuyo, `404` si no
+      existe, `410` si venció y `409` si ya estaba resuelto. Rechazar dos veces
+      no es un `204` silencioso: es `409 PING_RESOLVED`, para que el cliente
+      sepa que el segundo toque no hizo nada.
+    tags:
+      - pings
+    parameters:
+      - name: pingId
+        in: path
+        required: true
+        description: Id del ping a rechazar. Un id malformado es 422, no 404.
+        schema:
+          type: string
+          format: uuid
+    responses:
+      '204':
+        description: Ping rechazado. No hay match ni body.
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/PingForbidden'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/PingNotFound'
+      '409':
+        $ref: '../openapi.yaml#/components/responses/PingResolved'
+      '410':
+        $ref: '../openapi.yaml#/components/responses/PingExpired'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 4

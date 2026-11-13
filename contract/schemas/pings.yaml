@@ -1,0 +1,231 @@
+# Pings y matches (Sprint 4): el primer paso del flujo de conexión.
+#
+# Un ping es una propuesta unidireccional de `fromProfileId` a `toProfileId`.
+# Nace `pending`, y sólo puede salir de ahí de tres maneras: el destinatario lo
+# acepta (y nace un `Match`), lo rechaza, o vence. No hay cuarto estado y no se
+# puede volver a `pending`: el enum es la máquina de estados completa.
+#
+# Regla de la casa: ningún DTO expone coordenadas. Un ping no lleva el punto de
+# nadie ni `distanceM`/`bearingDeg`; la cercanía ya la resolvió `GET /discovery`
+# antes de que el cliente eligiera a quién pinguear.
+#
+# `Ping` es la fila cruda del recurso. La bandeja (`PingList`) no la devuelve
+# pelada: cada fila es `PingListItem { ping, peer }` porque la lista tiene que
+# mostrar **al otro** —nickname, foto e intención— sin que el cliente cruce el
+# ping contra `/demo/profiles` (que además no conoce a los bots). Anidar el ping
+# en vez de aplanar sus seis campos evita una segunda copia del mismo shape que
+# se desincronice cuando el ping crezca.
+
+PingStatus:
+  type: string
+  enum:
+    - pending
+    - accepted
+    - rejected
+    - expired
+  description: |
+    Estado del ping. `pending` es el único estado del que se puede salir; los
+    otros tres son terminales.
+
+    `expired` es el paso del tiempo, no una decisión de nadie: el server lo
+    aplica cuando `expiresAt` ya pasó, tanto al leer la bandeja como al intentar
+    resolver. Un ping vencido que nadie miró nunca no queda `pending` para
+    siempre.
+
+    La transición es la autoridad del estado, no el reloj del cliente: aceptar
+    un ping ya resuelto es `409 PING_RESOLVED` y aceptar uno vencido es
+    `410 PING_EXPIRED`, aunque el cliente crea que llegó a tiempo.
+
+PingCreate:
+  type: object
+  additionalProperties: false
+  required:
+    - targetProfileId
+  description: |
+    Body de `POST /pings`. Nombra el destinatario y nada más: el emisor es la
+    sesión (no se puede mandar un ping "de otro") y el TTL lo fija el server.
+
+    No hay mensaje, emoji ni contra-ping: el contenido del primer contacto no es
+    parte de esta versión del contrato. Un ping es una señal, no un chat.
+  properties:
+    targetProfileId:
+      type: string
+      minLength: 1
+      description: |
+        `profileId` del destinatario tal como lo devolvió `GET /discovery`: un
+        humano del catálogo (`mx-p01`) o un bot (`mx-p01-b1`). Un `profileId` de
+        otra región es `404 PROFILE_NOT_FOUND` (el ping no cruza regiones) y el
+        propio es `422 VALIDATION_FAILED` (no se pinguea a sí mismo).
+
+Ping:
+  type: object
+  additionalProperties: false
+  required:
+    - id
+    - fromProfileId
+    - toProfileId
+    - status
+    - createdAt
+    - expiresAt
+    - matchId
+  description: |
+    Un ping y su estado. Es lo que devuelve `201` de `POST /pings` y lo que
+    viaja adentro de cada fila de la bandeja.
+
+    `fromProfileId`/`toProfileId` son la dirección del ping y no cambian nunca.
+    `matchId` es el puente al `Match`: `null` mientras no haya match y el id del
+    match cuando `status` es `accepted`. Es lo que le permite al emisor enterarse
+    de que su ping fue aceptado y con qué match, sin un `GET /matches`.
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Identidad del ping. Opaca para el cliente.
+    fromProfileId:
+      type: string
+      minLength: 1
+      description: Quien envió el ping. Para la bandeja de entrada, es "el otro".
+    toProfileId:
+      type: string
+      minLength: 1
+      description: Quien lo recibió. Para la bandeja de enviados, es "el otro".
+    status:
+      $ref: '#/PingStatus'
+    createdAt:
+      type: string
+      format: date-time
+      description: Cuándo se envió (RFC 3339 UTC con ms).
+    expiresAt:
+      type: string
+      format: date-time
+      description: |
+        Cuándo deja de estar pendiente si nadie lo resuelve. Después de este
+        instante el ping es `expired` y aceptarlo o rechazarlo es
+        `410 PING_EXPIRED`.
+    matchId:
+      type:
+        - string
+        - 'null'
+      description: |
+        `Match` creado al aceptar, o `null` si todavía no hay match. Un ping
+        `rejected` o `expired` nunca tiene `matchId`.
+
+PingPeer:
+  type: object
+  additionalProperties: false
+  required:
+    - profileId
+    - nickname
+    - initials
+    - intention
+    - photoId
+    - sourceType
+  description: |
+    El otro lado del ping, reducido a lo que la bandeja dibuja: quién es y cómo
+    se ve. Nada de `distanceM`/`bearingDeg` (un ping no es un resultado de
+    descubrimiento y la distancia de hace horas no dice nada), nada de
+    coordenadas y nada del dataset que la fila no use.
+
+    Un bot hereda la proyección de su dueño (`nickname`, `initials`, `photoId`,
+    `intention`) y se distingue por `profileId` + `sourceType: bot`, igual que en
+    `GET /discovery`: no existe un segundo catálogo de personas para rellenar la
+    demo.
+  properties:
+    profileId:
+      type: string
+      minLength: 1
+      description: El `profileId` del otro perfil (humano o bot).
+    nickname:
+      type: string
+      minLength: 1
+      description: Nombre visible.
+    initials:
+      type: string
+      minLength: 1
+      description: Iniciales para el avatar sin foto.
+    intention:
+      $ref: './common.yaml#/Intention'
+    photoId:
+      type: string
+      minLength: 1
+      description: |
+        Id de la foto. El avatar se resuelve contra el bundle de la demo, igual
+        que en `ProfileSummary`: la imagen no viaja.
+    sourceType:
+      $ref: './common.yaml#/SourceType'
+
+PingListItem:
+  type: object
+  additionalProperties: false
+  required:
+    - ping
+    - peer
+  description: |
+    Una fila de la bandeja: el ping y el otro perfil. La bandeja no repite el
+    shape del ping: lo anida, así el `Ping` sigue teniendo un solo lugar donde
+    declararse.
+  properties:
+    ping:
+      $ref: '#/Ping'
+    peer:
+      $ref: '#/PingPeer'
+
+PingList:
+  type: object
+  additionalProperties: false
+  required:
+    - pings
+  description: |
+    Respuesta de `GET /pings`: objeto con array adentro —mismo idioma que
+    `ProfileList`, `ZoneList` y `DiscoveryResult`—, no un array pelado.
+
+    Orden: `createdAt` descendente, que es "lo más nuevo arriba". Sin cursor: la
+    demo tiene pocos pings por perfil y el server corta en las 100 filas más
+    recientes (`maxItems`). Cuando la bandeja real necesite paginar, el cursor se
+    agrega con la misma forma que `GET /events/poll`.
+  properties:
+    pings:
+      type: array
+      maxItems: 100
+      items:
+        $ref: '#/PingListItem'
+
+Match:
+  type: object
+  additionalProperties: false
+  required:
+    - id
+    - profileIds
+    - createdAt
+  description: |
+    El match que nace cuando el destinatario acepta un ping. Es **uno por par**:
+    dos personas pueden mandarse pings en las dos direcciones, pero el par
+    aceptado produce un solo match (`profileIds` es un conjunto, no una
+    secuencia).
+
+    `profileIds` viene ordenado por `profileId` ascendente, no `[yo, el otro]`:
+    los dos lados reciben exactamente el mismo objeto y el cliente sabe cuál es
+    el propio porque ya conoce su `profileId`.
+
+    No hay `GET /matches` ni chat en esta versión: el `Match` se entrega en el
+    `200` de aceptar y el emisor lo descubre por `Ping.matchId`. La conversación
+    llega en S5.
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Identidad del match. Opaca para el cliente.
+    profileIds:
+      type: array
+      minItems: 2
+      maxItems: 2
+      description: |
+        Los dos perfiles del match, ordenados por `profileId` ascendente. El
+        orden es parte del contrato: es lo que hace determinista el objeto.
+      items:
+        type: string
+        minLength: 1
+    createdAt:
+      type: string
+      format: date-time
+      description: Cuándo se aceptó el ping que lo creó (RFC 3339 UTC con ms).

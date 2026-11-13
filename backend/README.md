@@ -325,6 +325,58 @@ posiciones del radar salen de discovery** (y se interpolan entre snapshots);
 a la fila de discovery de un tercero. Las dos proyecciones **sí** coinciden en el
 conjunto de perfiles visibles, que es lo que corrigió S3-A.
 
+### Pings y matches (Sprint 4)
+
+El flujo de conexión mínimo: **enviar ping → ver la bandeja → aceptar o rechazar →
+match**. Sin chat (llega en S5) y sin `GET /matches`: el match viaja en el `200` de
+aceptar y `Ping.matchId` lo publica en la bandeja.
+
+```bash
+API=http://localhost:3000
+A=$(curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":1}')
+B=$(curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":2}')
+TA=$(printf '%s' "$A" | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+TB=$(printf '%s' "$B" | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+PB=$(printf '%s' "$B" | node -pe 'JSON.parse(require("fs").readFileSync(0)).profileId')
+
+# A pinguea a B → 201 Ping pending
+PING=$(curl -s -X POST $API/pings -H "Authorization: Bearer $TA"   -H 'content-type: application/json' -d "{\"targetProfileId\":\"$PB\"}")
+ID=$(printf '%s' "$PING" | node -pe 'JSON.parse(require("fs").readFileSync(0)).id')
+
+# B lo ve en su inbox, con el peer ya proyectado
+curl -s "$API/pings?box=inbox" -H "Authorization: Bearer $TB"
+
+# B acepta → 200 Match; A lo ve aceptado en su bandeja de enviados
+curl -s -X POST $API/pings/$ID/accept -H "Authorization: Bearer $TB"
+curl -s "$API/pings?box=sent" -H "Authorization: Bearer $TA"
+```
+
+| Regla | Cómo |
+|---|---|
+| un pendiente por par dirigido | índice único parcial; el segundo envío es `409 PING_DUPLICATE` |
+| un match por par | `UNIQUE (region_key, profile_a_id, profile_b_id)` con el par ordenado |
+| aceptar/rechazar dos veces | `409 PING_RESOLVED` (idempotencia explícita, no un 204 silencioso) |
+| vencimiento | 24 h (`expiresAt`); perezoso, al leer y al resolver; `410 PING_EXPIRED` |
+| sólo el destinatario resuelve | `403 PING_FORBIDDEN` |
+| el bot acepta solo | si el destino es `<owner>-b1`, el `201` vuelve ya `accepted` con `matchId` |
+| cuota | 30 envíos por minuto por perfil; después, `429 RATE_LIMITED` |
+| sin coordenadas | ni `lat`/`lng` ni `distanceM`/`bearingDeg` en ninguna response |
+
+**Por qué el bot acepta en la misma transacción.** Un job que despierte bots "a
+los 2 s" sería otro proceso, otra tabla de agenda y otro estado que puede quedar a
+medio camino. Aceptar en el `INSERT` da el mismo resultado para la demo y el
+cliente no tiene un caso especial: mira el mismo `Ping`.
+
+**Por qué la bandeja es `{ ping, peer }`.** La fila muestra al **otro**: nickname,
+iniciales, foto e intención. Sin `peer`, el cliente tendría que cruzar el ping
+contra `/demo/profiles`, que además no conoce a los bots. El peer de un bot hereda
+la proyección de su dueño y se distingue por `sourceType`, igual que en discovery.
+
+**Por qué `reset` global los borra.** `pings` y `matches` son estado de demo, no
+catálogo: el reset global los vacía (pings primero, por la FK) y deja la bandeja
+como recién migrada. El reset propio **no** los toca: cerrar sesión no borra la
+bandeja de un perfil, que es lo mismo que pasa con los pings que ya recibió.
+
 ### CORS
 
 La API responde `Access-Control-Allow-Origin` sólo a los orígenes de una allowlist
@@ -410,6 +462,7 @@ Migraciones actuales:
 | 002 | `002_presence.sql` | `presence` (una fila por sesión, `Point,4326` privado, `expires_at`) | `DROP TABLE presence`; catálogo y sesiones intactas |
 | 003 | `003_bots_events.sql` | `bots`, `bot_waypoints`, `event_seq`, `events` | dropea las 4 tablas; catálogo, sesiones y presencia intactas |
 | 004 | `004_bots_anchor.sql` | `bots.anchor` (ancla privada del loop) + vista `presence_anchors` (punto del dueño: GPS o centroide de su zona) | `DROP VIEW presence_anchors` + `DROP COLUMN bots.anchor`; los bots siguen y el ticker los vuelve a sembrar con el ancla de zona |
+| 005 | `005_pings.sql` | `pings` (un pendiente por par dirigido, TTL y estados) + `matches` (un match por par) | `DROP TABLE pings` y después `matches`; catálogo, sesiones, presencia y bots intactos |
 
 `002` es aditiva y reversible sin pérdida: la única tabla nueva referencia a
 `sessions` y `zones` (no al revés), así que el `down` no desarma nada. Aplicar y
@@ -469,9 +522,10 @@ real → zona, fallback, TTL, cambio de región, `DELETE`), bots (2 por humano,
 waypoints, ghost, cap de 6, aislamiento regional), ancla de los bots (la persona
 con GPS vs. el centroide de la zona demo, reubicación por desplazamiento),
 descubrimiento (5 perfiles con los bots propios, medidas por observador, filtros y
-combinados, 422, ghost, región, cap y tope de página), eventos (ticket, cursor,
-replay, paridad SSE↔polling, dedupe), logs sin PII y migraciones/seeds
-idempotentes + `ST_Covers`.
+combinados, 422, ghost, región, cap y tope de página), pings y matches (bandeja de
+los dos lados, dedupe, aceptar/rechazar, bot que acepta solo, vencimiento y el
+único match por par), eventos (ticket, cursor, replay, paridad SSE↔polling,
+dedupe), logs sin PII y migraciones/seeds idempotentes + `ST_Covers`.
 
 Los tests del mundo (`bots`, `events`, `discovery`) empujan el vencimiento de las
 presencias del escenario con un `UPDATE` (`extendPresence`) para no depender de los
@@ -509,6 +563,7 @@ guarda antes y las repone al terminar.
 | `bots.test.mjs` | 2 bots por humano con `profileId` estable, waypoints y métricas, bots propios dentro del stream, ghost, cap de 6, aislamiento mx/co |
 | `bots-anchor.test.mjs` | ancla en la persona (GPS en el norte de Bogotá), `demoZoneKey` ⇒ centroide, reubicación por desplazamiento > 250 m, ruido de GPS que no recrea, borde del polígono sin recorte |
 | `discovery.test.mjs` | 5 perfiles (1 humano + 4 bots), medidas por observador vs ancla, radio, filtros y combinados, 422, ghost, región, cap de 6 y tope de 10 |
+| `pings.test.mjs` | 201 pendiente, inbox/sent con `peer`, `409 PING_DUPLICATE`, accept → un match por par, reject 204, bot que acepta solo, 403/404/410/422 y bandeja que sobrevive al logout |
 | `events.test.mjs` | ticket de un uso, `Last-Event-ID`, cursor y `limit` 422/410, página vacía, paridad SSE↔polling, `profile.presence`, dedupe |
 | `migrations-seeds.test.mjs` | idempotencia de migraciones y seeds, `ST_Covers` |
 
@@ -527,7 +582,11 @@ guarda antes y las repone al terminar.
 | `GET /events?ticket=` | ticket | `paths/events.yaml` | SSE: `retry: 5000`, `Last-Event-ID`, `: keepalive` cada 15 s; `401 TICKET_EXPIRED`/`TICKET_REUSED`; `410 CURSOR_EXPIRED`; `422` |
 | `GET /events/poll?cursor=&limit=` | Bearer | `paths/events.yaml` | `EventsPage` del mismo log; `limit` 1..500 (default 100); misma secuencia que el SSE desde el mismo cursor |
 | `GET /discovery?radiusM=&intention=&gender=&verified=&online=` | Bearer | `paths/discovery.yaml` | `DiscoveryResult`: filas `ProfileSummary` ordenadas por distancia, medidas desde el observador; `422 VALIDATION_FAILED` fuera de rango |
-| `POST /demo/reset` | — | **no** | reset global: borra sesiones e invitados, no el catálogo (§11) |
+| `POST /pings` | Bearer | `paths/pings.yaml` | `201 Ping`; `409 PING_DUPLICATE`; `404 PROFILE_NOT_FOUND`; `410 PING_EXPIRED`; `429 RATE_LIMITED`; un bot vuelve `accepted` |
+| `GET /pings?box=inbox\|sent` | Bearer | `paths/pings.yaml` | `PingList` (`{ping, peer}`) más nuevo primero; `422 VALIDATION_FAILED` sin `box` |
+| `POST /pings/{pingId}/accept` | Bearer | `paths/pings.yaml` | `200 Match`; `403 PING_FORBIDDEN`; `404 PING_NOT_FOUND`; `409 PING_RESOLVED`; `410 PING_EXPIRED` |
+| `POST /pings/{pingId}/reject` | Bearer | `paths/pings.yaml` | `204` sin cuerpo; mismas guardas que accept; nunca crea match |
+| `POST /demo/reset` | — | **no** | reset global: borra sesiones, invitados, bots, eventos, pings y matches; no el catálogo (§11) |
 | `POST /demo/reset/self` | Bearer | **no** | reset de la propia sesión; idempotente |
 
 ### Takeover: por qué es otra operation
@@ -601,6 +660,8 @@ DTOs de la demo. El shape es propio y sólo lo consumen Docker y el runbook.
 | `bot_waypoints` | `(region_key, bot_profile_id, waypoint_index)` | 4 waypoints por bot, `geometry(Point, 4326)` privados; cascada con el bot |
 | `event_seq` | `region_key` | contador monotónico por región (el orden de `id`) |
 | `events` | `(region_key, seq)` | log de las dos proyecciones; `payload` jsonb sin coordenadas; retención de 5000 por región |
+| `pings` | `ping_id` | un pendiente por par dirigido (índice único parcial); `pending` ⇔ `resolved_at IS NULL`; `accepted` ⇔ `match_id IS NOT NULL`; TTL 24 h |
+| `matches` | `match_id` | **uno por par no dirigido** (`UNIQUE (region_key, profile_a_id, profile_b_id)` con `a < b`) |
 | `demo_meta` | `key` | `seed_id` y `contract_id` aplicados |
 
 El slot se reclama con la base, no con un `SELECT` previo: si dos navegadores piden
@@ -630,9 +691,10 @@ curl -s -X POST http://localhost:3000/demo/reset/self -H "Authorization: Bearer 
 ```
 
 Los dos son idempotentes: repetirlos devuelve `sessionsDeleted: 0` y no rompe nada.
-El global además vacía `bots`, `events` y `event_seq`: la demo arranca con el stream
-vacío y el `seq` de cada región en 1. El reset propio retira los bots de su perfil en
-la misma transacción (no espera al tick).
+El global además vacía `bots`, `events`, `event_seq`, `pings` y `matches`: la demo
+arranca con el stream vacío, el `seq` de cada región en 1 y la bandeja limpia. El
+reset propio retira los bots de su perfil en la misma transacción (no espera al
+tick) pero **no** borra pings ni matches: cerrar sesión no vacía una bandeja.
 
 ## Imágenes y compose
 

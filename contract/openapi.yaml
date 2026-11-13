@@ -9,12 +9,12 @@ openapi: 3.1.0
 
 info:
   title: NearbyIG API
-  version: 0.2.0
-  summary: Contrato congelado de la demo (S1–S3).
+  version: 0.3.0
+  summary: Contrato congelado de la demo (S1–S4).
   description: |
     Contrato de la demo NearbyIG escrito a mano antes del server. La superficie
-    está congelada en S1–S3; pings, matches, chat, block, report y `/health`
-    quedan fuera hasta que exista un diseño que los congele (S4/S5).
+    está congelada en S1–S4; chat, block, report y `/health` quedan fuera hasta
+    que exista un diseño que los congele (S5).
 
     Cada operation declara `x-implementation-sprint` con el sprint que la
     implementa. Ninguna operation se implementa en Sprint 0: acá sólo se
@@ -30,10 +30,19 @@ info:
         implícito.
     Ningún DTO, código de error ni response cambia de forma.
 
+    **v0.3 (delta sobre v0.2):** entra el flujo de conexión mínimo de S4.
+      * `POST /pings`, `GET /pings`, `POST /pings/{pingId}/accept` y
+        `POST /pings/{pingId}/reject`: enviar, mirar la bandeja y resolver.
+      * `Ping`, `PingList` (con `PingPeer`) y `Match`. El bot acepta solo.
+      * `PING_DUPLICATE` y `PING_EXPIRED` salen de `x-reserved`: ya tienen
+        operation. Se suman `PING_FORBIDDEN`, `PING_NOT_FOUND` y
+        `PING_RESOLVED`, que son las tres decisiones nuevas del cliente.
+    Chat, block y report siguen fuera.
+
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: '7203b8216b58'
+  x-contract-id: '8f239137c03c'
 
 servers:
   - url: http://localhost:3000
@@ -78,6 +87,13 @@ tags:
       género, verificado y online. `distanceM` y `bearingDeg` los calcula el
       server y se redondean al metro y al grado; la respuesta no lleva el punto de
       nadie.
+  - name: pings
+    description: |
+      El flujo de conexión de S4. Un ping es una propuesta de una dirección;
+      aceptarlo crea **un** `Match` por par y rechazarlo no crea nada. La bandeja
+      (`GET /pings?box=`) trae el ping y la proyección del otro perfil, sin
+      coordenadas: quién fue, no dónde está. Un bot acepta solo, así la demo se
+      siente viva sin que nadie mire la pantalla del bot.
 
 paths:
   /auth/demo-session:
@@ -102,6 +118,12 @@ paths:
     $ref: './paths/presence.yaml#/presence'
   /discovery:
     $ref: './paths/discovery.yaml#/discovery'
+  /pings:
+    $ref: './paths/pings.yaml#/pings'
+  /pings/{pingId}/accept:
+    $ref: './paths/pings.yaml#/pings-accept'
+  /pings/{pingId}/reject:
+    $ref: './paths/pings.yaml#/pings-reject'
 
 components:
   # Respuestas de error compartidas. Todas tienen la misma forma
@@ -269,6 +291,77 @@ components:
           schema:
             $ref: './schemas/errors.yaml#/Problem'
 
+    PingForbidden:
+      description: |
+        El ping existe pero la sesión no es su destinatario (`PING_FORBIDDEN`).
+        Es un 403 y no un 404: el recurso está, lo que falta es el derecho a
+        resolverlo. También es el 403 de `POST /pings` cuando la sesión no tiene
+        perfil propio (invitado de relleno): un invitado no es una persona a la
+        que otro pueda contestarle.
+      x-error-code: PING_FORBIDDEN
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    PingTargetNotFound:
+      description: |
+        El destinatario de `POST /pings` no existe para esta sesión
+        (`PROFILE_NOT_FOUND`): `profileId` de otra región, id inexistente, o un
+        bot cuyo dueño ya no tiene presencia viva. Un ping no cruza regiones y un
+        bot sin presencia no está.
+      x-error-code: PROFILE_NOT_FOUND
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    PingNotFound:
+      description: |
+        El `pingId` del path no existe (`PING_NOT_FOUND`). Un id malformado (no
+        uuid) es 422 `VALIDATION_FAILED`, no un 404: el pedido está mal escrito
+        antes de que el recurso falte.
+      x-error-code: PING_NOT_FOUND
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    PingDuplicate:
+      description: |
+        El par dirigido ya tiene un ping pendiente (`PING_DUPLICATE`). No es un
+        error del cliente que se corrige con un body distinto: hay que esperar a
+        que el otro conteste o venza. La carrera entre dos envíos simultáneos la
+        resuelve un índice único parcial, no un chequeo previo.
+      x-error-code: PING_DUPLICATE
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    PingResolved:
+      description: |
+        El ping ya no está pendiente (`PING_RESOLVED`): lo aceptaron, lo
+        rechazaron o lo cerró una aceptación previa. Repetir la acción no es un
+        no-op silencioso; el cliente se entera y deja de reintentar.
+      x-error-code: PING_RESOLVED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    PingExpired:
+      description: |
+        El ping venció (`PING_EXPIRED`). En `POST /pings` es el pendiente del par
+        que ya pasó su `expiresAt`: queda cerrado y el próximo envío crea uno
+        nuevo. En `accept`/`reject` es un ping que se resolvió tarde: no hay
+        match. El reloj del server es la autoridad, no el del cliente.
+      x-error-code: PING_EXPIRED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
   securitySchemes:
     demoSession:
       type: http
@@ -356,3 +449,17 @@ components:
       $ref: './schemas/discovery.yaml#/DiscoveryQuery'
     DiscoveryResult:
       $ref: './schemas/discovery.yaml#/DiscoveryResult'
+    PingStatus:
+      $ref: './schemas/pings.yaml#/PingStatus'
+    PingCreate:
+      $ref: './schemas/pings.yaml#/PingCreate'
+    Ping:
+      $ref: './schemas/pings.yaml#/Ping'
+    PingPeer:
+      $ref: './schemas/pings.yaml#/PingPeer'
+    PingListItem:
+      $ref: './schemas/pings.yaml#/PingListItem'
+    PingList:
+      $ref: './schemas/pings.yaml#/PingList'
+    Match:
+      $ref: './schemas/pings.yaml#/Match'

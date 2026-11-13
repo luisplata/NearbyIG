@@ -95,6 +95,24 @@ describe('reset de la demo', () => {
     assert.equal(human.status, 201, JSON.stringify(human.body));
     await insertGuestSession('co');
 
+    // Pings y matches son estado de demo: el reset global los tiene que borrar
+    // igual que las sesiones. Se siembra uno de cada uno por SQL para no
+    // depender del flujo de S4 en un test que es del reset.
+    await withDb(async (client) => {
+      await client.query(
+        `INSERT INTO pings (region_key, from_profile_id, to_profile_id, expires_at)
+         VALUES ('mx', $1, 'mx-p02', now() + interval '1 hour')`,
+        [human.body.profileId],
+      );
+      await client.query(
+        `INSERT INTO matches (region_key, profile_a_id, profile_b_id)
+         VALUES ('mx', least($1, 'mx-p02'), greatest($1, 'mx-p02'))`,
+        [human.body.profileId],
+      );
+    });
+    assert.ok((await countRows('pings')) >= 1, 'el escenario tiene un ping');
+    assert.ok((await countRows('matches')) >= 1, 'el escenario tiene un match');
+
     const expected = await withDb(async (client) => {
       const { rows } = await client.query(
         `SELECT count(*)::int AS total,
@@ -117,6 +135,8 @@ describe('reset de la demo', () => {
 
     assert.equal(await countRows('sessions'), 0);
     assert.equal(await countRows('stream_tickets'), 0);
+    assert.equal(await countRows('pings'), 0, 'el reset global vacía la bandeja');
+    assert.equal(await countRows('matches'), 0, 'el reset global vacía los matches');
 
     // Dos veces no rompe: la segunda no encuentra nada.
     const second = await resetGlobal();

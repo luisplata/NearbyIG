@@ -1,7 +1,7 @@
 /**
  * Errores HTTP con la forma del contrato (`Problem`, RFC 9457).
  *
- * El catálogo de códigos es cerrado: `ErrorCode` replica los 18 valores de
+ * El catálogo de códigos es cerrado: `ErrorCode` replica los 21 valores de
  * `contract/schemas/errors.yaml` y `ERROR_STATUS` la tabla `x-status`. No se
  * inventan códigos en el server; si hace falta uno nuevo, primero se agrega al
  * contrato (y sus gates lo exigen).
@@ -13,11 +13,14 @@ export type ErrorCode =
   | 'TICKET_REUSED'
   | 'REGION_MISMATCH'
   | 'CHAT_BLOCKED'
+  | 'PING_FORBIDDEN'
   | 'PROFILE_NOT_FOUND'
   | 'MATCH_NOT_FOUND'
+  | 'PING_NOT_FOUND'
   | 'PROFILE_IN_USE'
   | 'PRESENCE_STALE'
   | 'PING_DUPLICATE'
+  | 'PING_RESOLVED'
   | 'CURSOR_EXPIRED'
   | 'PING_EXPIRED'
   | 'RATE_LIMITED'
@@ -34,11 +37,14 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   TICKET_REUSED: 401,
   REGION_MISMATCH: 403,
   CHAT_BLOCKED: 403,
+  PING_FORBIDDEN: 403,
   PROFILE_NOT_FOUND: 404,
   MATCH_NOT_FOUND: 404,
+  PING_NOT_FOUND: 404,
   PROFILE_IN_USE: 409,
   PRESENCE_STALE: 409,
   PING_DUPLICATE: 409,
+  PING_RESOLVED: 409,
   CURSOR_EXPIRED: 410,
   PING_EXPIRED: 410,
   RATE_LIMITED: 429,
@@ -55,11 +61,14 @@ const TITLE: Readonly<Record<ErrorCode, string>> = {
   TICKET_REUSED: 'Stream ticket already used',
   REGION_MISMATCH: 'Region mismatch',
   CHAT_BLOCKED: 'Chat blocked',
+  PING_FORBIDDEN: 'Ping forbidden',
   PROFILE_NOT_FOUND: 'Profile not found',
   MATCH_NOT_FOUND: 'Match not found',
+  PING_NOT_FOUND: 'Ping not found',
   PROFILE_IN_USE: 'Profile in use',
   PRESENCE_STALE: 'Presence stale',
   PING_DUPLICATE: 'Ping duplicate',
+  PING_RESOLVED: 'Ping already resolved',
   CURSOR_EXPIRED: 'Cursor expired',
   PING_EXPIRED: 'Ping expired',
   RATE_LIMITED: 'Rate limited',

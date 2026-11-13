@@ -6,6 +6,7 @@ import { DatabaseModule } from './db/database.module';
 import { DiscoveryModule } from './discovery/discovery.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
+import { PingsModule } from './pings/pings.module';
 import { PresenceModule } from './presence/presence.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { ResetModule } from './reset/reset.module';
@@ -23,6 +24,7 @@ import { ResetModule } from './reset/reset.module';
  *   DiscoveryModule→ GET /discovery (radio, filtros y medidas por observador)
  *   PresenceModule → PUT y DELETE /presence (región y zona derivadas)
  *   ProfilesModule → GET /demo/profiles
+ *   PingsModule    → POST/GET /pings y accept/reject (S4)
  *   ResetModule    → POST /demo/reset y /demo/reset/self (fuera del contrato)
  */
 @Module({
@@ -36,6 +38,7 @@ import { ResetModule } from './reset/reset.module';
     DiscoveryModule,
     PresenceModule,
     ProfilesModule,
+    PingsModule,
     ResetModule,
   ],
 })

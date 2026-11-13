@@ -4,7 +4,7 @@
  *
  * Invariantes:
  *  - raíz OpenAPI 3.1.0, `info.version` semver y `servers` con http://localhost:3000
- *  - toda operation declara `x-implementation-sprint` entero en 1..3
+ *  - toda operation declara `x-implementation-sprint` entero en 1..4
  *  - `operationId` presente y único
  *  - ningún path con prefijo de versión (`/v1`): el versionado vive en `info`
  *  - todo `$ref` resuelve, es relativo y no sale de `contract/`
@@ -29,7 +29,7 @@ import {
   splitRef,
 } from './lib/spec.mjs';
 
-const SUPPORTED_SPRINTS = [1, 2, 3];
+const SUPPORTED_SPRINTS = [1, 2, 3, 4];
 const REPO_ROOT = resolve(CONTRACT_ROOT, '..');
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
@@ -80,7 +80,7 @@ function structuralChecks() {
     const sprint = operation?.['x-implementation-sprint'];
     if (!Number.isInteger(sprint) || !SUPPORTED_SPRINTS.includes(sprint)) {
       problems.push(
-        `${label}: x-implementation-sprint debe ser entero en 1..3, no ${JSON.stringify(sprint)}`,
+        `${label}: x-implementation-sprint debe ser entero en 1..4, no ${JSON.stringify(sprint)}`,
       );
     }
   }

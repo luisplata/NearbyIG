@@ -4,8 +4,8 @@
  * Se exige:
  *  - cada `ErrorCode` tiene un status HTTP 4xx/5xx en `x-status`, y el mapa y el
  *    enum listan exactamente los mismos códigos;
- *  - `x-reserved` sólo marca códigos que ninguna operation usa, y son los cuatro
- *    de S4/S5;
+ *  - `x-reserved` sólo marca códigos que ninguna operation usa, y son los dos
+ *    de S5;
  *  - ninguna response usa un código ausente del enum;
  *  - todo 4xx/5xx responde `application/problem+json` con `Problem`, declara su
  *    `x-error-code` y el status coincide con `x-status`;
@@ -14,9 +14,10 @@
  *
  * La última regla se activó en PR6, cuando presence y discovery cerraron el uso
  * de todo lo que S1–S3 puede ejercer (`RATE_LIMITED`, `PROFILE_NOT_FOUND`,
- * `PRESENCE_STALE`, `ZONE_UNKNOWN`, `NOT_IMPLEMENTED` e `INTERNAL`). Antes era
- * insatisfacible: con la superficie congelada no hay paths de ping, match ni
- * chat, así que esos códigos no podían usarse. Los cuatro de S4/S5 siguen en
+ * `PRESENCE_STALE`, `ZONE_UNKNOWN`, `NOT_IMPLEMENTED` e `INTERNAL`). v0.3 sumó
+ * los pings y con ellos el uso real de `PING_DUPLICATE` y `PING_EXPIRED`, más
+ * los tres códigos nuevos del flujo (`PING_FORBIDDEN`, `PING_NOT_FOUND`,
+ * `PING_RESOLVED`). Los dos de S5 —chat y match como recurso— siguen en
  * `x-reserved` justamente para que esta regla los distinga de un olvido.
  */
 
@@ -32,11 +33,11 @@ const STATUS_BY_CODE = errorCode?.['x-status'] ?? {};
 const RESERVED = errorCode?.['x-reserved'] ?? {};
 const PROBLEM_FIELDS = ['code', 'detail', 'requestId', 'status', 'title', 'type'];
 
-/** Códigos congelados en el contrato S1–S3. S4/S5 los agrega y actualiza este número. */
-const EXPECTED_ENUM_SIZE = 18;
+/** Códigos congelados en el contrato S1–S4. S5 los agrega y actualiza este número. */
+const EXPECTED_ENUM_SIZE = 21;
 
-/** Códigos reservados: existen para S4/S5 y todavía no tienen operation en `paths/`. */
-const EXPECTED_RESERVED = ['CHAT_BLOCKED', 'MATCH_NOT_FOUND', 'PING_DUPLICATE', 'PING_EXPIRED'];
+/** Códigos reservados: existen para S5 y todavía no tienen operation en `paths/`. */
+const EXPECTED_RESERVED = ['CHAT_BLOCKED', 'MATCH_NOT_FOUND'];
 
 const operations = listOperations(spec);
 const label = ({ method, path }) => `${method.toUpperCase()} ${path}`;
@@ -101,7 +102,7 @@ test('cada ErrorCode tiene un status HTTP válido en x-status', () => {
   );
 });
 
-test('x-reserved marca sólo códigos sin operation, y son los de S4/S5', () => {
+test('x-reserved marca sólo códigos sin operation, y son los de S5', () => {
   const reserved = Object.keys(RESERVED).sort();
   assert.deepEqual(reserved, [...EXPECTED_RESERVED].sort(), 'el conjunto de códigos reservados cambió');
 

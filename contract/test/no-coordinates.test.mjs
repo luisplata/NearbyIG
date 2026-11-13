@@ -5,7 +5,7 @@
  * mitad de la salida sobre el grafo **resuelto** (`loadSpec()` expande todos los
  * `$ref`), desde las raíces públicas:
  *
- *  - toda `responses.*.content.*.schema` de las 11 operations;
+ *  - toda `responses.*.content.*.schema` de las 16 operations;
  *  - el envelope de eventos y la página de polling (`EventEnvelope` cubre la unión
  *    de los 6 payloads; `EventsPage` cubre el envelope).
  *
@@ -152,7 +152,7 @@ test('ninguna response ni evento alcanza una coordenada, a ninguna profundidad',
   assert.ok(total.nodes > 100, `el walk recorrió ${total.nodes} nodos: demasiado poco para ser creíble`);
 
   t.diagnostic(
-    `${roots.length} raíces (37 responses + envelope y EventsPage) · ` +
+    `${roots.length} raíces (responses + envelope y EventsPage) · ` +
       `${total.nodes} nodos de schema · ${total.names.size} nombres de propiedad distintos · 0 coordenadas`,
   );
 });
