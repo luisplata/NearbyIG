@@ -24,6 +24,29 @@ SourceType:
     Origen del perfil o de la sesión. `guest` es la sesión de relleno que se abre
     cuando los 10 slots de una región están tomados: no tiene `demoSlot`.
 
+Gender:
+  type: string
+  enum:
+    - female
+    - male
+    - nonbinary
+  description: |
+    Género declarado del perfil. Son los tres valores del dataset
+    (`demo/shared/fixtures.json` → `filters.genders`) y las tres tienen que
+    aparecer en cada región del catálogo. No hay `other` ni `prefer not to say`:
+    lo que no cae en estos tres valores no viaja.
+
+Intention:
+  type: string
+  enum:
+    - networking
+    - friendship
+    - activities
+  description: |
+    Intención con la que el perfil abrió la demo (`filters.intentions` del
+    dataset). El filtro de descubrimiento de S3 usa el mismo enum: agregar un
+    valor es un cambio de vocabulario, no un parámetro nuevo de un endpoint.
+
 KeyLabel:
   type: object
   additionalProperties: false

@@ -1,0 +1,233 @@
+# Perfiles del catálogo demo: la fila que sale por `GET /demo/profiles`.
+#
+# Los 13 campos del dataset (`demo/shared/fixtures.json` → `profiles[]`) más la
+# identidad (`regionKey`, `demoSlot`, `sourceType`). El catálogo NO puede cambiar
+# un valor del dataset: sólo agrega esos tres campos. La paridad campo a campo la
+# prueba `contract/test/fixtures-parity.test.mjs`, y en todo campo mapeado gana
+# `fixtures.json`.
+#
+# Avatar: **no hay objeto `avatar`**. El catálogo guarda `photoId` y el cliente
+# resuelve la foto contra el bundle de la demo. Duplicar acá la ruta, el tamaño o
+# los colores del avatar sería la primera copia en desincronizarse.
+#
+# Geometría: ninguna. `distanceM` y `bearingDeg` son mediciones relativas a la
+# sesión que el server de S2 recalcula en runtime; el contrato no transporta
+# coordenadas ni polígonos (esos viven sólo en `contract/catalog/zones.json`).
+
+ProfileSummary:
+  type: object
+  additionalProperties: false
+  required:
+    - profileId
+    - regionKey
+    - demoSlot
+    - sourceType
+    - nickname
+    - initials
+    - intention
+    - gender
+    - verified
+    - online
+    - distanceM
+    - bearingDeg
+    - photoId
+    - instagramHandle
+    - statusKey
+    - bioKey
+  description: |
+    Fila del catálogo tal como viaja por HTTP. `(regionKey, profileId)` es la
+    identidad global: el mismo `profileId` puede existir en `mx` y en `co` sin ser
+    el mismo perfil, y ningún response puede mezclar regiones.
+
+    Invariante: `demoSlot == null` si y sólo si `sourceType == guest`. Las 20
+    filas del catálogo son `human` con `demoSlot` 1..10; un invitado no ocupa
+    slot y no aparece en el catálogo.
+
+    Los 13 campos del dataset son 1:1 con `fixtures.json`: si un valor del
+    catálogo no coincide, el gate de paridad falla nombrando perfil y campo.
+  properties:
+    profileId:
+      type: string
+      minLength: 1
+      description: |
+        Identidad del perfil dentro de su región. Único por región y estable: es
+        lo que referencian los eventos (`payload.profileId`) y los matches de S4.
+      examples:
+        - mx-p01
+    regionKey:
+      $ref: './common.yaml#/RegionKey'
+    demoSlot:
+      type:
+        - integer
+        - 'null'
+      minimum: 1
+      maximum: 10
+      description: |
+        Slot demo ocupado (1..10), único por región. Es la clave natural de los
+        seeds de S1 (`region_key + demo_slot`). `null` sólo para invitados.
+    sourceType:
+      $ref: './common.yaml#/SourceType'
+    nickname:
+      type: string
+      minLength: 1
+      description: Nombre visible del perfil, ya resuelto (no es una clave de copy).
+      examples:
+        - Vale
+    initials:
+      type: string
+      minLength: 1
+      description: Dos letras para el avatar de respaldo cuando no hay foto.
+      examples:
+        - VA
+    intention:
+      $ref: './common.yaml#/Intention'
+    gender:
+      $ref: './common.yaml#/Gender'
+    verified:
+      type: boolean
+      description: Si el perfil pasó la verificación de la demo. Nunca `null`.
+    online:
+      type: boolean
+      description: |
+        Presencia del último heartbeat. Es estado, no evento: los cambios llegan
+        por `profile.presence` en S2. Nunca `null`.
+    distanceM:
+      type: integer
+      minimum: 200
+      maximum: 5000
+      description: |
+        Distancia a la sesión en metros. En el seed sale del dataset; en runtime
+        (S2) la calcula el server. Nunca se serializa como coordenada.
+    bearingDeg:
+      type: integer
+      minimum: 0
+      maximum: 359
+      description: |
+        Rumbo en grados desde la sesión (0 = norte, sentido horario). Junto con
+        `distanceM` ubica al perfil sin exponer latitud ni longitud.
+    photoId:
+      type: string
+      minLength: 1
+      description: |
+        Id de la foto en el bundle de la demo (`ph01`…`ph10`). El avatar se
+        resuelve por este id: no hay objeto `avatar` en el contrato.
+      examples:
+        - ph01
+    instagramHandle:
+      type: string
+      minLength: 1
+      description: Handle de Instagram de la demo, sin `@`. Sólo se revela tras el match.
+      examples:
+        - vale.works
+    statusKey:
+      type: string
+      minLength: 1
+      description: Clave de copy del estado (`status.p01`). El texto lo resuelve el server.
+      examples:
+        - status.p01
+    bioKey:
+      type: string
+      minLength: 1
+      description: Clave de copy de la bio (`bio.p01`). El texto lo resuelve el server.
+      examples:
+        - bio.p01
+  allOf:
+    - if:
+        required:
+          - sourceType
+        properties:
+          sourceType:
+            const: guest
+      then:
+        properties:
+          demoSlot:
+            type: 'null'
+    - if:
+        required:
+          - demoSlot
+        properties:
+          demoSlot:
+            type: 'null'
+      then:
+        properties:
+          sourceType:
+            const: guest
+
+ProfileList:
+  type: object
+  additionalProperties: false
+  required:
+    - profiles
+  description: |
+    Respuesta de `GET /demo/profiles`: los perfiles de **una** región, en orden
+    de `demoSlot`. Objeto con array adentro, no array pelado: mismo idioma que
+    `RegionList`, `ZoneList` y `EventsPage`.
+  properties:
+    profiles:
+      type: array
+      minItems: 1
+      maxItems: 10
+      items:
+        $ref: '#/ProfileSummary'
+
+SelfProfile:
+  type: object
+  additionalProperties: false
+  required:
+    - profileId
+    - regionKey
+    - demoSlot
+    - sourceType
+    - nickname
+    - initials
+    - intention
+    - photoId
+    - instagramHandle
+    - statusKey
+  description: |
+    Perfil de la propia sesión. Declara exactamente los campos que el dataset
+    guarda en `fixtures.self` más la identidad (`regionKey`, `demoSlot`,
+    `sourceType`): el self no aparece en su propio resultado de descubrimiento,
+    así que no lleva `distanceM`, `bearingDeg` ni `online`, y el dataset tampoco
+    le da `gender`, `verified` ni `bioKey`.
+
+    No tiene consumer en S1–S3 (no hay `GET /me`): se declara para que Sprint 1
+    no lo invente con otro nombre ni con alias.
+  properties:
+    profileId:
+      type: string
+      minLength: 1
+      description: Identidad del perfil propio dentro de su región.
+    regionKey:
+      $ref: './common.yaml#/RegionKey'
+    demoSlot:
+      type:
+        - integer
+        - 'null'
+      minimum: 1
+      maximum: 10
+      description: Slot demo de la sesión; `null` para invitados.
+    sourceType:
+      $ref: './common.yaml#/SourceType'
+    nickname:
+      type: string
+      minLength: 1
+      description: Nombre visible propio, ya resuelto.
+    initials:
+      type: string
+      minLength: 1
+      description: Iniciales para el avatar de respaldo.
+    intention:
+      $ref: './common.yaml#/Intention'
+    photoId:
+      type: string
+      minLength: 1
+      description: Id de la foto propia en el bundle de la demo.
+    instagramHandle:
+      type: string
+      minLength: 1
+      description: Handle de Instagram propio, sin `@`.
+    statusKey:
+      type: string
+      minLength: 1
+      description: Clave de copy del estado propio.

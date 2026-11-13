@@ -23,7 +23,7 @@ info:
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: '9a46aa91e7d3'
+  x-contract-id: 'f194b6f347c5'
 
 servers:
   - url: http://localhost:3000
@@ -45,6 +45,12 @@ tags:
       Regiones y zonas de la demo. Sólo proyecciones: `ZoneSummary` lleva
       `zoneKey`, `nameKey` y `regionKey`, nunca geometría. El polígono vive en
       `contract/catalog/zones.json`, fuera del spec.
+  - name: profiles
+    description: |
+      Perfiles del catálogo demo: 10 humanos por región (`mx`, `co`). La fila es
+      `ProfileSummary`, con los campos del dataset más `regionKey`, `demoSlot` y
+      `sourceType`. El avatar se resuelve por `photoId`; ningún response expone
+      coordenadas.
 
 paths:
   /auth/demo-session:
@@ -61,6 +67,8 @@ paths:
     $ref: './paths/catalog.yaml#/demo-regions'
   /demo/zones:
     $ref: './paths/catalog.yaml#/demo-zones'
+  /demo/profiles:
+    $ref: './paths/profiles.yaml#/demo-profiles'
 
 components:
   # Respuestas de error compartidas. Todas tienen la misma forma
@@ -136,6 +144,17 @@ components:
           schema:
             $ref: './schemas/errors.yaml#/Problem'
 
+    RegionMismatch:
+      description: |
+        El recurso pedido pertenece a otra región que la de la sesión
+        (`REGION_MISMATCH`). Es un 403 y no un 404 a propósito: el perfil existe,
+        lo que no existe es el derecho a verlo desde esta sesión.
+      x-error-code: REGION_MISMATCH
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
   securitySchemes:
     demoSession:
       type: http
@@ -193,3 +212,13 @@ components:
       $ref: './schemas/region.yaml#/ZoneList'
     ZoneSummary:
       $ref: './schemas/region.yaml#/ZoneSummary'
+    Gender:
+      $ref: './schemas/common.yaml#/Gender'
+    Intention:
+      $ref: './schemas/common.yaml#/Intention'
+    ProfileList:
+      $ref: './schemas/profile.yaml#/ProfileList'
+    ProfileSummary:
+      $ref: './schemas/profile.yaml#/ProfileSummary'
+    SelfProfile:
+      $ref: './schemas/profile.yaml#/SelfProfile'

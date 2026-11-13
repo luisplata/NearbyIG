@@ -1,0 +1,54 @@
+# Perfiles (Sprint 1): la lectura de catálogo que alimenta el descubrimiento.
+#
+# Devuelve los 10 perfiles humanos de una región, en orden de `demoSlot`. La
+# región se pide por query porque el contrato no asume que el cliente ya abrió
+# sesión al leer el catálogo; una sesión abierta no puede pedir otra región.
+#
+# Geometría: ninguna. La fila lleva `distanceM` y `bearingDeg` (mediciones
+# relativas a la sesión), nunca `lat`/`lng`. El test de geometría recorre este
+# path como cualquier otro y falla si aparece una coordenada.
+#
+# Errores: 401 heredado de `demoSession`; 403 `REGION_MISMATCH` cuando el
+# `regionKey` pedido no es el de la sesión (recurso de otra región); 422
+# `VALIDATION_FAILED` cuando falta o no tiene la forma `^[a-z]{2}$`.
+
+demo-profiles:
+  get:
+    operationId: listDemoProfiles
+    summary: Lista los perfiles de una región
+    description: |
+      Los 10 perfiles del catálogo de una región, ordenados por `demoSlot`. Cada
+      fila es `ProfileSummary`: los 13 campos del dataset más `regionKey`,
+      `demoSlot` y `sourceType`. El avatar se resuelve por `photoId`, no viaja.
+
+      Aislamiento regional: un `profileId` de `mx` no aparece en una respuesta de
+      `co` ni al revés. Pedir una región distinta a la de la sesión es 403
+      `REGION_MISMATCH`, no un catálogo vacío.
+
+      Los invitados no están en el catálogo: son sesión de relleno, no perfiles
+      descubribles.
+    tags:
+      - profiles
+    parameters:
+      - name: regionKey
+        in: query
+        required: true
+        description: |
+          Región cuyos perfiles se listan. Tiene que coincidir con la región de
+          la sesión; el catálogo sólo conoce `mx` y `co`.
+        schema:
+          $ref: '../schemas/common.yaml#/RegionKey'
+    responses:
+      '200':
+        description: Los perfiles de la región, en orden de `demoSlot`.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/profile.yaml#/ProfileList'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/RegionMismatch'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+    x-implementation-sprint: 1

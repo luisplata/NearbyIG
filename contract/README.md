@@ -85,12 +85,16 @@ contract/
   paths/auth.yaml           path items de auth (S1)
   paths/events.yaml         GET /events (SSE) y GET /events/poll (S2)
   paths/catalog.yaml        GET /demo/regions y GET /demo/zones (S2), sin geometría
+  paths/profiles.yaml       GET /demo/profiles (S1), sin geometría
   schemas/auth.yaml         DemoSession, DemoSessionRequest, StreamTicket
   schemas/events.yaml       envelope, los 6 tipos, payloads S2, EventsPage
   schemas/region.yaml       Region, RegionList, ZoneSummary, ZoneList
-  schemas/common.yaml       RegionKey, SourceType, KeyLabel, Page
+  schemas/profile.yaml      ProfileSummary, ProfileList, SelfProfile
+  schemas/common.yaml       RegionKey, SourceType, Gender, Intention, KeyLabel, Page
   catalog/regions.json      dos regiones: mx, co (con defaultZoneKey)
   catalog/zones.json        geometría de CDMX y Bogotá: anillos [lng, lat]
+  catalog/profiles.mx.json  10 perfiles derivados de fixtures.json (posición a posición)
+  catalog/profiles.co.json  10 perfiles autorados, mismo shape
   event/sample-log.json     fixture congelado: 40 eventos con un duplicado
   scripts/lib/spec.mjs      carga los YAML, resuelve $ref, calcula x-contract-id
   scripts/lib/events.mjs    proyecciones puras: parseEnvelopeId, toSseFrames, toPollPage
@@ -98,6 +102,7 @@ contract/
   test/spec-valid.test.mjs  inventario de operations + invariantes
   test/events-contract.test.mjs  envelope, dedupe y paridad SSE ≡ polling
   test/zones-geometry.test.mjs   anillos válidos + geometría inalcanzable desde el spec
+  test/fixtures-parity.test.mjs  paridad campo a campo con fixtures (fixtures gana)
 ```
 
 ### Cómo se arma un path
@@ -191,6 +196,50 @@ no resuelve límites administrativos.
    sea de la misma región.
 3. `npm run contract:test`. Nada del spec cambia: `ZoneSummary` ya la proyecta.
 
+## Perfiles: 20 filas y la paridad con fixtures
+
+`GET /demo/profiles` devuelve los 10 perfiles de una región, ordenados por
+`demoSlot`. La fila es `ProfileSummary`: los 13 campos del dataset más
+`regionKey`, `demoSlot` y `sourceType`.
+
+| Archivo | Filas | De dónde sale |
+|---|---:|---|
+| `catalog/profiles.mx.json` | 10 | **derivado** de `demo/shared/fixtures.json` → `profiles[i]`, posición por posición |
+| `catalog/profiles.co.json` | 10 | **autorado**: mismo shape, otros valores, `profileId` distintos |
+| `schemas/profile.yaml` | — | `ProfileSummary`, `ProfileList`, `SelfProfile` |
+
+Quién manda en cada campo:
+
+| Campo | Origen |
+|---|---|
+| los 13 del dataset (`nickname`, `initials`, `intention`, `gender`, `verified`, `online`, `distanceM`, `bearingDeg`, `photoId`, `instagramHandle`, `statusKey`, `bioKey` y el `id`) | **`fixtures.json` gana**: el catálogo no puede cambiar el valor |
+| `profileId` | `"{regionKey}-" + fixtures.profiles[i].id` (`mx-p01`), la identidad que usan los eventos |
+| `regionKey`, `demoSlot` (`i + 1`), `sourceType: human` | los agrega el contrato |
+
+`contract/test/fixtures-parity.test.mjs` no comprueba que el campo exista:
+compara el valor, y cuando difiere falla con perfil, campo y ambos valores. El
+mapping es una tabla de datos, así que además falla si `fixtures.json` estrena un
+campo sin entrada en la tabla (el catálogo se quedaría sin ese dato en silencio).
+
+Reglas que el catálogo cumple y el test congela:
+
+- 10 filas por región, `demoSlot` 1..10 sin huecos ni repetidos, `sourceType: human`.
+- los 20 `profileId` son únicos; `mx` y `co` no comparten ninguno.
+- cada intención (`networking`, `friendship`, `activities`) la usan ≥2 perfiles por región y los 3 géneros aparecen.
+- **sin objeto `avatar`**: la foto se resuelve por `photoId` contra el bundle de la demo, así el catálogo no duplica los datos del avatar.
+- `ProfileSummary` cierra con `additionalProperties: false` y declara exactamente esas 16 claves: un campo que no existe en el schema no llega al catálogo.
+
+Los invitados no están en el catálogo: son sesión de relleno, no perfiles
+descubribles. `demoSlot: null` está en el schema porque `SourceType` lo admite,
+pero ninguna de las 20 filas es `guest`.
+
+### Cómo cambiar un perfil
+
+1. Si es de `mx`, el valor se cambia **en `demo/shared/fixtures.json`** y se
+   regenera el catálogo. Editar `profiles.mx.json` a mano rompe la paridad.
+2. Si es de `co`, se edita `profiles.co.json` respetando el shape y la cobertura.
+3. `npm run contract:test`. El schema no cambia: `ProfileSummary` ya lo proyecta.
+
 ## Eventos: envelope y replay
 
 Un solo envelope para las dos proyecciones. `GET /events` (SSE) y
@@ -253,8 +302,8 @@ Consecuencias que importan al revisar:
 - **Sprint por operation.** `x-implementation-sprint` ∈ {1,2,3}. Ninguna operation
   declara 0, 4 o 5.
 - **Errores en `application/problem+json`** (RFC 9457) con `code` del enum cerrado.
-  Entran en PR2; por eso `operation-4xx-response` está en `off` en `redocly.yaml`
-  y se reactiva con el catálogo.
+  `operation-4xx-response` está activa en `redocly.yaml`, pero su severidad es
+  `warning`: el gate duro es el test "toda operation declara ≥1 error 4xx/5xx".
 - **Nunca coordenadas.** Ningún response ni payload de evento puede alcanzar
   `lat`/`lng`/`latitude`/`longitude` ni un par `[n, n]`. Los polígonos viven sólo
   en `contract/catalog/zones.json`, fuera del spec y sin keys (ver

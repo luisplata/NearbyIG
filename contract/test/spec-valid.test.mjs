@@ -24,6 +24,7 @@ const EXPECTED_OPERATIONS = [
   'GET /events/poll',
   'GET /demo/regions',
   'GET /demo/zones',
+  'GET /demo/profiles',
 ];
 
 const SUPPORTED_SPRINTS = [1, 2, 3];
