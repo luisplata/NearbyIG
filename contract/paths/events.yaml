@@ -1,0 +1,103 @@
+# Eventos (Sprint 2). Dos proyecciones del mismo log: SSE para el cliente vivo,
+# polling para el que no puede mantener una conexión abierta.
+#
+# `GET /events` es la única operation con `streamTicket`: `EventSource` no puede
+# mandar headers, así que el ticket viaja en la query `ticket` (lo declara el
+# security scheme, no un parámetro suelto). Polling usa la sesión normal.
+#
+# Ninguna de las dos inventa códigos: 401/410/422 salen de
+# `openapi.yaml#/components/responses`.
+
+events:
+  get:
+    operationId: streamEvents
+    summary: Abre el stream de eventos de la sesión (SSE)
+    description: |
+      Responde `text/event-stream` con un frame por evento: `id:` = envelope `id`,
+      `event:` = su `type` y `data:` = el envelope en una línea JSON, terminado en
+      línea vacía. Al abrir manda `retry: 5000`; sin `Last-Event-ID` arranca en
+      vivo y con `Last-Event-ID` reenvía desde `seq + 1` sin duplicar el último
+      entregado. El stream sólo entrega eventos de la región de la sesión.
+    tags:
+      - events
+    security:
+      - streamTicket: []
+    parameters:
+      - name: Last-Event-ID
+        in: header
+        required: false
+        description: |
+          Último `id` entregado. Se reanuda en `seq + 1`. Reenviar el mismo id no
+          duplica el evento: la regla de dedupe es `seq <= lastSeen`.
+        schema:
+          type: string
+          pattern: '^[a-z]{2}:[0-9]{12}$'
+    responses:
+      '200':
+        description: |
+          Stream abierto. La conexión no se cierra al terminar el replay: sigue en
+          vivo, con `: keepalive` cada 15 s.
+        headers:
+          Cache-Control:
+            description: El stream no se cachea en ningún intermediario.
+            schema:
+              type: string
+              enum:
+                - no-cache
+        content:
+          text/event-stream:
+            schema:
+              type: string
+              description: Secuencia de frames `id`/`event`/`data`, cada uno cerrado en línea vacía.
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '410':
+        $ref: '../openapi.yaml#/components/responses/CursorExpired'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+    x-implementation-sprint: 2
+
+events-poll:
+  get:
+    operationId: pollEvents
+    summary: Pagina el log de eventos de la sesión
+    description: |
+      Misma secuencia que el stream desde el mismo cursor, con `limit` default 100
+      y máximo 500. Sin `cursor` arranca desde el principio. Para cualquier cursor
+      C, concatenar las páginas da exactamente el replay SSE desde C: mismos `id`,
+      mismo orden, mismo `payload`. Una página vacía no avanza el cursor.
+    tags:
+      - events
+    parameters:
+      - name: cursor
+        in: query
+        required: false
+        description: |
+          Último `id` entregado. Se reanuda en `seq + 1`. Malformado →
+          `VALIDATION_FAILED`; fuera de retención → `CURSOR_EXPIRED`.
+        schema:
+          type: string
+          pattern: '^[a-z]{2}:[0-9]{12}$'
+      - name: limit
+        in: query
+        required: false
+        description: Eventos por página.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+    responses:
+      '200':
+        description: Página de eventos, en orden ascendente por `seq`.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/events.yaml#/EventsPage'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '410':
+        $ref: '../openapi.yaml#/components/responses/CursorExpired'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+    x-implementation-sprint: 2

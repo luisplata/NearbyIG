@@ -23,7 +23,7 @@ info:
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: 'e77ff1658f63'
+  x-contract-id: '2661d6cc0a6c'
 
 servers:
   - url: http://localhost:3000
@@ -36,6 +36,10 @@ security:
 tags:
   - name: auth
     description: Sesión demo, logout y ticket efímero para `GET /events`.
+  - name: events
+    description: |
+      Stream SSE y polling del mismo log de eventos. El orden lo da `seq`, no
+      `occurredAt`; el cliente deduplica con `seq <= lastSeen`.
 
 paths:
   /auth/demo-session:
@@ -44,6 +48,10 @@ paths:
     $ref: './paths/auth.yaml#/logout'
   /auth/stream-ticket:
     $ref: './paths/auth.yaml#/stream-ticket'
+  /events:
+    $ref: './paths/events.yaml#/events'
+  /events/poll:
+    $ref: './paths/events.yaml#/events-poll'
 
 components:
   # Respuestas de error compartidas. Todas tienen la misma forma
@@ -96,6 +104,18 @@ components:
           schema:
             $ref: './schemas/errors.yaml#/Problem'
 
+    CursorExpired:
+      description: |
+        El cursor (`Last-Event-ID` de `GET /events` o `?cursor=` de
+        `GET /events/poll`) quedó fuera de la retención del log (`CURSOR_EXPIRED`).
+        No es un 400: el pedido está bien formado, lo que ya no existe es el
+        evento. Un cursor malformado es `VALIDATION_FAILED` (422).
+      x-error-code: CURSOR_EXPIRED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
   securitySchemes:
     demoSession:
       type: http
@@ -104,6 +124,15 @@ components:
       description: |
         JWT corto emitido por `POST /auth/demo-session`. Viaja sólo en el header
         `Authorization`. No hay OAuth, cookies ni API keys de terceros.
+    streamTicket:
+      type: apiKey
+      in: query
+      name: ticket
+      description: |
+        Ticket de 30 s y un solo uso emitido por `POST /auth/stream-ticket`.
+        Existe sólo porque `EventSource` no puede mandar headers: se aplica
+        **únicamente** a `GET /events`. Un JWT en query se filtra por logs,
+        `Referer` e historial; un ticket efímero y de un uso acota el daño a 30 s.
 
   schemas:
     DemoSession:
@@ -112,6 +141,18 @@ components:
       $ref: './schemas/auth.yaml#/DemoSessionRequest'
     StreamTicket:
       $ref: './schemas/auth.yaml#/StreamTicket'
+    EventEnvelope:
+      $ref: './schemas/events.yaml#/EventEnvelope'
+    EventPayload:
+      $ref: './schemas/events.yaml#/EventPayload'
+    EventType:
+      $ref: './schemas/events.yaml#/EventType'
+    EventsPage:
+      $ref: './schemas/events.yaml#/EventsPage'
+    ProfileMovedPayload:
+      $ref: './schemas/events.yaml#/ProfileMovedPayload'
+    ProfilePresencePayload:
+      $ref: './schemas/events.yaml#/ProfilePresencePayload'
     ErrorCode:
       $ref: './schemas/errors.yaml#/ErrorCode'
     Problem:
