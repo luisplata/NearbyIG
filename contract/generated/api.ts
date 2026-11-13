@@ -3,7 +3,7 @@
  *
  * Source: contract/openapi.yaml
  * Generator: openapi-typescript 7.13.0 (pinned exact in package.json)
- * Contract: x-contract-id c15b856f71cc
+ * Contract: x-contract-id 7203b8216b58
  *
  * Type-only client: no runtime code and no imports. Regenerate with
  * `npm run contract:generate`. The drift gate is `npm run contract:generate:check`.
@@ -25,6 +25,56 @@ export interface paths {
          *     pública del contrato: no hay sesión previa que presentar.
          */
         post: operations["createDemoSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/takeover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Desaloja el slot demo de otra sesión y lo ocupa
+         * @description La sesión que llama pasa a ocupar `(regionKey, demoSlot)`. Si el slot lo
+         *     tenía otra sesión viva, esa sesión se revoca **en el acto**: su token deja
+         *     de servir para todo (leer perfiles, pedir ticket, volver a entrar) y sus
+         *     tickets de stream se queman. No hay gracia ni ventana de solapamiento: el
+         *     índice único de slot vivo no admite dos ocupantes, y fingir que sí daría
+         *     un estado que la base no puede sostener.
+         *
+         *     **No es un claim que "por suerte" desaloja.** Pedir un slot ocupado con
+         *     `POST /auth/demo-session` sigue siendo `409 PROFILE_IN_USE`; desalojar
+         *     exige nombrar el slot acá. El desalojo implícito no existe en el contrato.
+         *
+         *     **Slot libre: 200, no 409.** La postcondición de la operation es "la sesión
+         *     que llama ocupa el slot", y esa postcondición se cumple igual si el slot
+         *     estaba libre. `inUse` es una foto: entre que el selector lo pinta y el
+         *     cliente toca "usar", el ocupante pudo hacer logout. Devolver 409 en ese
+         *     caso convertiría una carrera benigna en un error que el cliente tiene que
+         *     reintentar, y mentiría sobre el único código disponible: `PROFILE_IN_USE`
+         *     significa "lo tiene otro y no pedí desalojarlo".
+         *
+         *     **Ya es mío: 409.** Si el slot lo ocupa la propia sesión que llama no hay
+         *     nada que desalojar. Responder 200 "renovando" el token apagaría la
+         *     credencial que el cliente está usando en ese mismo instante, así que el
+         *     contrato declara el conflicto y el cliente conserva su token.
+         *
+         *     **Invitado → humano.** La operation es el camino natural para que un
+         *     invitado (`demoSlot: null`) deje de serlo cuando se libera un slot: el
+         *     invitado no tiene slot que desalojar, y su sesión de relleno se revoca como
+         *     cualquier otra.
+         *
+         *     La región va en el body y tiene que ser la de la sesión: desalojar un slot
+         *     de otra región es `403 REGION_MISMATCH`, no un cruce silencioso.
+         */
+        post: operations["takeoverDemoSlot"];
         delete?: never;
         options?: never;
         head?: never;
@@ -308,6 +358,23 @@ export interface components {
             regionKey?: components["schemas"]["RegionKey"];
             /** @description Slot pedido explícitamente (1..10). Omitirlo deja que el server elija. */
             demoSlot?: number;
+        };
+        /**
+         * @description Pedido **explícito** de takeover: la sesión que llama pasa a ocupar el slot
+         *     pedido, desalojando a quien lo tenga.
+         *
+         *     Los dos campos son obligatorios y no hay default. Un takeover "del que esté
+         *     libre" o "del primero" sería un desalojo implícito elegido por el server, y
+         *     el contrato no permite eso: el cliente nombra el slot que quiere.
+         *
+         *     El slot es el mismo espacio que `DemoSessionRequest.demoSlot` (1..10 por
+         *     región), así que `(regionKey, demoSlot)` identifica al ocupante sin pedir su
+         *     `profileId` y sin abrir la puerta a desalojar un perfil de otra región.
+         */
+        TakeoverRequest: {
+            regionKey: components["schemas"]["RegionKey"];
+            /** @description Slot demo que se quiere ocupar (1..10). */
+            demoSlot: number;
         };
         /**
          * @description Ticket de un solo uso para abrir `GET /events` (S2) en la query `ticket`.
@@ -630,6 +697,20 @@ export interface components {
              */
             online: boolean;
             /**
+             * @description Ocupación del slot en el momento de la respuesta: `true` si existe una
+             *     sesión demo viva ocupando `(regionKey, demoSlot)`.
+             *
+             *     Es el dato que hace que el selector de perfiles muestre "en uso" sin
+             *     intentar un claim y comer un 409. La consistencia la garantiza el índice
+             *     único parcial de `sessions` (una sola sesión viva por slot), no el server:
+             *     `inUse: true` es exactamente la condición que haría fallar un
+             *     `POST /auth/demo-session` sobre ese slot.
+             *
+             *     No viene del seed y no se persiste: es estado, igual que `online`.
+             *     Cancelar la sesión (logout, reset o takeover) lo vuelve a `false`.
+             */
+            inUse: boolean;
+            /**
              * @description Distancia a la sesión en metros. En el seed sale del dataset; en runtime
              *     (S2) la calcula el server. Nunca se serializa como coordenada.
              */
@@ -854,8 +935,12 @@ export interface components {
             };
         };
         /**
-         * @description El recurso pedido choca con el estado actual: el slot demo ya está
-         *     ocupado por otra sesión viva (`PROFILE_IN_USE`).
+         * @description El pedido choca con el estado del slot demo (`PROFILE_IN_USE`). En
+         *     `POST /auth/demo-session` es un slot que ya ocupa otra sesión viva: el
+         *     claim no desaloja, así que el cliente tiene que elegir otro o pedir el
+         *     takeover. En `POST /auth/takeover` es un pedido sobre el slot que ya
+         *     ocupa la propia sesión que llama: no hay nada que desalojar y reemitir el
+         *     token apagaría la credencial en uso.
          */
         Conflict: {
             headers: {
@@ -1001,8 +1086,12 @@ export interface components {
             };
         };
         /**
-         * @description El recurso pedido choca con el estado actual: el slot demo ya está
-         *     ocupado por otra sesión viva (`PROFILE_IN_USE`).
+         * @description El pedido choca con el estado del slot demo (`PROFILE_IN_USE`). En
+         *     `POST /auth/demo-session` es un slot que ya ocupa otra sesión viva: el
+         *     claim no desaloja, así que el cliente tiene que elegir otro o pedir el
+         *     takeover. En `POST /auth/takeover` es un pedido sobre el slot que ya
+         *     ocupa la propia sesión que llama: no hay nada que desalojar y reemitir el
+         *     token apagaría la credencial en uso.
          */
         "responses-Conflict": {
             headers: {
@@ -1030,6 +1119,19 @@ export interface components {
          *     propio 401 porque sus dos códigos no existen fuera de `GET /events`.
          */
         "responses-Unauthorized": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El recurso pedido pertenece a otra región que la de la sesión
+         *     (`REGION_MISMATCH`). Es un 403 y no un 404 a propósito: el perfil existe,
+         *     lo que no existe es el derecho a verlo desde esta sesión.
+         */
+        "responses-RegionMismatch": {
             headers: {
                 [name: string]: unknown;
             };
@@ -1085,19 +1187,6 @@ export interface components {
          *     otra forma es `VALIDATION_FAILED`, mismo 422.
          */
         "responses-RegionUnavailable": {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["Problem"];
-            };
-        };
-        /**
-         * @description El recurso pedido pertenece a otra región que la de la sesión
-         *     (`REGION_MISMATCH`). Es un 403 y no un 404 a propósito: el perfil existe,
-         *     lo que no existe es el derecho a verlo desde esta sesión.
-         */
-        "responses-RegionMismatch": {
             headers: {
                 [name: string]: unknown;
             };
@@ -1206,6 +1295,37 @@ export interface operations {
                     "application/json": components["schemas"]["DemoSession"];
                 };
             };
+            409: components["responses"]["responses-Conflict"];
+            422: components["responses"]["responses-Unprocessable"];
+        };
+    };
+    takeoverDemoSlot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakeoverRequest"];
+            };
+        };
+        responses: {
+            /**
+             * @description Takeover hecho: la sesión que llama ocupa el slot y el token nuevo es
+             *     el único que sirve. El ocupante anterior quedó revocado.
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoSession"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-RegionMismatch"];
             409: components["responses"]["responses-Conflict"];
             422: components["responses"]["responses-Unprocessable"];
         };

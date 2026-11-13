@@ -20,6 +20,32 @@ DemoSessionRequest:
       maximum: 10
       description: Slot pedido explícitamente (1..10). Omitirlo deja que el server elija.
 
+TakeoverRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - regionKey
+    - demoSlot
+  description: |
+    Pedido **explícito** de takeover: la sesión que llama pasa a ocupar el slot
+    pedido, desalojando a quien lo tenga.
+
+    Los dos campos son obligatorios y no hay default. Un takeover "del que esté
+    libre" o "del primero" sería un desalojo implícito elegido por el server, y
+    el contrato no permite eso: el cliente nombra el slot que quiere.
+
+    El slot es el mismo espacio que `DemoSessionRequest.demoSlot` (1..10 por
+    región), así que `(regionKey, demoSlot)` identifica al ocupante sin pedir su
+    `profileId` y sin abrir la puerta a desalojar un perfil de otra región.
+  properties:
+    regionKey:
+      $ref: 'common.yaml#/RegionKey'
+    demoSlot:
+      type: integer
+      minimum: 1
+      maximum: 10
+      description: Slot demo que se quiere ocupar (1..10).
+
 DemoSession:
   type: object
   additionalProperties: false

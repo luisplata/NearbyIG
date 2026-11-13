@@ -1,5 +1,5 @@
 {
-  "contractId": "c15b856f71cc",
+  "contractId": "7203b8216b58",
   "files": [
     {
       "path": "catalog/regions.json",
@@ -22,7 +22,7 @@
       "sha256": "61ab943115e59b3bc86093350ac83d81fef50fa24050be9f44a43b490d01fe13"
     }
   ],
-  "seedId": "seed-e13de7fd90c1",
+  "seedId": "seed-19573897bae5",
   "seedVersion": 1,
   "sources": {
     "fixtures": {

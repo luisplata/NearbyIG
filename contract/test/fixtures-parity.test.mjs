@@ -57,6 +57,13 @@ const MAPPING = [
 /** Los tres campos que el contrato agrega; no existen en el dataset. */
 const CATALOG_ONLY = ['demoSlot', 'regionKey', 'sourceType'];
 
+/**
+ * Campos que sólo existen en la **respuesta**: son estado de runtime, no seed.
+ * `inUse` (v0.2) dice si hay una sesión viva en el slot; no puede vivir en
+ * `catalog/*.json` porque el catálogo es data congelada y esto es estado.
+ */
+const RESPONSE_ONLY = ['inUse'];
+
 const PROFILE_FIELDS = [...MAPPING.map((entry) => entry.profile), ...CATALOG_ONLY].sort();
 const REGIONS = { mx, co };
 const INTENTIONS = ['activities', 'friendship', 'networking'];
@@ -162,15 +169,32 @@ test('cada región cubre las 3 intenciones (≥2 perfiles) y los 3 géneros', ()
 
 test('el schema público declara exactamente esos campos, cerrado y obligatorio', () => {
   const summary = spec.components.schemas.ProfileSummary;
+  const responseFields = [...PROFILE_FIELDS, ...RESPONSE_ONLY].sort();
 
   assert.ok(summary, 'falta components.schemas.ProfileSummary (¿se montó schemas/profile.yaml?)');
   assert.deepEqual(
     Object.keys(summary.properties ?? {}).sort(),
-    PROFILE_FIELDS,
-    'ProfileSummary tiene que declarar las 16 claves del catálogo y ninguna más',
+    responseFields,
+    'ProfileSummary declara las 16 claves del catálogo más `inUse`, y ninguna otra',
   );
-  assert.deepEqual([...(summary.required ?? [])].sort(), PROFILE_FIELDS, 'los 16 campos son obligatorios');
+  assert.deepEqual(
+    [...(summary.required ?? [])].sort(),
+    responseFields,
+    'los 17 campos de la respuesta son obligatorios (incluido inUse)',
+  );
   assert.equal(summary.additionalProperties, false, 'ProfileSummary cierra con additionalProperties: false');
+
+  // `inUse` es estado, no seed: si aparece en el catálogo, alguien congeló una
+  // ocupación en un archivo y el `--check` la va a pelear en cada reset.
+  for (const [regionKey, rows] of Object.entries(REGIONS)) {
+    for (const profile of rows) {
+      assert.equal(
+        Object.hasOwn(profile, 'inUse'),
+        false,
+        `${regionKey}/${nameOf(profile)}: inUse es de respuesta, no del seed`,
+      );
+    }
+  }
 
   // Los enums del vocabulario no se copian: se referencian. Si alguna vez se
   // duplican, el próximo valor nuevo se agrega en un solo lugar y el otro miente.

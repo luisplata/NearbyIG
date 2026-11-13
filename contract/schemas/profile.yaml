@@ -6,6 +6,10 @@
 # prueba `contract/test/fixtures-parity.test.mjs`, y en todo campo mapeado gana
 # `fixtures.json`.
 #
+# `inUse` no viene del dataset ni del seed: es **estado de runtime** (¿hay una
+# sesión demo viva en ese slot ahora?). Por eso no aparece en `catalog/*.json` y
+# por eso es `boolean` y no `null`: la respuesta siempre lo sabe.
+#
 # Avatar: **no hay objeto `avatar`**. El catálogo guarda `photoId` y el cliente
 # resuelve la foto contra el bundle de la demo. Duplicar acá la ruta, el tamaño o
 # los colores del avatar sería la primera copia en desincronizarse.
@@ -28,6 +32,7 @@ ProfileSummary:
     - gender
     - verified
     - online
+    - inUse
     - distanceM
     - bearingDeg
     - photoId
@@ -91,6 +96,20 @@ ProfileSummary:
       description: |
         Presencia del último heartbeat. Es estado, no evento: los cambios llegan
         por `profile.presence` en S2. Nunca `null`.
+    inUse:
+      type: boolean
+      description: |
+        Ocupación del slot en el momento de la respuesta: `true` si existe una
+        sesión demo viva ocupando `(regionKey, demoSlot)`.
+
+        Es el dato que hace que el selector de perfiles muestre "en uso" sin
+        intentar un claim y comer un 409. La consistencia la garantiza el índice
+        único parcial de `sessions` (una sola sesión viva por slot), no el server:
+        `inUse: true` es exactamente la condición que haría fallar un
+        `POST /auth/demo-session` sobre ese slot.
+
+        No viene del seed y no se persiste: es estado, igual que `online`.
+        Cancelar la sesión (logout, reset o takeover) lo vuelve a `false`.
     distanceM:
       type: integer
       minimum: 200

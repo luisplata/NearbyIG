@@ -9,7 +9,7 @@ openapi: 3.1.0
 
 info:
   title: NearbyIG API
-  version: 0.1.0
+  version: 0.2.0
   summary: Contrato congelado de la demo (S1–S3).
   description: |
     Contrato de la demo NearbyIG escrito a mano antes del server. La superficie
@@ -20,10 +20,20 @@ info:
     implementa. Ninguna operation se implementa en Sprint 0: acá sólo se
     declara la forma.
 
+    **v0.2 (delta sobre v0.1):** la ocupación de un slot demo se ve antes de
+    intentar reclamarlo y el desalojo se pide explícitamente.
+      * `ProfileSummary.inUse` publica si hay una sesión viva en el slot, así el
+        selector de perfiles puede mostrar "en uso" sin comer un 409.
+      * `POST /auth/takeover` desaloja un slot concreto y devuelve una
+        `DemoSession` nueva. `POST /auth/demo-session` sigue respondiendo
+        `409 PROFILE_IN_USE` sobre un slot ocupado: el desalojo nunca es
+        implícito.
+    Ningún DTO, código de error ni response cambia de forma.
+
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: 'c15b856f71cc'
+  x-contract-id: '7203b8216b58'
 
 servers:
   - url: http://localhost:3000
@@ -35,7 +45,11 @@ security:
 
 tags:
   - name: auth
-    description: Sesión demo, logout y ticket efímero para `GET /events`.
+    description: |
+      Sesión demo, takeover de un slot, logout y ticket efímero para
+      `GET /events`. `POST /auth/demo-session` es la única operation pública;
+      `POST /auth/takeover` pide sesión porque el desalojo necesita un sujeto: es
+      el invitado que pasa a humano o el navegador que cambia de perfil.
   - name: events
     description: |
       Stream SSE y polling del mismo log de eventos. El orden lo da `seq`, no
@@ -68,6 +82,8 @@ tags:
 paths:
   /auth/demo-session:
     $ref: './paths/auth.yaml#/demo-session'
+  /auth/takeover:
+    $ref: './paths/auth.yaml#/takeover'
   /auth/logout:
     $ref: './paths/auth.yaml#/logout'
   /auth/stream-ticket:
@@ -124,8 +140,12 @@ components:
 
     Conflict:
       description: |
-        El recurso pedido choca con el estado actual: el slot demo ya está
-        ocupado por otra sesión viva (`PROFILE_IN_USE`).
+        El pedido choca con el estado del slot demo (`PROFILE_IN_USE`). En
+        `POST /auth/demo-session` es un slot que ya ocupa otra sesión viva: el
+        claim no desaloja, así que el cliente tiene que elegir otro o pedir el
+        takeover. En `POST /auth/takeover` es un pedido sobre el slot que ya
+        ocupa la propia sesión que llama: no hay nada que desalojar y reemitir el
+        token apagaría la credencial en uso.
       x-error-code: PROFILE_IN_USE
       content:
         application/problem+json:
@@ -272,6 +292,8 @@ components:
       $ref: './schemas/auth.yaml#/DemoSession'
     DemoSessionRequest:
       $ref: './schemas/auth.yaml#/DemoSessionRequest'
+    TakeoverRequest:
+      $ref: './schemas/auth.yaml#/TakeoverRequest'
     StreamTicket:
       $ref: './schemas/auth.yaml#/StreamTicket'
     EventEnvelope:

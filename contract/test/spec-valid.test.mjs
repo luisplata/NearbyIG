@@ -16,12 +16,16 @@ const { raw, spec } = loadSpec();
  * borra ni se renombra. Si un PR agrega una operation sin tocar esta lista, el
  * test falla: el inventario no puede crecer en silencio.
  *
- * Con PR6 la lista está **completa**: es exactamente la tabla de la spec
- * (S1–S3). De acá en adelante, una fila nueva es un cambio de superficie, no un
- * PR de la cadena.
+ * Con PR6 la lista quedó **completa** para v0.1: era exactamente la tabla de la
+ * spec (S1–S3). De ahí en adelante, una fila nueva es un cambio de superficie,
+ * no un PR de la cadena. La primera excepción es deliberada: **v0.2** agrega
+ * `POST /auth/takeover` (desalojo explícito de un slot) junto con
+ * `ProfileSummary.inUse`, porque la demo de Sprint 1 necesita mostrar "en uso" y
+ * desalojar sin inventar superficie fuera del contrato.
  */
 const EXPECTED_OPERATIONS = [
   'POST /auth/demo-session',
+  'POST /auth/takeover',
   'POST /auth/logout',
   'POST /auth/stream-ticket',
   'GET /events',

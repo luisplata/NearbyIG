@@ -49,7 +49,7 @@ contract:validate      →  el spec es OpenAPI 3.1 y cumple sus invariantes
 contract:generate:check →  api.ts commiteado == regenerado (bytes)
 contract:seed:check    →  catálogo y manifest sin drift
 contract:event-log:check →  sample-log.json == derivado del catálogo
-contract:test          →  los casos de node:test (hoy 70)
+contract:test          →  los casos de node:test (hoy 77)
 contract:typecheck     →  el cliente compila en strict
 git diff --exit-code   →  red secundaria: nada quedó sin commitear
 ```
@@ -114,7 +114,7 @@ contract/
   paths/profiles.yaml       GET /demo/profiles (S1), sin geometría
   paths/presence.yaml       PUT y DELETE /presence (S2): la única entrada con coordenadas
   paths/discovery.yaml      GET /discovery (S3): radio y filtros, sin geometría
-  schemas/auth.yaml         DemoSession, DemoSessionRequest, StreamTicket
+  schemas/auth.yaml         DemoSession, DemoSessionRequest, TakeoverRequest, StreamTicket
   schemas/events.yaml       envelope, los 6 tipos, los 6 payloads, EventsPage
   schemas/region.yaml       Region, RegionList, ZoneSummary, ZoneList
   schemas/profile.yaml      ProfileSummary, ProfileList, SelfProfile
@@ -138,6 +138,7 @@ contract/
   scripts/validate-spec.mjs gate: lint + invariantes
   scripts/gates.mjs         los 5 gates de Sprint 0 con exit code agregado
   test/spec-valid.test.mjs  inventario de operations + invariantes
+  test/takeover-contract.test.mjs  inUse + takeover: forma del delta v0.2
   test/events-contract.test.mjs  envelope, dedupe, paridad SSE ≡ polling y log derivado
   test/zones-geometry.test.mjs   anillos válidos + geometría inalcanzable desde el spec
   test/fixtures-parity.test.mjs  paridad campo a campo con fixtures (fixtures gana)
@@ -180,6 +181,7 @@ cuando exista un diseño que lo congele: pings, matches, chat, block, report y
 | Operation | Sprint | Archivo | Entra en |
 |---|---:|---|---|
 | `POST /auth/demo-session` | 1 | `paths/auth.yaml` | PR1 |
+| `POST /auth/takeover` | 1 | `paths/auth.yaml` | **v0.2** |
 | `POST /auth/logout` | 1 | `paths/auth.yaml` | PR1 |
 | `POST /auth/stream-ticket` | 1 | `paths/auth.yaml` | PR1 |
 | `GET /demo/profiles` | 1 | `paths/profiles.yaml` | PR5 |
@@ -187,6 +189,46 @@ cuando exista un diseño que lo congele: pings, matches, chat, block, report y
 | `GET /demo/regions`, `GET /demo/zones` | 2 | `paths/catalog.yaml` | PR4 |
 | `PUT /presence`, `DELETE /presence` | 2 | `paths/presence.yaml` | PR6 |
 | `GET /discovery` | 3 | `paths/discovery.yaml` | PR6 |
+
+## Ocupación y takeover (delta v0.2)
+
+La demo de Sprint 1 tiene selector de perfiles: hay que ver "en uso" **antes** de
+intentar reclamar, y hay que poder desalojar. v0.1 no modelaba ninguna de las dos
+cosas, así que el cliente sólo descubría la ocupación comiendo un `409` y no
+tenía forma de desalojar sin mentir. El delta es chico y no cambia ningún DTO
+existente:
+
+| Pieza | Forma | Qué resuelve |
+|---|---|---|
+| `ProfileSummary.inUse` | `boolean` obligatorio | El selector pinta "en uso" con una sola lectura |
+| `POST /auth/takeover` | body `{ regionKey, demoSlot }` → 200 `DemoSession` | El desalojo es explícito y con sujeto |
+
+Reglas que el contrato fija y el server no puede reinterpretar:
+
+| Caso | Respuesta | Por qué |
+|---|---|---|
+| slot ocupado por otra sesión viva | **200** `DemoSession` | El token nuevo es el único que sirve: el anterior queda revocado en el acto y sus tickets se queman |
+| slot libre | **200** `DemoSession` | La postcondición ("ocupás el slot") se cumple igual; `inUse` es una foto y la carrera es benigna |
+| slot ocupado por la **propia** sesión | **409** `PROFILE_IN_USE` | No hay nada que desalojar y "renovar" el token apagaría la credencial en uso |
+| `regionKey` distinta a la de la sesión | **403** `REGION_MISMATCH` | Un takeover nunca cruza regiones, ni siquiera para "liberar" |
+| body inválido o slot sin perfil | **422** `VALIDATION_FAILED` | Es schema, no estado |
+| sin token | **401** `UNAUTHENTICATED` | El takeover hereda `demoSession`: el desalojo tiene sujeto |
+
+**Por qué `inUse` no está en el seed.** `catalog/profiles.*.json` es data
+congelada y determinista; la ocupación es estado que cambia con cada login. Si
+`inUse` viviera en el catálogo, `contract:seed:check` fallaría en cada sesión
+abierta. Por eso `fixtures-parity` separa las 16 claves del seed de las 17 de la
+respuesta (`inUse` es la única respuesta-only).
+
+**Por qué takeover es una operation y no un flag.** Un `takeover: true` dentro de
+`DemoSessionRequest` convierte el claim en un desalojo opcional y el cliente que
+lo olvida descubre el bug en producción. Como operation aparte, el contrato
+obliga a nombrar el slot y a elegir el verbo: `demo-session` dice "dale, sin
+desalojar"; `takeover` dice "este slot es mío". `POST /auth/demo-session` sobre un
+slot ocupado sigue siendo `409 PROFILE_IN_USE`.
+
+`inUse` viaja también en `DiscoveryResult`, que reusa `ProfileSummary`: es el
+mismo dato (¿hay alguien en ese slot?) y no se agrega un DTO nuevo para esconderlo.
 
 ## Regiones y zonas: la geometría existe y nunca viaja
 
@@ -243,7 +285,8 @@ no resuelve límites administrativos.
 
 `GET /demo/profiles` devuelve los 10 perfiles de una región, ordenados por
 `demoSlot`. La fila es `ProfileSummary`: los 13 campos del dataset más
-`regionKey`, `demoSlot` y `sourceType`.
+`regionKey`, `demoSlot`, `sourceType` y —desde v0.2— `inUse`, que es estado de
+runtime y no está en el seed (ver [Ocupación y takeover](#ocupación-y-takeover-delta-v02)).
 
 | Archivo | Filas | De dónde sale |
 |---|---:|---|
@@ -270,7 +313,7 @@ Reglas que el catálogo cumple y el test congela:
 - los 20 `profileId` son únicos; `mx` y `co` no comparten ninguno.
 - cada intención (`networking`, `friendship`, `activities`) la usan ≥2 perfiles por región y los 3 géneros aparecen.
 - **sin objeto `avatar`**: la foto se resuelve por `photoId` contra el bundle de la demo, así el catálogo no duplica los datos del avatar.
-- `ProfileSummary` cierra con `additionalProperties: false` y declara exactamente esas 16 claves: un campo que no existe en el schema no llega al catálogo.
+- `ProfileSummary` cierra con `additionalProperties: false` y declara exactamente esas 16 claves más `inUse`: un campo que no existe en el schema no llega a la respuesta, y `inUse` no llega al catálogo.
 
 Los invitados no están en el catálogo: son sesión de relleno, no perfiles
 descubribles. `demoSlot: null` está en el schema porque `SourceType` lo admite,
