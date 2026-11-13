@@ -84,15 +84,20 @@ contract/
   redocly.yaml              ruleset (extends: recommended)
   paths/auth.yaml           path items de auth (S1)
   paths/events.yaml         GET /events (SSE) y GET /events/poll (S2)
+  paths/catalog.yaml        GET /demo/regions y GET /demo/zones (S2), sin geometría
   schemas/auth.yaml         DemoSession, DemoSessionRequest, StreamTicket
   schemas/events.yaml       envelope, los 6 tipos, payloads S2, EventsPage
+  schemas/region.yaml       Region, RegionList, ZoneSummary, ZoneList
   schemas/common.yaml       RegionKey, SourceType, KeyLabel, Page
+  catalog/regions.json      dos regiones: mx, co (con defaultZoneKey)
+  catalog/zones.json        geometría de CDMX y Bogotá: anillos [lng, lat]
   event/sample-log.json     fixture congelado: 40 eventos con un duplicado
   scripts/lib/spec.mjs      carga los YAML, resuelve $ref, calcula x-contract-id
   scripts/lib/events.mjs    proyecciones puras: parseEnvelopeId, toSseFrames, toPollPage
   scripts/validate-spec.mjs gate: lint + invariantes
   test/spec-valid.test.mjs  inventario de operations + invariantes
   test/events-contract.test.mjs  envelope, dedupe y paridad SSE ≡ polling
+  test/zones-geometry.test.mjs   anillos válidos + geometría inalcanzable desde el spec
 ```
 
 ### Cómo se arma un path
@@ -134,6 +139,57 @@ cuando exista un diseño que lo congele: pings, matches, chat, block, report y
 | `GET /demo/regions`, `GET /demo/zones` | 2 | `paths/catalog.yaml` | PR4 |
 | `PUT /presence`, `DELETE /presence` | 2 | `paths/presence.yaml` | PR6 |
 | `GET /discovery` | 3 | `paths/discovery.yaml` | PR6 |
+
+## Regiones y zonas: la geometría existe y nunca viaja
+
+El catálogo **tiene** polígonos: `contract/catalog/zones.json` guarda CDMX y
+Bogotá como anillos de pares `[lng, lat]`. Lo que no puede pasar es que una
+coordenada llegue a un response o a un payload de evento. La frontera es el spec:
+
+| Qué | Dónde vive | Sale por HTTP |
+|---|---|---|
+| `ZoneSummary { zoneKey, nameKey, regionKey }` | `schemas/region.yaml` → `components.schemas.ZoneSummary` | sí, y nada más |
+| `Region { regionKey, nameKey, defaultZoneKey }` | `schemas/region.yaml` → `components.schemas.Region` | sí |
+| `polygon[]` de anillos con vértices `[lng, lat]` | **sólo** `catalog/zones.json` | **nunca** |
+
+Por qué alcanza con eso: un `$ref` del contrato resuelve dentro del spec y el
+catálogo no es un schema, es un archivo de datos. Si alguien agrega
+`ZonePolygon` a `components.schemas`, el guard de abajo lo ve; si alguien lo
+apunta a `catalog/zones.json`, `contract:validate` falla porque el `$ref` sale
+del spec y el guard de geometría falla porque ningún `$ref` puede nombrar
+`catalog/`. Las dos puertas están cerradas.
+
+`contract/test/zones-geometry.test.mjs` **no** usa una allowlist de schemas: una
+lista de nombres permitidos deja pasar el próximo schema que nadie sumó. Recorre
+el grafo resuelto desde toda `responses.*.content.*.schema` y desde todo
+`components.schemas`, y falla nombrando la ruta cuando aparece:
+
+- una propiedad `polygon`, `polygons`, `ring`, `rings`, `center`, `geometry`,
+  `coordinates`, `lat`, `lng`, `lon`, `latitude` o `longitude`;
+- un array de exactamente dos números (`prefixItems`) o un literal `[n, n]`, que
+  es una coordenada sin nombre;
+- un `$ref` que apunte a `catalog/`.
+
+| Regla del anillo | Valor |
+|---|---|
+| Forma del vértice | par posicional `[lng, lat]`; prohibido `{"lng": …}` y `{"lat": …}` |
+| Cierre | primer vértice == último |
+| Vértices | ≥3 distintos (≥4 puntos contando el cierre) |
+| Precisión | exactamente 6 decimales **en el archivo** (no es cosmético: es el formato del seed) |
+| Rango | `lng` ∈ [−180, 180], `lat` ∈ [−90, 90] |
+| Prohibido en el catálogo | `center`: no hay centro, el polígono alcanza |
+
+Los datos son aproximados y plausibles, no catastrales: la demo dibuja una zona,
+no resuelve límites administrativos.
+
+### Cómo agregar una zona
+
+1. Sumar la fila a `catalog/zones.json` con `zoneKey`, `regionKey`, `nameKey` y
+   `polygon` (anillo cerrado, 6 decimales). Sin `center`.
+2. Si es la zona por defecto de su región, apuntarla desde
+   `defaultZoneKey` en `catalog/regions.json`. El test verifica que exista y que
+   sea de la misma región.
+3. `npm run contract:test`. Nada del spec cambia: `ZoneSummary` ya la proyecta.
 
 ## Eventos: envelope y replay
 
@@ -200,8 +256,9 @@ Consecuencias que importan al revisar:
   Entran en PR2; por eso `operation-4xx-response` está en `off` en `redocly.yaml`
   y se reactiva con el catálogo.
 - **Nunca coordenadas.** Ningún response ni payload de evento puede alcanzar
-  `lat`/`lng`/`latitude`/`longitude`. Los polígonos viven sólo en
-  `contract/catalog/zones.json`, fuera del spec y sin keys (`[lng, lat]`).
+  `lat`/`lng`/`latitude`/`longitude` ni un par `[n, n]`. Los polígonos viven sólo
+  en `contract/catalog/zones.json`, fuera del spec y sin keys (ver
+  [Regiones y zonas](#regiones-y-zonas-la-geometría-existe-y-nunca-viaja)).
 - **Sin `/v1`.** El versionado vive en `info`, no en el path.
 - **`Page` es metadata, no wrapper.** `allOf` + `additionalProperties: false`
   bloquea campos hermanos: las proyecciones declaran sus campos planos.
