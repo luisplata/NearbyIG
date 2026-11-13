@@ -23,7 +23,7 @@ info:
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: '2054137eeec3'
+  x-contract-id: 'e77ff1658f63'
 
 servers:
   - url: http://localhost:3000
@@ -46,6 +46,56 @@ paths:
     $ref: './paths/auth.yaml#/stream-ticket'
 
 components:
+  # Respuestas de error compartidas. Todas tienen la misma forma
+  # (`application/problem+json` → `Problem`) porque el cliente tiene que poder
+  # parsear cualquier 4xx/5xx con un solo shape.
+  #
+  # `x-error-code` no es un capricho: es lo que ata el status del response al
+  # `x-status` del código en `schemas/errors.yaml`, así el test compara ambos
+  # números en vez de confiar en que nadie se equivoque al escribirlos.
+  responses:
+    Unauthorized:
+      description: |
+        Falta la credencial, el JWT venció o el ticket de stream no es válido.
+        `code` distingue los tres casos: `UNAUTHENTICATED`, `TICKET_EXPIRED`,
+        `TICKET_REUSED`.
+      x-error-code: UNAUTHENTICATED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    Conflict:
+      description: |
+        El recurso pedido choca con el estado actual: el slot demo ya está
+        ocupado por otra sesión viva (`PROFILE_IN_USE`).
+      x-error-code: PROFILE_IN_USE
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    Unprocessable:
+      description: |
+        El pedido está bien formado como HTTP pero no cumple el schema: body,
+        query o cursor (`VALIDATION_FAILED`).
+      x-error-code: VALIDATION_FAILED
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
+    Internal:
+      description: |
+        Falla no clasificada (`INTERNAL`). Se declara acá y la cablea S2 en las
+        operations de events y presence; en auth no hay nada que pueda romperse
+        del lado del cliente más allá del slot.
+      x-error-code: INTERNAL
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
   securitySchemes:
     demoSession:
       type: http
@@ -62,6 +112,10 @@ components:
       $ref: './schemas/auth.yaml#/DemoSessionRequest'
     StreamTicket:
       $ref: './schemas/auth.yaml#/StreamTicket'
+    ErrorCode:
+      $ref: './schemas/errors.yaml#/ErrorCode'
+    Problem:
+      $ref: './schemas/errors.yaml#/Problem'
     KeyLabel:
       $ref: './schemas/common.yaml#/KeyLabel'
     Page:

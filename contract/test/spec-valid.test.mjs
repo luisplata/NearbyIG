@@ -49,6 +49,20 @@ test('toda operation declara x-implementation-sprint entero en 1..3', () => {
   }
 });
 
+test('toda operation declara al menos un error 4xx/5xx', () => {
+  for (const operation of operations) {
+    const statuses = Object.keys(operation.operation.responses ?? {})
+      .filter((status) => /^[1-5]\d{2}$/.test(status))
+      .map(Number)
+      .filter((status) => status >= 400);
+
+    assert.ok(
+      statuses.length > 0,
+      `${label(operation)}: no declara ningún 4xx/5xx (redocly: operation-4xx-response)`,
+    );
+  }
+});
+
 test('los operationId son únicos y no vacíos', () => {
   const ids = operations.map((operation) => operation.operationId);
 
