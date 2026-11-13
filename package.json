@@ -17,7 +17,10 @@
     "contract:validate": "node contract/scripts/validate-spec.mjs",
     "contract:test": "node --test \"contract/test/*.test.mjs\"",
     "contract:docs": "node scripts/build-contract-docs.mjs",
-    "contract:check": "npm run contract:validate && npm run contract:test && git diff --exit-code"
+    "contract:seed": "node contract/scripts/seed.mjs",
+    "contract:seed:check": "node contract/scripts/seed.mjs --check",
+    "contract:seed:dry-run": "node contract/scripts/seed.mjs --dry-run",
+    "contract:check": "npm run contract:validate && npm run contract:seed:check && npm run contract:test && git diff --exit-code"
   },
   "devDependencies": {
     "@redocly/cli": "2.78.0",

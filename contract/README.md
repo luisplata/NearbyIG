@@ -27,12 +27,16 @@ pinneadas: `@redocly/cli` y `yaml`).
 | Comando | Qué hace |
 |---|---|
 | `npm run contract:validate` | `redocly lint` + invariantes estructurales |
+| `npm run contract:seed` | emite el catálogo en forma canónica + `seed/manifest.json` |
+| `npm run contract:seed:check` | falla si lo commiteado difiere de lo emitido |
+| `npm run contract:seed:dry-run` | tabla `path \| rows \| sha \| estado`, sin escribir |
 | `npm run contract:test` | `node --test` sobre `contract/test/*.test.mjs` |
 | `npm run contract:docs` | genera el doc HTML estático en `contract/dist/` |
-| `npm run contract:check` | `contract:validate` → `contract:test` → `git diff --exit-code` |
+| `npm run contract:check` | `contract:validate` → `contract:seed:check` → `contract:test` → `git diff --exit-code` |
 
-`contract:check` es el gate. Suma un guard por PR: seeds en PR7, `generate:check`
-y `typecheck` en PR8.
+`contract:check` es el gate: el seed se verifica antes de los tests, porque un
+`manifest` viejo invalida cualquier verde posterior. PR8 sumará `generate:check`
+y `typecheck`.
 
 Corre en CI en `.github/workflows/contract.yml`, un workflow propio: `push` a `main`
 y PRs que toquen `contract/`, `package.json`, `package-lock.json` o el workflow.
@@ -95,14 +99,17 @@ contract/
   catalog/zones.json        geometría de CDMX y Bogotá: anillos [lng, lat]
   catalog/profiles.mx.json  10 perfiles derivados de fixtures.json (posición a posición)
   catalog/profiles.co.json  10 perfiles autorados, mismo shape
+  seed/manifest.json        versión, contractId, hash de fixtures y sha de cada archivo emitido
   event/sample-log.json     fixture congelado: 40 eventos con un duplicado
   scripts/lib/spec.mjs      carga los YAML, resuelve $ref, calcula x-contract-id
   scripts/lib/events.mjs    proyecciones puras: parseEnvelopeId, toSseFrames, toPollPage
+  scripts/seed.mjs          emisor canónico del catálogo + manifest (--check, --dry-run)
   scripts/validate-spec.mjs gate: lint + invariantes
   test/spec-valid.test.mjs  inventario de operations + invariantes
   test/events-contract.test.mjs  envelope, dedupe y paridad SSE ≡ polling
   test/zones-geometry.test.mjs   anillos válidos + geometría inalcanzable desde el spec
   test/fixtures-parity.test.mjs  paridad campo a campo con fixtures (fixtures gana)
+  test/seed-idempotent.test.mjs  doble emisión byte-idéntica + gate anti-drift
 ```
 
 ### Cómo se arma un path
@@ -240,6 +247,56 @@ pero ninguna de las 20 filas es `guest`.
 2. Si es de `co`, se edita `profiles.co.json` respetando el shape y la cobertura.
 3. `npm run contract:test`. El schema no cambia: `ProfileSummary` ya lo proyecta.
 
+## Seeds deterministas
+
+El seed **es** el catálogo emitido. `npm run contract:seed` escribe los cuatro
+archivos de `catalog/` en una forma única y `seed/manifest.json` con lo que emitió:
+
+| Archivo | Forma | `rows` |
+|---|---|---:|
+| `catalog/regions.json` | una fila por línea, claves ordenadas, orden `(regionKey)` | 2 |
+| `catalog/zones.json` | una zona por línea, vértices `[lng, lat]` con **6 decimales** | 2 |
+| `catalog/profiles.mx.json`, `catalog/profiles.co.json` | una fila por línea, orden `(regionKey, demoSlot)` | 10 + 10 |
+
+`seed/manifest.json`:
+
+| Campo | Qué ata |
+|---|---|
+| `seedVersion` | versión del **formato** (sube cuando cambia la forma, no los datos) |
+| `contractId` | el `x-contract-id` vigente: el seed y el contrato no pueden desincronizarse |
+| `sources.fixtures.sha256` | el hash de `demo/shared/fixtures.json` con LF: tocarlo sin regenerar rompe el gate |
+| `files[{ path, rows, sha256 }]` | qué se emitió; `path` relativo a `contract/` |
+| `seedId` | `seed-` + 12 hex de lo emitido (sin incluirse a sí mismo) |
+
+| Comando | Qué hace | Exit |
+|---|---|---:|
+| `npm run contract:seed` | emite y escribe; muestra la tabla con el estado previo | 0 |
+| `npm run contract:seed:check` | compara lo emitido con lo commiteado | 1 si hay `drift` o `nuevo` |
+| `npm run contract:seed:dry-run` | imprime la tabla y **no escribe nada** | 0 |
+
+La tabla es `path | rows | sha | estado` y el estado es uno de `sin cambios`,
+`drift` (existe y difiere) o `nuevo` (falta). `contract:check` corre
+`contract:seed:check` antes de los tests: un manifest viejo invalida cualquier
+verde posterior.
+
+**Qué se prueba:** dos emisiones producen bytes idénticos y el mismo `seedId`
+(`test/seed-idempotent.test.mjs`, emitiendo a dos directorios temporales). Eso es
+idempotencia de **emisión**, una función pura del input.
+
+**Qué no se prueba todavía:** la idempotencia de **inserción**. No hay DB en
+Sprint 0, así que cualquier `INSERT` acá sería una invención. En Sprint 1 se
+garantiza por claves naturales — `region_key + zone_key` para zonas y
+`region_key + demo_slot` para perfiles — con `ON CONFLICT DO NOTHING`. El seed ya
+trae esas dos claves: es lo único que S1 tiene que agregar al esquema.
+
+### Cómo regenerar el seed
+
+1. Cambiá el catálogo (o `fixtures.json`, si es un perfil `mx`).
+2. `npm run contract:seed`.
+3. Revisá el `git diff`: si aparece un archivo entero reescrito, es que el input
+   no estaba canónico. `--check` lo habría detectado igual.
+4. `npm run contract:check` y commiteá catálogo + manifest juntos.
+
 ## Eventos: envelope y replay
 
 Un solo envelope para las dos proyecciones. `GET /events` (SSE) y
@@ -318,5 +375,5 @@ Consecuencias que importan al revisar:
   un wrapper `fetch` con selector mock/live que ningún generador produce.
 - `contract/catalog/` no se sirve nunca a clientes: sólo se exponen proyecciones
   (`ZoneSummary`, DTOs de perfil).
-- Idempotencia de **emisión** de seeds es S0; la de **inserción** es Sprint 1
-  (claves naturales + `ON CONFLICT DO NOTHING`). PR7 lo documenta acá.
+- La idempotencia de **emisión** de seeds es S0; la de **inserción** es Sprint 1
+  (claves naturales + `ON CONFLICT DO NOTHING`). Ver [Seeds deterministas](#seeds-deterministas).
