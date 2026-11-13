@@ -76,6 +76,11 @@ export interface AppConfig {
    * `curl` y el backend sí).
    */
   readonly corsAllowedOrigins: readonly string[];
+  /**
+   * Aceptar túneles de ngrok además de la allowlist. Sólo en desarrollo/test:
+   * en producción los orígenes son exactamente los declarados.
+   */
+  readonly corsAllowTunnelOrigins: boolean;
 }
 
 export const DEV_JWT_SECRET = 'dev-only-insecure-jwt-secret-change-me';
@@ -97,6 +102,48 @@ export const DEV_CORS_ORIGINS: readonly string[] = [
   'http://localhost:4173',
   'http://localhost:8080',
 ];
+
+/**
+ * Túneles de desarrollo: probar la demo desde el móvil sin publicar nada.
+ *
+ * Un túnel de ngrok cambia de subdominio en cada sesión, así que no se puede
+ * declarar en `CORS_ALLOWED_ORIGINS` sin editar el entorno cada vez. Se aceptan
+ * por patrón y **sólo en desarrollo/test**: en producción la lista vuelve a ser
+ * exactamente la que alguien declaró.
+ *
+ * Ojo con cuál origen importa: el navegador manda el `Origin` de la **página**
+ * que sirve el JS (el túnel del `expo export`), no el de la API. Si la app se
+ * abre en `https://<algo>.ngrok-free.app` y llama a `https://<otro>.ngrok-free.app`,
+ * las dos cosas son túneles y la que tiene que estar permitida es la primera.
+ */
+export const DEV_TUNNEL_ORIGIN_PATTERNS: readonly RegExp[] = [
+  /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.ngrok-free\.app$/i,
+  /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.ngrok-free\.dev$/i,
+  /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.ngrok\.io$/i,
+];
+
+/** `true` si el origen es un túnel de ngrok (siempre `https`). */
+export function isTunnelOrigin(origin: string): boolean {
+  return DEV_TUNNEL_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin));
+}
+
+/**
+ * Decisión de CORS para un `Origin`: allowlist exacta o, en desarrollo, túnel.
+ *
+ * Es una función y no un array porque una allowlist de strings no expresa
+ * subdominios. No cambia la garantía: sigue sin haber `*` y sigue sin
+ * credenciales (la demo autentica con Bearer).
+ */
+export function isAllowedCorsOrigin(
+  origin: string,
+  allowedOrigins: readonly string[],
+  allowTunnelOrigins: boolean,
+): boolean {
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+  return allowTunnelOrigins && isTunnelOrigin(origin);
+}
 
 /** `scheme://host[:port]`, sin path ni barra final: es lo que manda el browser. */
 const ORIGIN_PATTERN = /^https?:\/\/[a-z0-9.-]+(?::[0-9]{1,5})?$/i;
@@ -189,5 +236,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sseHeartbeatMs: 15_000,
     defaultRegionKey: (env.DEFAULT_REGION_KEY?.trim() || 'mx').toLowerCase(),
     corsAllowedOrigins: parseCorsOrigins(env.CORS_ALLOWED_ORIGINS, isProduction),
+    corsAllowTunnelOrigins: !isProduction,
   };
 }

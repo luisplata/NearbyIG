@@ -18,7 +18,7 @@ implementa, no se renegocia.
 | `GET /events/poll` | listo (S2): misma secuencia que el SSE desde el mismo cursor |
 | `GET /discovery` | listo (S3): radio, intención, género, verificado y online; medidas por observador |
 | Bots | listo (S2): 2 por humano vivo, 4 waypoints, ticker de 2 s, cap de 6 por observador |
-| CORS | listo (S3): allowlist configurable (`CORS_ALLOWED_ORIGINS`) |
+| CORS | listo (S3): allowlist configurable (`CORS_ALLOWED_ORIGINS`) + túneles de ngrok en desarrollo |
 | `POST /demo/reset`, `/demo/reset/self` | listo (fuera del contrato, §11 del plan) |
 | Migraciones + seeds idempotentes | listo (`001_init`, `002_presence`, `003_bots_events`) |
 
@@ -314,9 +314,19 @@ autentica con `Authorization: Bearer`, no con cookies.
 
 | Entorno | Orígenes |
 |---|---|
-| desarrollo / test (default) | `http://localhost:8081` (Expo web dev), `http://localhost:4173` (`npx serve site -l 4173`), `http://localhost:8080` |
-| producción | **ninguno** hasta que se declare; el boot lo avisa por log |
+| desarrollo / test (default) | `http://localhost:8081` (Expo web dev), `http://localhost:4173` (`npx serve site -l 4173`), `http://localhost:8080`, más los túneles de ngrok (`*.ngrok-free.app`, `*.ngrok-free.dev`, `*.ngrok.io`) |
+| producción | **ninguno** hasta que se declare; el boot lo avisa por log. Los túneles **no** se aceptan |
 | S6 (GitHub Pages) | agregar el origen del sitio: `CORS_ALLOWED_ORIGINS=https://usuario.github.io` |
+
+**Qué origen importa.** El navegador manda el `Origin` de la **página** que sirve
+el JS, no el de la API. Si la app se abre en `https://<pagina>.ngrok-free.app` y
+llama a `https://<api>.ngrok-free.app`, el que tiene que estar permitido es el de
+la página; el de la API nunca aparece en un `Origin`.
+
+**Túneles en desarrollo.** Un túnel de ngrok cambia de subdominio en cada sesión,
+así que se acepta por patrón en `development`/`test` en vez de obligar a editar
+`CORS_ALLOWED_ORIGINS` cada vez. Sigue sin haber `*` y sigue sin credenciales. En
+producción no hay patrones: los orígenes son exactamente los declarados.
 
 ```bash
 # preflight de discovery con el origen de Expo web
@@ -328,6 +338,13 @@ curl -s -i -X OPTIONS http://localhost:3000/discovery \
 # Access-Control-Allow-Origin: http://localhost:8081
 # Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS
 # Access-Control-Allow-Headers: authorization,content-type,last-event-id
+
+# el mismo preflight desde el túnel de la página (sólo desarrollo)
+curl -s -i -X OPTIONS http://localhost:3000/discovery \
+  -H 'Origin: https://abc123.ngrok-free.app' \
+  -H 'Access-Control-Request-Method: GET' | head -3
+# HTTP/1.1 204 No Content
+# Access-Control-Allow-Origin: https://abc123.ngrok-free.app
 ```
 
 Un origen fuera de la lista recibe la respuesta **sin** `Access-Control-Allow-Origin`

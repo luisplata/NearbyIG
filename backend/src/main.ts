@@ -4,7 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ProblemFilter } from './common/problem.filter';
 import { requestContext } from './common/request-context';
-import { DEV_JWT_SECRET, loadConfig } from './config/env';
+import { DEV_JWT_SECRET, isAllowedCorsOrigin, loadConfig } from './config/env';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
@@ -23,13 +23,29 @@ async function bootstrap(): Promise<void> {
   // `GET /discovery` con `Authorization` es una request real, y sin esto el
   // navegador la bloquea aunque el endpoint responda 200 a `curl`.
   //
+  // El `Origin` que importa es el de la **página** que sirve el JS, no el de la
+  // API: el navegador compara el origen de quien llama contra lo que la API
+  // declara. Un túnel para probar en el móvil se permite por patrón, sólo en
+  // desarrollo (`isAllowedCorsOrigin`).
+  //
   // Sin `credentials`: la demo autentica con Bearer en el header, no con cookie,
   // así que `Access-Control-Allow-Credentials` sería una concesión que nadie usa.
   // `last-event-id` va en la lista porque el `EventSource` lo manda solo al
   // reconectar y no es un header "simple" para el preflight.
-  if (config.corsAllowedOrigins.length > 0) {
+  if (config.corsAllowedOrigins.length > 0 || config.corsAllowTunnelOrigins) {
     app.enableCors({
-      origin: [...config.corsAllowedOrigins],
+      // Una función en vez de un array: la allowlist exacta no expresa
+      // subdominios de túnel. Un origen ausente (curl, server-to-server) no es
+      // un problema de CORS y sigue pasando sin headers.
+      origin: (
+        origin: string | undefined,
+        callback: (error: Error | null, allow?: boolean) => void,
+      ) => {
+        const allowed =
+          typeof origin === 'string' &&
+          isAllowedCorsOrigin(origin, config.corsAllowedOrigins, config.corsAllowTunnelOrigins);
+        callback(null, allowed);
+      },
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['authorization', 'content-type', 'last-event-id'],
       maxAge: 600,
