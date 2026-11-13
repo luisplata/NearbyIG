@@ -20,6 +20,8 @@ const EXPECTED_OPERATIONS = [
   'POST /auth/demo-session',
   'POST /auth/logout',
   'POST /auth/stream-ticket',
+  'GET /events',
+  'GET /events/poll',
 ];
 
 const SUPPORTED_SPRINTS = [1, 2, 3];

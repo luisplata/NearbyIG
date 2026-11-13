@@ -83,11 +83,16 @@ contract/
   openapi.yaml              raíz: info, servers, security global, tags, montaje de paths
   redocly.yaml              ruleset (extends: recommended)
   paths/auth.yaml           path items de auth (S1)
+  paths/events.yaml         GET /events (SSE) y GET /events/poll (S2)
   schemas/auth.yaml         DemoSession, DemoSessionRequest, StreamTicket
+  schemas/events.yaml       envelope, los 6 tipos, payloads S2, EventsPage
   schemas/common.yaml       RegionKey, SourceType, KeyLabel, Page
+  event/sample-log.json     fixture congelado: 40 eventos con un duplicado
   scripts/lib/spec.mjs      carga los YAML, resuelve $ref, calcula x-contract-id
+  scripts/lib/events.mjs    proyecciones puras: parseEnvelopeId, toSseFrames, toPollPage
   scripts/validate-spec.mjs gate: lint + invariantes
   test/spec-valid.test.mjs  inventario de operations + invariantes
+  test/events-contract.test.mjs  envelope, dedupe y paridad SSE ≡ polling
 ```
 
 ### Cómo se arma un path
@@ -129,6 +134,36 @@ cuando exista un diseño que lo congele: pings, matches, chat, block, report y
 | `GET /demo/regions`, `GET /demo/zones` | 2 | `paths/catalog.yaml` | PR4 |
 | `PUT /presence`, `DELETE /presence` | 2 | `paths/presence.yaml` | PR6 |
 | `GET /discovery` | 3 | `paths/discovery.yaml` | PR6 |
+
+## Eventos: envelope y replay
+
+Un solo envelope para las dos proyecciones. `GET /events` (SSE) y
+`GET /events/poll` (cursor) entregan la misma secuencia desde el mismo cursor, y
+`contract/test/events-contract.test.mjs` lo prueba sobre el log congelado: las
+dos son funciones puras del mismo archivo.
+
+| Pieza | Regla |
+|---|---|
+| `id` | `<regionKey>:<seq:012d>` (`mx:000000000042`). `seq` es monotónico **por región** |
+| Orden | lo da `seq`. `occurredAt` es RFC 3339 UTC con ms y **no ordena** |
+| Reanudar | `Last-Event-ID` (SSE) o `?cursor=` (poll) = último `id` entregado → se sigue en `seq + 1` |
+| Dedupe | el cliente descarta `seq <= lastSeen`; el log trae un duplicado idéntico a propósito |
+| Página vacía | `nextCursor` vuelve igual al recibido y `hasMore: false` |
+| Cursor viejo / malformado | 410 `CURSOR_EXPIRED` / 422 `VALIDATION_FAILED` (no hay 400) |
+| Ticket | `streamTicket` en query, **sólo** en `GET /events`: `EventSource` no manda headers |
+
+`contract/event/sample-log.json` es un fixture congelado (40 entradas: 24 `seq`
+de `mx`, 15 de `co` y un duplicado). Todavía no se regenera desde el catálogo: el
+generador y el test de bytes llegan con los perfiles (PR5).
+
+### Cómo agregar un tipo de evento
+
+1. El valor ya está en `EventType` si es uno de los seis congelados. Si no,
+   sumalo ahí: el enum es el contrato con el cliente.
+2. Declarar `<Tipo>Payload` con `additionalProperties: false` — sin `lat`, `lng`,
+   `latitude` ni `longitude`; distancia y rumbo van como `distanceM`/`bearingDeg`.
+3. Sumarlo al `oneOf` de `EventPayload`. El envelope **no** cambia.
+4. Extender `PAYLOAD_SCHEMA` en `contract/test/events-contract.test.mjs`.
 
 ## `x-contract-id`
 

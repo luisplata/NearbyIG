@@ -1,0 +1,134 @@
+# Envelope de eventos y sus payloads. Todo evento —por SSE o por polling— es el
+# mismo objeto: cambia el transporte, no el dato.
+#
+# El orden lo define `seq`, no `occurredAt`. Entre requests concurrentes el reloj
+# no ordena nada; un contador por región sí. `id` es opaco para el cliente salvo
+# el sufijo numérico, que es lo único que necesita para deduplicar: descarta todo
+# `seq <= lastSeen`. Por eso `occurredAt` es informativo y se documenta como tal.
+
+EventType:
+  type: string
+  enum:
+    - profile.moved
+    - profile.presence
+    - ping.received
+    - match.created
+    - message.created
+    - typing.started
+  description: |
+    Nombre del evento, cerrado a estos seis. El enum entra completo ahora aunque
+    S2 sólo emita los dos primeros: S4/S5 agregan payloads, no renombran tipos, y
+    el cliente no cambia de unión.
+
+EventEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - id
+    - type
+    - occurredAt
+    - payload
+  description: |
+    Forma única de evento, idéntica en `data:` del SSE y en `events[]` del
+    polling. `id` = `<regionKey>:<seq:012d>`; stream y poll de una región nunca
+    entregan el prefijo de otra.
+  properties:
+    id:
+      type: string
+      pattern: '^[a-z]{2}:[0-9]{12}$'
+      examples:
+        - 'mx:000000000042'
+      description: |
+        `<regionKey>:<seq>` con `seq` de 12 dígitos, monotónico por región. El
+        cliente sólo parsea el sufijo para deduplicar; el resto es opaco.
+    type:
+      $ref: '#/EventType'
+    occurredAt:
+      type: string
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$'
+      examples:
+        - '2026-11-12T18:00:00.000Z'
+      description: |
+        RFC 3339 UTC con milisegundos y sufijo `Z`. **Informativo: no ordena.** Dos
+        eventos con este campo invertido siguen ordenados por `seq`.
+    payload:
+      $ref: '#/EventPayload'
+
+EventPayload:
+  description: |
+    Cuerpo por `type`. La unión crece con los cuatro payloads de S4/S5
+    (`ping.received`, `match.created`, `message.created`, `typing.started`), sin
+    tocar el envelope. Ningún payload lleva coordenadas: `profile.moved` usa
+    `distanceM`/`bearingDeg` como el resto del sistema.
+  oneOf:
+    - $ref: '#/ProfileMovedPayload'
+    - $ref: '#/ProfilePresencePayload'
+
+ProfileMovedPayload:
+  type: object
+  additionalProperties: false
+  required:
+    - profileId
+    - distanceM
+    - bearingDeg
+  description: El perfil se movió. Distancia y rumbo relativos a quien recibe.
+  properties:
+    profileId:
+      type: string
+      minLength: 1
+      description: Id del perfil dentro de la región (la región la da el `id`).
+    distanceM:
+      type: integer
+      minimum: 200
+      maximum: 5000
+      description: Distancia en metros, ya calculada por el server.
+    bearingDeg:
+      type: integer
+      minimum: 0
+      maximum: 359
+      description: Rumbo en grados desde el norte, sentido horario.
+
+ProfilePresencePayload:
+  type: object
+  additionalProperties: false
+  required:
+    - profileId
+    - online
+  description: El perfil cambió de estado de presencia. No hay coordenadas ni zona.
+  properties:
+    profileId:
+      type: string
+      minLength: 1
+    online:
+      type: boolean
+      description: Nunca null.
+
+EventsPage:
+  type: object
+  additionalProperties: false
+  required:
+    - events
+    - nextCursor
+    - hasMore
+  description: |
+    Página de polling. Tres campos planos a propósito: `Page` es metadata y
+    `allOf` + `additionalProperties: false` bloquearía los hermanos. No hay
+    `truncated`: `hasMore` ya dice si queda algo y `nextCursor` es el `id` del
+    último entregado — una página vacía lo devuelve igual al recibido.
+  properties:
+    events:
+      type: array
+      maxItems: 500
+      items:
+        $ref: '#/EventEnvelope'
+    nextCursor:
+      type:
+        - string
+        - 'null'
+      pattern: '^[a-z]{2}:[0-9]{12}$'
+      description: |
+        Cursor de la próxima página: el `id` del último evento entregado. `null`
+        sólo cuando no se recibió cursor y la página salió vacía.
+    hasMore:
+      type: boolean
+      description: Si quedan eventos después de esta página.
