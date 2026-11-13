@@ -28,14 +28,23 @@ import {
   type LiveActionResult,
   type LiveController,
   type MarkReadResult,
+  type OpenChatResult,
   type PingResult,
+  type SendMessageResult,
 } from './controller';
 import { requestBrowserPoint } from './geolocation';
 import { toBlockRows, type BlockRow } from './safety';
+import { toMatchRows, type MatchRow } from './chat';
 import { toNotificationRows, type NotificationRow } from './notifications';
 import { pendingCount, toPingRows } from './pings';
 import type { PingRow } from './pings';
-import { emptyLiveState, type LiveState, type ReportReason, type Visibility } from './types';
+import {
+  emptyLiveState,
+  type LiveChatState,
+  type LiveState,
+  type ReportReason,
+  type Visibility,
+} from './types';
 
 /**
  * Puente entre el controlador live (puro) y React.
@@ -95,6 +104,21 @@ export type LiveBinding = {
   notificationError: string | null;
   refreshNotifications: () => Promise<void>;
   markNotificationsRead: (notificationIds?: readonly string[]) => Promise<MarkReadResult>;
+  /** Bandeja de matches ya adaptada (preview y no leídos incluidos). */
+  matches: MatchRow[];
+  matchesError: string | null;
+  refreshMatches: () => Promise<void>;
+  /** Conversación abierta. `null` = la pantalla de chat muestra el guion mock. */
+  chat: LiveChatState | null;
+  openChat: (matchId: string) => Promise<OpenChatResult>;
+  closeChat: () => void;
+  loadMoreMessages: () => Promise<void>;
+  refreshChat: () => Promise<void>;
+  sendChatMessage: (
+    matchId: string,
+    body: string,
+    clientMessageId?: string,
+  ) => Promise<SendMessageResult>;
   /** Reset propio (`POST /demo/reset/self`): cierra la sesión y limpia lo propio. */
   resetSelf: () => Promise<LiveActionResult>;
 };
@@ -273,11 +297,33 @@ export function LiveProvider({
     [controller],
   );
   const resetSelf = useCallback(async () => controller.resetSelf(), [controller]);
+  const refreshMatches = useCallback(async () => {
+    await controller.refreshMatches();
+  }, [controller]);
+  const openChat = useCallback(async (matchId: string) => controller.openChat(matchId), [
+    controller,
+  ]);
+  const closeChat = useCallback(() => controller.closeChat(), [controller]);
+  const loadMoreMessages = useCallback(async () => {
+    await controller.loadMoreMessages();
+  }, [controller]);
+  const refreshChat = useCallback(async () => {
+    await controller.refreshChat();
+  }, [controller]);
+  const sendChatMessage = useCallback(
+    async (matchId: string, body: string, clientMessageId?: string) =>
+      controller.sendChatMessage(matchId, body, clientMessageId),
+    [controller],
+  );
 
   const blocks = useMemo(() => toBlockRows(live.blocks), [live.blocks]);
   const notifications = useMemo(
     () => toNotificationRows(live.notifications),
     [live.notifications],
+  );
+  const matches = useMemo(
+    () => toMatchRows(live.matches, live.session?.profileId ?? null),
+    [live.matches, live.session?.profileId],
   );
 
   /**
@@ -327,6 +373,15 @@ export function LiveProvider({
         notificationError: live.notificationError,
         refreshNotifications,
         markNotificationsRead,
+        matches,
+        matchesError: live.matchError,
+        refreshMatches,
+        chat: live.chat,
+        openChat,
+        closeChat,
+        loadMoreMessages,
+        refreshChat,
+        sendChatMessage,
         resetSelf,
       }}
     >

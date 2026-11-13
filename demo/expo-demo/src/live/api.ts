@@ -3,6 +3,9 @@ import type {
   LiveBlockItem,
   LiveEventsPage,
   LiveMatch,
+  LiveMatchListItem,
+  LiveMessage,
+  LiveMessagePage,
   LiveNotification,
   LiveNotificationKind,
   LivePing,
@@ -119,6 +122,23 @@ export type LiveApi = {
   listPings(box: PingBox): Promise<LivePingItem[]>;
   acceptPing(pingId: string): Promise<LiveMatch>;
   rejectPing(pingId: string): Promise<void>;
+  /**
+   * `GET /matches`: la bandeja de conversaciones. El match más reciente primero y
+   * el otro lado ya proyectado; el cliente no cruza contra `/demo/profiles`.
+   */
+  listMatches(): Promise<LiveMatchListItem[]>;
+  /**
+   * `GET /matches/{id}/messages?cursor=`: página cronológica **ascendente**.
+   * `cursor` es opaco y se repite tal cual.
+   */
+  listMessages(matchId: string, cursor: string | null): Promise<LiveMessagePage>;
+  /**
+   * `POST /matches/{id}/messages`: idempotente por `clientMessageId`. Reintentar
+   * con la misma clave devuelve el mismo `Message`, no un duplicado.
+   */
+  sendMessage(matchId: string, clientMessageId: string, body: string): Promise<LiveMessage>;
+  /** `POST /matches/{id}/read`: 204, apaga el `unreadCount` de la fila. */
+  markMatchRead(matchId: string): Promise<void>;
   /** `GET /blocks`: los bloqueos propios con el otro ya proyectado. */
   listBlocks(): Promise<LiveBlockItem[]>;
   /** `POST /blocks`: idempotente; devuelve el bloqueo canonizado. */
@@ -327,6 +347,88 @@ function readMatch(payload: unknown): LiveMatch {
 function readNullableString(record: Record<string, unknown>, field: string): string | null {
   const value = record[field];
   return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
+ * `Message` del contrato. Sin `id` o sin `body` se descarta: el server es la
+ * autoridad del contenido y una burbuja vacía no es un mensaje.
+ */
+function readMessage(payload: unknown): LiveMessage | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const id = readString(record, 'id');
+  const body = readString(record, 'body');
+  if (id === '' || body === '') {
+    return null;
+  }
+  return {
+    id,
+    matchId: readString(record, 'matchId'),
+    senderProfileId: readString(record, 'senderProfileId'),
+    clientMessageId: readString(record, 'clientMessageId'),
+    body,
+    createdAt: readString(record, 'createdAt'),
+  };
+}
+
+function readMessagePage(payload: unknown): LiveMessagePage {
+  const record = (payload ?? {}) as Record<string, unknown>;
+  const list = record['messages'];
+  const messages: LiveMessage[] = [];
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      const message = readMessage(item);
+      if (message !== null) {
+        messages.push(message);
+      }
+    }
+  }
+  const nextCursor = record['nextCursor'];
+  return {
+    messages,
+    nextCursor: typeof nextCursor === 'string' && nextCursor !== '' ? nextCursor : null,
+    hasMore: record['hasMore'] === true,
+  };
+}
+
+/** `MatchListItem`: el match, el otro lado y el estado de la conversación. */
+function readMatchItem(payload: unknown): LiveMatchListItem | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const match = readMatch(record['match']);
+  const peer = readPingPeer(record['peer']);
+  if (match.id === '' || peer === null) {
+    return null;
+  }
+  const lastMessage = record['lastMessage'] === null ? null : readMessage(record['lastMessage']);
+  const unread = record['unreadCount'];
+  return {
+    match,
+    peer,
+    lastMessage,
+    unreadCount:
+      typeof unread === 'number' && Number.isFinite(unread) && unread > 0 ? Math.floor(unread) : 0,
+  };
+}
+
+function readMatchItems(payload: unknown): LiveMatchListItem[] {
+  const record = (payload ?? {}) as Record<string, unknown>;
+  const list = record['matches'];
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  const items: LiveMatchListItem[] = [];
+  for (const item of list) {
+    const parsed = readMatchItem(item);
+    if (parsed !== null) {
+      items.push(parsed);
+    }
+  }
+  return items;
 }
 
 /** `Block`: `profileId` canonizado + fecha. Sin `profileId` la fila se descarta. */
@@ -636,6 +738,35 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
     },
     rejectPing: async (pingId) => {
       await request(`/pings/${encodeURIComponent(pingId)}/reject`, { method: 'POST' });
+    },
+    listMatches: async () => readMatchItems((await request('/matches')).payload),
+    listMessages: async (matchId, cursor) =>
+      readMessagePage(
+        (
+          await request(
+            `/matches/${encodeURIComponent(matchId)}/messages${queryString({
+              cursor: cursor ?? undefined,
+            })}`,
+          )
+        ).payload,
+      ),
+    sendMessage: async (matchId, clientMessageId, body) => {
+      const response = await request(`/matches/${encodeURIComponent(matchId)}/messages`, {
+        method: 'POST',
+        body: { clientMessageId, body },
+      });
+      const message = readMessage(response.payload);
+      if (message === null) {
+        throw new LiveApiError(
+          response.status,
+          'INVALID_MESSAGE',
+          'El mensaje no vino con la forma esperada.',
+        );
+      }
+      return message;
+    },
+    markMatchRead: async (matchId) => {
+      await request(`/matches/${encodeURIComponent(matchId)}/read`, { method: 'POST' });
     },
     listBlocks: async () => readBlockItems((await request('/blocks')).payload),
     createBlock: async (profileId) => {

@@ -114,6 +114,86 @@ export type LiveMatch = {
 export type PingBox = 'inbox' | 'sent';
 
 /**
+ * `Message` del contrato (delta v0.4): un mensaje persistido de la conversación.
+ *
+ * `clientMessageId` **vuelve** del server a propósito: es la clave con la que el
+ * cliente reconcilia su burbuja optimista. Sin ella habría que comparar por
+ * texto y hora, que es como se duplican los mensajes.
+ */
+export type LiveMessage = {
+  id: string;
+  matchId: string;
+  senderProfileId: string;
+  clientMessageId: string;
+  body: string;
+  createdAt: string;
+};
+
+/** `MessagePage`: página cronológica ascendente, con cursor opaco. */
+export type LiveMessagePage = {
+  messages: LiveMessage[];
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+/**
+ * `MatchListItem`: fila de `GET /matches` — el match, el otro lado, el último
+ * mensaje y cuántos mensajes del otro quedan sin leer.
+ *
+ * `lastMessage === null` es un match recién aceptado, no un error.
+ */
+export type LiveMatchListItem = {
+  match: LiveMatch;
+  peer: LivePingPeer;
+  lastMessage: LiveMessage | null;
+  unreadCount: number;
+};
+
+/**
+ * Un mensaje tal como lo dibuja el chat.
+ *
+ * **`status`.** `sending` y `failed` existen sólo en el cliente: una burbuja
+ * optimista nace `sending`, pasa a `sent` cuando llega el `Message` del server
+ * (mismo `clientMessageId`, mismo `key`) y queda `failed` con su código cuando
+ * el envío no salió. `id === null` es la marca de "todavía no lo confirmó el
+ * server"; `key` es estable entre reintentos justamente para que reconciliar no
+ * dependa del texto.
+ */
+export type LiveChatMessage = {
+  /** Estable: `clientMessageId` si existe, si no el `id` del server. */
+  key: string;
+  id: string | null;
+  clientMessageId: string;
+  senderProfileId: string;
+  body: string;
+  createdAt: string;
+  mine: boolean;
+  status: 'sending' | 'sent' | 'failed';
+};
+
+/**
+ * La conversación abierta.
+ *
+ * `peer` puede ser `null` sólo en el instante en que el match no vino en la
+ * última foto de `GET /matches`: el chat se abre igual con el `matchId` del
+ * server y no inventa un nombre.
+ */
+export type LiveChatState = {
+  matchId: string;
+  peer: LivePingPeer | null;
+  messages: LiveChatMessage[];
+  /** Cursor de la próxima página **posterior** (el contrato pagina hacia adelante). */
+  nextCursor: string | null;
+  hasMore: boolean;
+  /** Primera página en vuelo. */
+  loading: boolean;
+  /** Página siguiente en vuelo. */
+  loadingMore: boolean;
+  /** `Problem.code` del último envío fallido; la burbuja fallida conserva el suyo. */
+  error: string | null;
+};
+
+/**
  * `Visibility` del contrato (v0.5): la sesión está online y visible, o online
  * pero invisible para los demás.
  *
@@ -372,6 +452,14 @@ export type LiveState = {
   notificationsAt: number | null;
   /** `Problem.code` del último `POST /notifications/read` fallido. */
   notificationError: string | null;
+  /** Bandeja de matches (`GET /matches`), en el orden del server. */
+  matches: LiveMatchListItem[];
+  /** Cuándo se leyó la bandeja de matches. `null` = todavía no hubo una foto. */
+  matchesAt: number | null;
+  /** `Problem.code` del último `GET /matches` fallido. */
+  matchError: string | null;
+  /** Conversación abierta. `null` = la pantalla de chat muestra el guion mock. */
+  chat: LiveChatState | null;
   lastSeq: number;
   lastEventAt: number | null;
   /** Código del último error del server (`Problem.code`). */
@@ -408,6 +496,10 @@ export function emptyLiveState(): LiveState {
     unreadCount: 0,
     notificationsAt: null,
     notificationError: null,
+    matches: [],
+    matchesAt: null,
+    matchError: null,
+    chat: null,
     lastSeq: 0,
     lastEventAt: null,
     error: null,

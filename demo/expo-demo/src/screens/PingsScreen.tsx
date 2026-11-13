@@ -1,9 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
 import { fixtures } from '../generated/fixtures';
 import type { Intention } from '../generated/fixtures';
+import { chatText } from '../live/chatCopy';
+import type { MatchRow } from '../live/chat';
 import { useLive } from '../live/LiveProvider';
 import { canResolve, formatPingTime, pingErrorKey, type PingRow } from '../live/pings';
 import { pingText, type PingsCopyKey } from '../live/pingsCopy';
@@ -19,20 +21,21 @@ import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { EmptyState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
+import { PressableRow } from '../components/PressableRow';
 
 /**
- * Bandeja de pings.
+ * Bandeja de pings **y** de matches.
  *
  * **Dos fuentes, una pantalla.** Con sesión live la bandeja es la del backend
- * (`GET /pings?box=inbox|sent`): cada fila trae el peer ya proyectado y el
- * estado que el server considera vigente. Sin sesión (dataset del build) se ve
- * el guion de siempre, con aceptar/rechazar simulados. El mock no se rompió: es
- * el piso de la demo cuando la API no está configurada o no responde.
+ * (`GET /pings?box=inbox|sent`) y la tercera pestaña son los matches reales
+ * (`GET /matches`): cada fila trae el peer ya proyectado, el último mensaje y
+ * cuántos mensajes del otro lado quedan sin leer. Sin sesión (dataset del build)
+ * se ve el guion de siempre, con aceptar/rechazar simulados. El mock no se rompió:
+ * es el piso de la demo cuando la API no está configurada o no responde.
  *
- * **Aceptar crea match.** La respuesta del accept trae el `Match`, pero no hay
- * `GET /matches` ni chat en esta versión: la fila pasa a `accepted` con su
- * `matchId` y muestra "Match creado" — que es lo que el contrato permite
- * afirmar sin inventar una conversación.
+ * **Aceptar crea match, y el match se puede abrir.** La respuesta del accept trae
+ * el `Match`; la fila pasa a `accepted` y el match aparece en la pestaña Matches,
+ * que es la puerta al chat real.
  */
 export function PingsScreen() {
   const { state } = useDemo();
@@ -85,17 +88,27 @@ function MockPings() {
 }
 
 /**
- * Bandeja real: pestañas recibidos/enviados, refresco manual y estado por fila.
- * El polling del controlador (5 s) mantiene la lista al día sin que el usuario
- * tenga que tocar nada; el chip "Actualizar" existe para el caso "quiero verlo
- * ahora".
+ * Bandeja real: pestañas recibidos/enviados/matches, refresco manual y estado por
+ * fila. El polling del controlador (5 s) mantiene la lista de pings al día sin
+ * que el usuario tenga que tocar nada; la de matches se refresca al abrir la
+ * pestaña y con los eventos `match.created`/`message.created` del stream.
  */
 function LivePings() {
+  const { dispatch } = useDemo();
   const live = useLive();
-  const [tab, setTab] = useState<'inbox' | 'sent'>('inbox');
+  const [tab, setTab] = useState<'inbox' | 'sent' | 'matches'>('inbox');
   const [busy, setBusy] = useState<string | null>(null);
   const rows = tab === 'inbox' ? live.pings.inbox : live.pings.sent;
   const error = live.pings.error;
+  const unread = live.matches.reduce((total, row) => total + row.unreadCount, 0);
+
+  // La pestaña Matches pide su foto al entrar: la bandeja no tiene polling propio
+  // (mismo criterio que la campana: no sumar requests al rate limit).
+  useEffect(() => {
+    if (tab === 'matches') {
+      void live.refreshMatches();
+    }
+  }, [tab, live.refreshMatches]);
 
   const run = async (pingId: string, mode: 'accept' | 'reject'): Promise<void> => {
     setBusy(pingId);
@@ -105,6 +118,14 @@ function LivePings() {
       await live.rejectPing(pingId);
     }
     setBusy(null);
+  };
+
+  /** Abrir un match: la conversación real reemplaza al mock en la pantalla chat. */
+  const openChat = async (matchId: string): Promise<void> => {
+    setBusy(matchId);
+    await live.openChat(matchId);
+    setBusy(null);
+    dispatch({ type: 'OPEN_OVERLAY', overlay: 'chat' });
   };
 
   return (
@@ -120,41 +141,144 @@ function LivePings() {
           selected={tab === 'sent'}
           onPress={() => setTab('sent')}
         />
-        {live.pings.pending > 0 ? (
+        <Chip
+          label={chatText('tabMatches')}
+          selected={tab === 'matches'}
+          onPress={() => setTab('matches')}
+        />
+        {tab === 'inbox' && live.pings.pending > 0 ? (
           <Chip label={String(live.pings.pending)} icon="ping" selected emphasis />
         ) : null}
+        {tab === 'matches' && unread > 0 ? (
+          <Chip label={String(unread)} icon="heart" selected emphasis />
+        ) : null}
         <View style={styles.refresh}>
-          <Chip label={pingText('refresh')} onPress={() => void live.refreshPings()} />
+          <Chip
+            label={pingText('refresh')}
+            onPress={() =>
+              void (tab === 'matches' ? live.refreshMatches() : live.refreshPings())
+            }
+          />
         </View>
       </View>
 
-      <Text style={[text.small, styles.hint]}>{pingText('liveHint')}</Text>
+      {tab === 'matches' ? (
+        <Text style={[text.small, styles.hint]}>{chatText('matchesHint')}</Text>
+      ) : (
+        <Text style={[text.small, styles.hint]}>{pingText('liveHint')}</Text>
+      )}
 
-      {error === null ? null : (
+      {error === null || tab === 'matches' ? null : (
         <Text style={[text.small, styles.error]}>
           {pingText(pingErrorKey(error), { code: error })}
         </Text>
       )}
 
-      {rows.length === 0 ? (
-        <EmptyState
-          message={pingText(tab === 'inbox' ? 'inboxEmptyLive' : 'sentEmptyLive')}
-          icon="ping"
-        />
-      ) : (
-        <ScrollView contentContainerStyle={styles.content}>
-          {rows.map((row) => (
-            <LiveCard
-              key={row.id}
-              row={row}
-              busy={busy === row.id}
-              onAccept={() => void run(row.id, 'accept')}
-              onReject={() => void run(row.id, 'reject')}
-            />
-          ))}
-        </ScrollView>
-      )}
+      {tab === 'matches' ? <MatchList busy={busy} onOpen={openChat} /> : null}
+
+      {tab !== 'matches' ? (
+        rows.length === 0 ? (
+          <EmptyState
+            message={pingText(tab === 'inbox' ? 'inboxEmptyLive' : 'sentEmptyLive')}
+            icon="ping"
+          />
+        ) : (
+          <ScrollView contentContainerStyle={styles.content}>
+            {rows.map((row) => (
+              <LiveCard
+                key={row.id}
+                row={row}
+                busy={busy === row.id}
+                onAccept={() => void run(row.id, 'accept')}
+                onReject={() => void run(row.id, 'reject')}
+              />
+            ))}
+          </ScrollView>
+        )
+      ) : null}
     </View>
+  );
+}
+
+/** Pestaña Matches: preview, hora y no leídos. Tap = abrir la conversación. */
+function MatchList({
+  busy,
+  onOpen,
+}: {
+  busy: string | null;
+  onOpen: (matchId: string) => Promise<void>;
+}) {
+  const live = useLive();
+  if (live.matches.length === 0) {
+    return <EmptyState message={chatText('matchesEmpty')} icon="heart" />;
+  }
+  return (
+    <ScrollView contentContainerStyle={styles.content}>
+      {live.matches.map((row) => (
+        <MatchCard
+          key={row.id}
+          row={row}
+          busy={busy === row.id}
+          onOpen={() => void onOpen(row.id)}
+        />
+      ))}
+    </ScrollView>
+  );
+}
+
+function MatchCard({
+  row,
+  busy,
+  onOpen,
+}: {
+  row: MatchRow;
+  busy: boolean;
+  onOpen: () => void;
+}) {
+  const time = formatPingTime(row.previewAt ?? row.createdAt);
+  const isBot = row.peer.sourceType === 'bot';
+  const preview =
+    row.preview === null
+      ? chatText('matchNoMessages')
+      : row.previewMine === true
+        ? `${chatText('matchYouPrefix')}${row.preview}`
+        : row.preview;
+
+  return (
+    <PressableRow
+      accessibilityLabel={`${row.peer.nickname}, ${preview}`}
+      accessibilityState={{ disabled: busy }}
+      onPress={busy ? () => undefined : onOpen}
+      style={styles.card}
+    >
+      <View style={styles.header}>
+        <Avatar photoId={row.peer.photoId} size={44} />
+        <View style={styles.info}>
+          <View style={styles.nameRow}>
+            <Text numberOfLines={1} style={[text.bodyLarge, styles.name]}>
+              {row.peer.nickname}
+            </Text>
+            {isBot ? <Chip label={chatText('matchBotTag')} /> : null}
+          </View>
+          <Text numberOfLines={1} style={[text.small, { color: colors.muted }]}>
+            {preview}
+          </Text>
+        </View>
+        <View style={styles.metaColumn}>
+          <Text style={[text.small, styles.metaTime]}>{time}</Text>
+          {row.unreadCount > 0 ? (
+            <View
+              style={styles.unread}
+              accessibilityLabel={chatText('unreadA11y', {
+                count: String(row.unreadCount),
+              })}
+            >
+              <Text style={styles.unreadText}>{row.unreadCount}</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </PressableRow>
   );
 }
 
@@ -386,5 +510,31 @@ const styles = StyleSheet.create({
   },
   match: {
     color: colors.accent,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  metaColumn: {
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  metaTime: {
+    color: colors.muted,
+  },
+  unread: {
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 10,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadText: {
+    color: colors.bg,
+    fontSize: fontSize[0],
+    fontWeight: '600',
   },
 });

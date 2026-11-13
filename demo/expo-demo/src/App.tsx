@@ -82,6 +82,8 @@ function DemoShell() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const overlayProfile = profileById(state.profileId, state.catalog);
   const celebration = profileById(state.matchCelebration, state.catalog);
+  /** Con un match real abierto el título sale del peer del chat, no del catálogo. */
+  const overlayName = live.state.chat?.peer?.nickname ?? overlayProfile?.nickname;
   const ghost = useGhost();
   const zonePrompt = live.state.zonePrompt;
   /**
@@ -97,6 +99,11 @@ function DemoShell() {
     if (state.overlay === 'safety' && state.profileId !== null) {
       dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: state.profileId });
       return;
+    }
+    // Cerrar el chat real devuelve la pantalla al guion del dataset: sin esto, el
+    // próximo `OPEN_CHAT` de un match mock mostraría la conversación del server.
+    if (state.overlay === 'chat') {
+      live.closeChat();
     }
     dispatch({ type: 'CLOSE_OVERLAY' });
   };
@@ -175,7 +182,7 @@ function DemoShell() {
 
             {state.overlay === null ? null : (
               <Overlay
-                title={overlayTitle(state.overlay, overlayProfile?.nickname)}
+                title={overlayTitle(state.overlay, overlayName)}
                 full={state.overlay === 'chat'}
                 onBack={onBack}
               >
@@ -186,7 +193,12 @@ function DemoShell() {
             {celebration === null ? null : (
               <MatchOverlay
                 profile={celebration}
-                onOpenChat={() => dispatch({ type: 'OPEN_CHAT', profileId: celebration.id })}
+                onOpenChat={() => {
+                  // El match del guion no es un match del server: se cierra el chat
+                  // real para que la pantalla muestre la conversación del dataset.
+                  live.closeChat();
+                  dispatch({ type: 'OPEN_CHAT', profileId: celebration.id });
+                }}
                 onDismiss={() => dispatch({ type: 'CLOSE_OVERLAY' })}
               />
             )}

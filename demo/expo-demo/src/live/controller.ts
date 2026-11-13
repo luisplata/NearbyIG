@@ -9,6 +9,14 @@ import {
   type LiveApi,
   type PresenceTarget,
 } from './api';
+import {
+  emptyChat,
+  mergeChatMessages,
+  newClientMessageId,
+  optimisticMessage,
+  setMessageStatus,
+  toMatchRows,
+} from './chat';
 import type { LiveSettings } from './config';
 import { applyEvents } from './events';
 import type { GeoPoint, GeoResult } from './geolocation';
@@ -18,6 +26,7 @@ import {
   emptyLiveState,
   EVENT_TYPES,
   parseEvent,
+  type LiveChatMessage,
   type LiveDiagnostics,
   type LiveEvent,
   type LiveLocation,
@@ -28,6 +37,7 @@ import {
   type Visibility,
   type ZonePromptCause,
 } from './types';
+import { createStreamWatchdog, DEFAULT_STALL_MS } from './watchdog';
 import { zoneForPoint } from './zones';
 
 /**
@@ -118,6 +128,12 @@ export type MarkReadResult = {
   marked: number;
 };
 
+/** Resultado de abrir una conversación (`GET /matches/{id}/messages`). */
+export type OpenChatResult = { ok: boolean; code: string | null };
+
+/** Resultado de mandar un mensaje: `code` es el `Problem.code` cuando falla. */
+export type SendMessageResult = { ok: boolean; code: string | null };
+
 const PING_OK = { ok: true, code: null } as const;
 const ACTION_OK = { ok: true, code: null } as const;
 
@@ -165,6 +181,10 @@ export type LiveControllerPorts = {
   reseedMs?: number;
   /** Cada cuánto se refresca la bandeja. El contrato no tiene push de pings. */
   pingsMs?: number;
+  /** Silencio tolerado del stream antes de caer a polling. Default: 25 s. */
+  streamStallMs?: number;
+  /** Cada cuánto se pregunta al watchdog. Default: 5 s. */
+  watchdogTickMs?: number;
 };
 
 export type LiveController = {
@@ -202,6 +222,28 @@ export type LiveController = {
   refreshNotifications(): Promise<void>;
   /** `POST /notifications/read`: todas si se omite `notificationIds`. */
   markNotificationsRead(notificationIds?: readonly string[]): Promise<MarkReadResult>;
+  /** `GET /matches`: la bandeja de conversaciones. */
+  refreshMatches(): Promise<void>;
+  /**
+   * Abre una conversación: primera página de mensajes y `POST /read` para apagar
+   * el `unreadCount`. Deja el chat en `state.chat` (la pantalla lo dibuja).
+   */
+  openChat(matchId: string): Promise<OpenChatResult>;
+  /** Vuelve al chat del dataset. No toca la bandeja. */
+  closeChat(): void;
+  /** Pide la página siguiente (mensajes **posteriores**) y la agrega al final. */
+  loadMoreMessages(): Promise<void>;
+  /** Relee la primera página y reconcilia sin mover al usuario. */
+  refreshChat(): Promise<void>;
+  /**
+   * `POST /matches/{id}/messages`. Optimista con `clientMessageId` estable: la
+   * misma clave en un reintento devuelve el mismo mensaje y no duplica burbujas.
+   */
+  sendChatMessage(
+    matchId: string,
+    body: string,
+    clientMessageId?: string,
+  ): Promise<SendMessageResult>;
   /**
    * `POST /demo/reset/self`: cierra la sesión propia, limpia lo privado propio y
    * deja la UI en el sheet de zona. No toca el reset global ni el catálogo.
@@ -224,6 +266,17 @@ const DEFAULT_POLL_MS = 3_000;
 const DEFAULT_RESEED_MS = 1_200;
 /** 5 s: la bandeja no es un chat, pero el ping tiene que sentirse vivo. */
 const DEFAULT_PINGS_MS = 5_000;
+/** 5 s: revisar el watchdog es barato y el silencio se detecta dentro de 5 s. */
+const DEFAULT_WATCHDOG_TICK_MS = 5_000;
+/**
+ * Tope de páginas que se leen de una conversación.
+ *
+ * El contrato pagina **hacia adelante** (`nextCursor` = "lo que sigue"), así que
+ * para ver el final de un chat hay que recorrer desde el principio. 10 páginas
+ * son 1.000 mensajes: un chat de la demo nunca llega ahí, y el que llegue sigue
+ * teniendo "cargar mensajes nuevos" con el cursor que quedó.
+ */
+const MAX_CHAT_PAGES = 10;
 /** Default de `DiscoveryQuery.radiusM` en el contrato. */
 const DEFAULT_RADIUS_M = 5_000;
 
@@ -263,6 +316,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let reseedTimer: ReturnType<typeof setTimeout> | null = null;
   let pingsTimer: ReturnType<typeof setInterval> | null = null;
+  let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
   const notify = (): void => {
     for (const listener of [...listeners]) {
@@ -294,6 +348,41 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   };
 
   const log = ports.log ?? ((): void => undefined);
+
+  /**
+   * **Watchdog.** Un `onopen` con el stream mudo es el caso que rompía la demo a
+   * través de Cloudflare: el cliente marcaba `sse`, dejaba de pollear y no llegaba
+   * ni un frame. Acá se cuenta desde el armado (la creación del `EventSource`) y
+   * cada frame reinicia la cuenta; `stallMs` de silencio degrada a polling, que es
+   * el transporte que sí atraviesa el túnel.
+   */
+  const watchdog = createStreamWatchdog({
+    stallMs: ports.streamStallMs ?? DEFAULT_STALL_MS,
+    now: () => Date.now(),
+    onStall: () => {
+      log('[stream] watchdog=stale → polling');
+      onStreamError();
+    },
+  });
+
+  const stopWatchdog = (): void => {
+    watchdog.disarm();
+    if (watchdogTimer !== null) {
+      clearInterval(watchdogTimer);
+      watchdogTimer = null;
+    }
+  };
+
+  /** Un solo tick para todo el ciclo de vida del stream: armado y desarmado juntos. */
+  const startWatchdog = (): void => {
+    watchdog.arm();
+    if (watchdogTimer !== null) {
+      return;
+    }
+    watchdogTimer = setInterval(() => {
+      watchdog.check();
+    }, ports.watchdogTickMs ?? DEFAULT_WATCHDOG_TICK_MS);
+  };
 
   /** Actualiza un subconjunto del diagnóstico sin pisar el resto. */
   const diagnose = (patch: Partial<LiveDiagnostics>): void => {
@@ -409,6 +498,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       clearInterval(pingsTimer);
       pingsTimer = null;
     }
+    stopWatchdog();
   };
 
   const closeStream = (): void => {
@@ -461,6 +551,10 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       unreadCount: 0,
       notificationsAt: null,
       notificationError: null,
+      matches: [],
+      matchesAt: null,
+      matchError: null,
+      chat: null,
     });
     emitDataset();
     if (api !== null && state.session !== null) {
@@ -504,6 +598,10 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       unreadCount: 0,
       notificationsAt: null,
       notificationError: null,
+      matches: [],
+      matchesAt: null,
+      matchError: null,
+      chat: null,
       lastSeq: 0,
       lastEventAt: null,
       location: null,
@@ -539,6 +637,29 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     // no sumar requests al rate limit del backend.
     if (events.some((event) => event.type === 'ping.received' || event.type === 'match.created')) {
       void refreshPings();
+    }
+    // Un match nuevo cambia la bandeja de conversaciones sin que el usuario haga
+    // nada: se pide en el acto. La bandeja no tiene polling propio (mismo motivo
+    // que la campana: no sumar requests al rate limit).
+    if (events.some((event) => event.type === 'match.created')) {
+      void refreshMatches();
+    }
+    // Un mensaje nuevo del otro lado —el bot incluido— se ve solo si la
+    // conversación está abierta. Se relee la página y se reconcilia por
+    // `clientMessageId`, así no se duplica lo que el usuario acaba de mandar. La
+    // bandeja se refresca siempre: el preview y el `unreadCount` cambian igual.
+    if (events.some((event) => event.type === 'message.created')) {
+      void refreshMatches();
+      const openChatId = state.chat === null ? null : state.chat.matchId;
+      if (
+        openChatId !== null &&
+        events.some(
+          (event) =>
+            event.type === 'message.created' && event.payload['matchId'] === openChatId,
+        )
+      ) {
+        void refreshChat();
+      }
     }
     if (
       events.some(
@@ -578,6 +699,10 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
 
   const pollOnce = async (): Promise<void> => {
     if (api === null || polling || state.session === null) {
+      return;
+    }
+    // Nunca dos transportes activos: si el SSE está entregando, no se pollea.
+    if (state.transport === 'sse') {
       return;
     }
     polling = true;
@@ -630,6 +755,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   };
 
   const onStreamError = (): void => {
+    stopWatchdog();
     closeStream();
     startPolling();
   };
@@ -654,18 +780,32 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       startPolling();
       return;
     }
+    // El watchdog se arma **antes** de crear el `EventSource`: el caso que
+    // importa es justamente el que nunca dispara `onopen` (proxy con buffering).
+    startWatchdog();
     const next = factory(api.streamUrl(ticket));
     if (next === null) {
+      stopWatchdog();
       startPolling();
       return;
     }
     source = next;
     next.onopen = () => {
+      // Un `onopen` es señal de vida: reinicia la cuenta del watchdog, pero no lo
+      // apaga. Si después no llega ni un frame, igual se degrada a polling.
+      watchdog.touch();
       stopPolling();
       set({ transport: 'sse', status: 'live', notice: null });
     };
     for (const type of EVENT_TYPES) {
       next.addEventListener(type, (event) => {
+        // Un stream ya reemplazado o cerrado no puede aportar frames: si el
+        // watchdog ya degradó, este listener es el fantasma del transporte viejo.
+        if (source !== next) {
+          return;
+        }
+        // Cualquier frame de los seis tipos es señal de vida del transporte.
+        watchdog.touch();
         const parsed = parseEvent(event?.data);
         if (parsed !== null) {
           apply([parsed]);
@@ -756,6 +896,264 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
 
   const safeCode = (error: unknown): string =>
     error instanceof LiveApiError ? error.code : 'NETWORK';
+
+  /**
+   * **Bandeja de matches.** Accesoria como la de pings: un 500 en `/matches` no
+   * puede tumbar una sesión que está sirviendo descubrimiento. Se refresca en el
+   * arranque, ante `match.created`/`message.created` del stream y cuando la
+   * pantalla la pide.
+   */
+  const refreshMatches = async (): Promise<void> => {
+    if (api === null || state.session === null) {
+      return;
+    }
+    try {
+      const matches = await api.listMatches();
+      set({ matches, matchesAt: Date.now(), matchError: null });
+    } catch (error) {
+      log(
+        `[chat] matches sin respuesta status=${error instanceof LiveApiError ? error.status : 'network'}`,
+      );
+    }
+  };
+
+  /**
+   * Lee la conversación desde el principio hasta el final (o hasta
+   * `MAX_CHAT_PAGES`), en orden y sin repetir.
+   *
+   * **Por qué recorre.** `MessagePage` pagina hacia adelante: la primera página
+   * es la **más vieja**. Quedarse con ella dejaría al usuario leyendo el principio
+   * de la conversación y sin ver el mensaje que acaba de llegar. El `merge` por
+   * `id` hace que releer sea inofensivo, así que el mismo camino sirve para abrir
+   * y para refrescar.
+   */
+  const readConversation = async (
+    matchId: string,
+    local: readonly LiveChatMessage[],
+    selfId: string,
+  ): Promise<{
+    messages: LiveChatMessage[];
+    nextCursor: string | null;
+    hasMore: boolean;
+    code: string | null;
+  }> => {
+    if (api === null) {
+      return { messages: [...local], nextCursor: null, hasMore: false, code: 'NO_SESSION' };
+    }
+    let messages = [...local];
+    let cursor: string | null = null;
+    let nextCursor: string | null = null;
+    let hasMore = false;
+    let pages = 0;
+    try {
+      for (;;) {
+        const page = await api.listMessages(matchId, cursor);
+        messages = mergeChatMessages(page.messages, messages, selfId);
+        nextCursor = page.nextCursor;
+        hasMore = page.hasMore;
+        pages += 1;
+        if (!page.hasMore || page.nextCursor === null || pages >= MAX_CHAT_PAGES) {
+          break;
+        }
+        cursor = page.nextCursor;
+      }
+      return { messages, nextCursor, hasMore, code: null };
+    } catch (error) {
+      return { messages, nextCursor, hasMore, code: safeCode(error) };
+    }
+  };
+
+  /**
+   * Abre una conversación.
+   *
+   * El orden importa: primero la foto de la bandeja (si el match no está, se pide
+   * antes de abrir para no dibujar un chat sin nombre), después la primera página
+   * de mensajes y al final `POST /read`, que es lo que apaga el `unreadCount` de
+   * la fila. Marcar leído no bloquea la lectura: si falla, se avisa y se sigue.
+   */
+  const openChat = async (matchId: string): Promise<OpenChatResult> => {
+    if (api === null || state.session === null) {
+      return { ok: false, code: 'NO_SESSION' };
+    }
+    if (!state.matches.some((item) => item.match.id === matchId)) {
+      await refreshMatches();
+    }
+    const found = state.matches.find((item) => item.match.id === matchId) ?? null;
+    set({ chat: emptyChat(matchId, found === null ? null : found.peer), matchError: null });
+    const page = await readConversation(matchId, [], state.session.profileId);
+    const current = state.chat;
+    if (current === null || current.matchId !== matchId) {
+      return { ok: false, code: 'CHAT_CHANGED' };
+    }
+    set({
+      chat: {
+        ...current,
+        messages: page.messages,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+        loading: false,
+        error: page.code,
+      },
+    });
+    if (page.code !== null) {
+      return { ok: false, code: page.code };
+    }
+    try {
+      await api.markMatchRead(matchId);
+      // El server es la autoridad del `unreadCount`: se relee la bandeja.
+      await refreshMatches();
+    } catch (error) {
+      log(
+        `[chat] read sin respuesta status=${error instanceof LiveApiError ? error.status : 'network'}`,
+      );
+    }
+    return { ok: true, code: null };
+  };
+
+  const closeChat = (): void => {
+    if (state.chat === null) {
+      return;
+    }
+    set({ chat: null, matchError: null });
+  };
+
+  /**
+   * Relee la conversación y reconcilia. Es el camino del bot: cuando llega
+   * `message.created` (por SSE o por polling) la respuesta aparece sola, sin que
+   * el usuario toque nada y sin perder el scroll ni duplicar lo que ya mandó.
+   */
+  const refreshChat = async (): Promise<void> => {
+    const chat = state.chat;
+    if (api === null || state.session === null || chat === null) {
+      return;
+    }
+    const page = await readConversation(chat.matchId, chat.messages, state.session.profileId);
+    const current = state.chat;
+    if (current === null || current.matchId !== chat.matchId) {
+      return;
+    }
+    if (page.code !== null) {
+      log(`[chat] mensajes sin respuesta code=${page.code}`);
+      return;
+    }
+    set({
+      chat: {
+        ...current,
+        messages: page.messages,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+      },
+    });
+  };
+
+  /**
+   * Página siguiente. El contrato pagina hacia adelante (`nextCursor` = "lo que
+   * sigue"), así que la página se **agrega al final**: son los mensajes más
+   * nuevos, no los más viejos.
+   */
+  const loadMoreMessages = async (): Promise<void> => {
+    const chat = state.chat;
+    if (api === null || state.session === null || chat === null || chat.loadingMore) {
+      return;
+    }
+    if (chat.nextCursor === null || !chat.hasMore) {
+      return;
+    }
+    set({ chat: { ...chat, loadingMore: true, error: null } });
+    try {
+      const page = await api.listMessages(chat.matchId, chat.nextCursor);
+      const current = state.chat;
+      if (current === null || current.matchId !== chat.matchId) {
+        return;
+      }
+      set({
+        chat: {
+          ...current,
+          messages: mergeChatMessages(page.messages, current.messages, state.session.profileId),
+          nextCursor: page.nextCursor,
+          hasMore: page.hasMore,
+          loadingMore: false,
+        },
+      });
+    } catch (error) {
+      const code = safeCode(error);
+      const current = state.chat;
+      if (current !== null && current.matchId === chat.matchId) {
+        set({ chat: { ...current, loadingMore: false, error: code } });
+      }
+    }
+  };
+
+  /**
+   * Envía un mensaje.
+   *
+   * **Optimista y reconciliado.** La burbuja entra en el acto con un
+   * `clientMessageId` estable (uuid), queda `sending` y se reemplaza por el
+   * `Message` del server cuando vuelve —mismo `clientMessageId`, misma `key`—.
+   * Un reintento reusa la clave: el contrato garantiza que el server devuelve el
+   * mismo mensaje y no crea otro, así que reintentar no puede duplicar.
+   *
+   * **El texto no se toca.** Se recorta sólo para decidir si es válido; lo que se
+   * manda es lo que el usuario escribió y el server recorta los bordes.
+   */
+  const sendChatMessage = async (
+    matchId: string,
+    body: string,
+    clientMessageId?: string,
+  ): Promise<SendMessageResult> => {
+    if (api === null || state.session === null || state.chat === null) {
+      return { ok: false, code: 'NO_SESSION' };
+    }
+    if (body.trim() === '') {
+      return { ok: false, code: 'VALIDATION_FAILED' };
+    }
+    const selfId = state.session.profileId;
+    const key = clientMessageId ?? newClientMessageId();
+    const chat = state.chat;
+    const known = chat.messages.some((message) => message.clientMessageId === key);
+    const messages = known
+      ? setMessageStatus(chat.messages, key, 'sending')
+      : [
+          ...chat.messages,
+          optimisticMessage({
+            clientMessageId: key,
+            senderProfileId: selfId,
+            body,
+            createdAt: new Date().toISOString(),
+          }),
+        ];
+    set({ chat: { ...chat, messages, error: null }, matchError: null });
+    try {
+      const message = await api.sendMessage(matchId, key, body);
+      const current = state.chat;
+      if (current !== null && current.matchId === matchId) {
+        set({
+          chat: {
+            ...current,
+            messages: mergeChatMessages([message], current.messages, selfId),
+            error: null,
+          },
+        });
+      }
+      // El preview y el orden de la bandeja cambian con cada mensaje.
+      void refreshMatches();
+      return { ok: true, code: null };
+    } catch (error) {
+      const code = safeCode(error);
+      const current = state.chat;
+      if (current !== null && current.matchId === matchId) {
+        set({
+          chat: {
+            ...current,
+            messages: setMessageStatus(current.messages, key, 'failed'),
+            error: code,
+          },
+        });
+      }
+      set({ matchError: code });
+      return { ok: false, code };
+    }
+  };
 
   /**
    * Foto de los bloqueos propios. Accesoria como la bandeja: un 500 acá no puede
@@ -947,7 +1345,20 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     cursor = null;
     stopPolling();
     closeStream();
-    set({ session, transport: 'none', self: null, selfSource: null, pings: [], sentPings: [], pingsAt: null });
+    set({
+      session,
+      transport: 'none',
+      self: null,
+      selfSource: null,
+      pings: [],
+      sentPings: [],
+      pingsAt: null,
+      // Otra identidad = otras conversaciones. Nada de arrastrar el chat ajeno.
+      matches: [],
+      matchesAt: null,
+      chat: null,
+      matchError: null,
+    });
     if (api !== null && presence !== null) {
       // Una sesión nueva (claim/takeover) nace visible y sin presencia viva: se
       // re-registra en el acto y, si el usuario estaba en ghost, se reaplica.
@@ -963,6 +1374,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     startPingPoll();
     void refreshBlocks();
     void refreshNotifications();
+    void refreshMatches();
   };
 
   /**
@@ -1027,6 +1439,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     void refreshRows().then(loadSelf);
     void refreshBlocks();
     void refreshNotifications();
+    void refreshMatches();
     return true;
   };
 
@@ -1245,6 +1658,12 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     report,
     refreshNotifications,
     markNotificationsRead,
+    refreshMatches,
+    openChat,
+    closeChat,
+    loadMoreMessages,
+    refreshChat,
+    sendChatMessage,
     resetSelf: async () => {
       if (api === null) {
         return { ok: false, code: 'NO_API' };
