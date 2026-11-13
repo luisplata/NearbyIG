@@ -39,8 +39,8 @@ export type LiveBinding = {
   state: LiveState;
   /** Hay una sesión abierta (viva o degradada a polling). */
   enabled: boolean;
+  /** Abre (o reintenta abrir) la sesión. La UI no ofrece "apagar el live". */
   enable: () => Promise<void>;
-  disable: () => Promise<void>;
   refresh: () => Promise<void>;
   refreshRows: () => Promise<void>;
   claim: (slot: number) => Promise<LiveActionResult>;
@@ -63,9 +63,19 @@ export type LiveProviderProps = {
   children: ReactNode;
   /** Inyectable en tests; en la app es el `EventSource` del navegador. */
   createEventSource?: (url: string) => EventSourceLike | null;
+  /**
+   * `false` apaga el arranque automático (tests de render o una pantalla que
+   * quiera decidir cuándo abrir la sesión). En la app siempre arranca.
+   */
+  autoStart?: boolean;
 };
 
-export function LiveProvider({ store, children, createEventSource }: LiveProviderProps) {
+export function LiveProvider({
+  store,
+  children,
+  createEventSource,
+  autoStart = true,
+}: LiveProviderProps) {
   // `EXPO_PUBLIC_*` se inlinea al compilar: el acceso tiene que ser estático.
   const settings = useMemo(
     () => readLiveSettings(process.env.EXPO_PUBLIC_API_URL, process.env.EXPO_PUBLIC_DEMO_REGION),
@@ -86,6 +96,23 @@ export function LiveProvider({ store, children, createEventSource }: LiveProvide
   const { state } = useDemo();
   const filters = state.filters;
 
+  /**
+   * **Default: live cuando el build tiene API.** El dataset del build no es una
+   * elección visible: es el catálogo con el que la app arranca y al que vuelve
+   * si la API no responde. El `EventSource`/fetch reales se abren acá y no en un
+   * chip, así que no hay forma de quedar en un modo que nadie pidió.
+   */
+  const enable = useCallback(async () => {
+    await controller.start();
+  }, [controller]);
+
+  useEffect(() => {
+    if (!autoStart || settings === null) {
+      return;
+    }
+    void enable();
+  }, [autoStart, enable, settings]);
+
   useEffect(() => {
     return () => {
       void controller.stop();
@@ -100,14 +127,6 @@ export function LiveProvider({ store, children, createEventSource }: LiveProvide
     }
     controller.setFilters(filters);
   }, [controller, enabled, filters]);
-
-  const enable = useCallback(async () => {
-    await controller.start();
-  }, [controller]);
-
-  const disable = useCallback(async () => {
-    await controller.stop();
-  }, [controller]);
 
   const refresh = useCallback(async () => {
     await controller.refresh();
@@ -128,7 +147,6 @@ export function LiveProvider({ store, children, createEventSource }: LiveProvide
         state: live,
         enabled,
         enable,
-        disable,
         refresh,
         refreshRows,
         claim,

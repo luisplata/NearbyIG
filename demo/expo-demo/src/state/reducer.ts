@@ -65,11 +65,11 @@ export function cloneState(state: DemoState): DemoState {
  *
  * `catalog` y `source` entran por parámetro porque son el dataset, no estado de
  * usuario: `RESET` reinicia la demo **sobre el catálogo activo** en vez de
- * arrastrar al usuario de vuelta al mock en medio de una sesión live.
+ * arrastrar al usuario de vuelta al dataset en medio de una sesión live.
  */
 export function initialState(
   catalog: readonly UiProfile[] = fixtures.profiles,
-  source: DemoSource = 'mock',
+  source: DemoSource = 'dataset',
 ): DemoState {
   return {
     view: 'list',

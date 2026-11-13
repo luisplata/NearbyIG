@@ -5,7 +5,7 @@ import type { AvatarRenderState, DemoState, UiProfile } from './types';
 /**
  * Perfil por `id`, o `null` si no existe en el catálogo activo.
  *
- * El segundo parámetro es el dataset (`state.catalog`): el mock lo deja por
+ * El segundo parámetro es el dataset (`state.catalog`): el build lo deja por
  * defecto y el modo live pasa el catálogo del backend. Sin default, cada
  * llamada de una pantalla tendría que conocer el origen.
  */

@@ -21,7 +21,7 @@ export type DemoStore = {
    * Cambia el dataset activo sin pasar por el reducer.
    *
    * No es una acción de la máquina de estados: el catálogo no es estado de
-   * usuario (el mock nunca lo fue, se importaba). El modo live lo reemplaza con
+   * usuario (el dataset nunca lo fue, se importaba). El modo live lo reemplaza con
    * cada foto de `/discovery`; `RESET` lo conserva. `DemoAction` sigue teniendo
    * las 27 acciones del contrato y el golden de paridad no cambia.
    */

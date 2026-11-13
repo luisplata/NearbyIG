@@ -41,7 +41,9 @@ import {
  * conexión vieja sólo daría 401.
  *
  * **Falla suave.** Cualquier error de arranque deja `status: 'offline'` y avisa
- * con `onCatalog(null, 'mock')`: la app vuelve al dataset del build sin romperse.
+ * con `onCatalog(null, 'dataset')`: la app vuelve al dataset del build sin
+ * romperse. No hay un modo "mock" visible que elegir: el dataset es el piso, no
+ * una opción de la UI.
  * Dos latidos fallidos seguidos se tratan igual (la sesión se perdió o la API se
  * cayó), incluso si el stream seguía abierto.
  */
@@ -61,7 +63,7 @@ export type LiveControllerPorts = {
   fetchImpl?: FetchLike;
   /** `null` = el runtime no tiene `EventSource`; se usa polling. */
   createEventSource?: (url: string) => EventSourceLike | null;
-  /** Catálogo para la UI. `null` significa "volvé al mock". */
+  /** Catálogo para la UI. `null` significa "volvé al dataset del build". */
   onCatalog?: (profiles: readonly UiProfile[] | null, source: DemoSource) => void;
   heartbeatMs?: number;
   pollMs?: number;
@@ -72,7 +74,7 @@ export type LiveController = {
   getSettings(): LiveSettings | null;
   getState(): LiveState;
   subscribe(listener: () => void): () => void;
-  /** `false` si no se pudo abrir: la UI se queda en mock. */
+  /** `false` si no se pudo abrir: la UI se queda con el dataset del build. */
   start(): Promise<boolean>;
   stop(): Promise<void>;
   refresh(): Promise<void>;
@@ -135,8 +137,8 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     ports.onCatalog?.(toUiProfiles(state.discovery), 'live');
   };
 
-  const emitMock = (): void => {
-    ports.onCatalog?.(null, 'mock');
+  const emitDataset = (): void => {
+    ports.onCatalog?.(null, 'dataset');
   };
 
   const queryFor = (current: DiscoveryFilters): DiscoveryQuery => {
@@ -202,7 +204,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     }
   };
 
-  /** Vuelta al mock por pérdida de sesión o de red: nunca deja la UI colgada. */
+  /** Vuelta al dataset por pérdida de sesión o de red: nunca deja la UI colgada. */
   const degrade = (error: unknown): void => {
     const notice = noticeFor(error);
     const code = error instanceof LiveApiError ? error.code : null;
@@ -212,7 +214,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     cursor = null;
     failures = 0;
     set({ status: 'offline', transport: 'none', notice, error: code });
-    emitMock();
+    emitDataset();
     if (api !== null && state.session !== null) {
       // Best effort: la sesión ya puede estar revocada.
       void api.logout().catch(() => undefined);
@@ -430,7 +432,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       set({ status: 'connecting', transport: 'none', notice: null, error: null });
       if (nextZone === null) {
         set({ status: 'offline', transport: 'none', notice: 'unreachable' });
-        emitMock();
+        emitDataset();
         return false;
       }
       let session: LiveState['session'];
@@ -444,7 +446,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
           notice: noticeFor(error),
           error: error instanceof LiveApiError ? error.code : null,
         });
-        emitMock();
+        emitDataset();
         return false;
       }
       zone = nextZone;
@@ -472,7 +474,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       zone = null;
       state = emptyLiveState();
       notify();
-      emitMock();
+      emitDataset();
       if (api !== null && hadSession) {
         await api.logout().catch(() => undefined);
       }

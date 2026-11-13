@@ -190,13 +190,13 @@ describe.skipIf(!enabled)('smoke live contra el backend', () => {
     expect(controller.getState().transport).toBe('polling');
   }, 40_000);
 
-  it('cerrar la sesión devuelve el catálogo al mock', async () => {
+  it('cerrar la sesión devuelve el catálogo al dataset', async () => {
     const { controller, catalogs } = makeController(fetchEventSource);
     await controller.start();
     await waitFor(() => controller.getState().discovery.length > 0, 20_000, 'perfiles live');
     await controller.stop();
     expect(controller.getState().status).toBe('idle');
-    expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'mock' });
+    expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'dataset' });
     expect(fixtures.profiles).toHaveLength(10);
   }, 30_000);
 });

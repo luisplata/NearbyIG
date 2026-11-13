@@ -15,14 +15,15 @@ import { colors, fontSize, space, text } from '../theme/theme';
 import { Chip } from './Chip';
 
 /**
- * Switch mock/live del descubrimiento, debajo del header.
+ * Barra de la sesión live, debajo del header.
  *
- * **Default: mock.** El artefacto publicado (`/expo/`) es la demo sin red y no
- * depende de que haya un backend en la máquina del que mira. El modo live es
- * opt-in explícito y además requiere que el build tenga `EXPO_PUBLIC_API_URL`.
+ * **No hay switch.** Cuando el build tiene API, la sesión arranca sola y la barra
+ * cuenta qué pasa (estado, línea de sesión, transporte, perfiles). El dataset del
+ * build no es un modo que se elija: es el catálogo con el que la app arranca y al
+ * que vuelve si la API no responde, con un aviso que explica el porqué.
  *
- * Si el arranque falla, el switch vuelve solo a mock y el aviso queda visible:
- * la app no se rompe ni se queda en un estado intermedio.
+ * Sin `EXPO_PUBLIC_API_URL` la barra no se monta: el artefacto publicado se ve
+ * exactamente como antes (CONTRACT.md §6 y §9).
  */
 export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
   const { state } = useDemo();
@@ -32,40 +33,24 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
   const session = liveSessionText(live.state);
   const transport = liveTransportText(live.state);
 
-  // Sin base de API en el build no hay nada que elegir: la barra no se monta y
-  // el artefacto publicado queda igual que antes (CONTRACT.md §6 y §9).
+  // Sin base de API en el build no hay nada que contar: la barra no se monta.
   if (!live.available) {
     return null;
   }
 
+  const offline = live.state.status === 'offline';
+
   return (
     <View style={styles.bar}>
       <View style={styles.row}>
-        <Chip
-          label={liveText('mock')}
-          selected={!isLive}
-          onPress={() => {
-            // Ya en mock no hay nada que hacer: tocar el chip activo no
-            // arranca una sesión que el usuario no pidió.
-            if (isLive) {
-              void live.disable();
-            }
-          }}
-        />
-        <Chip
-          label={liveText('live')}
-          selected={isLive}
-          onPress={() => {
-            if (!isLive) {
-              void live.enable();
-            }
-          }}
-        />
         <Text numberOfLines={1} style={[text.small, styles.status]}>
           {liveStatusText(state.source, live.state)}
         </Text>
         {isLive && live.enabled ? (
           <Chip label={liveText('changeProfile')} icon="person" onPress={onOpenProfiles} />
+        ) : null}
+        {offline ? (
+          <Chip label={liveText('retry')} onPress={() => void live.enable()} />
         ) : null}
       </View>
 
@@ -99,8 +84,7 @@ const styles = StyleSheet.create({
   },
   status: {
     flex: 1,
-    textAlign: 'right',
-    paddingHorizontal: space[1],
+    paddingVertical: 2,
   },
   meta: {
     fontSize: fontSize[0],

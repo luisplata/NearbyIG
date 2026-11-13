@@ -8,12 +8,13 @@
  * existe en ese artefacto, así que sus textos viven con el código que los usa.
  * Todo lo que ya está en el catálogo se reutiliza por `fmt()`: nombres de
  * intención, `status.*`, `a11y.profileDot`, títulos de pantalla.
+ *
+ * No hay copy de "Mock" ni de "Live" como chips: en el build publicado el
+ * dataset no es una elección visible, y cuando hay API la sesión arranca sola.
  */
 export const liveCopy = {
-  mock: 'Mock',
-  live: 'Live',
   liveBadge: 'Modo de datos: {mode}',
-  statusMock: 'dataset del build',
+  statusDataset: 'dataset local',
   statusConnecting: 'conectando…',
   statusLive: 'en vivo',
   statusPolling: 'en vivo por polling',
@@ -27,9 +28,16 @@ export const liveCopy = {
   transportSse: 'stream',
   transportPolling: 'polling',
   changeProfile: 'Cambiar perfil',
-  noticeUnreachable: 'No se pudo abrir la sesión live. Seguimos con el dataset del build.',
-  noticeSessionLost: 'La sesión se cerró (la tomó otra pestaña). Volvimos al dataset del build.',
+  retry: 'Reintentar',
+  noticeUnreachable: 'No se pudo abrir la sesión live. Seguimos con el dataset local.',
+  noticeSessionLost: 'La sesión se cerró (la tomó otra pestaña). Seguimos con el dataset local.',
   noticeDegraded: 'Se cortó el stream: seguimos actualizando por polling.',
+  gps: 'GPS',
+  demoZone: 'zona demo',
+  useMyLocation: 'Usar mi ubicación',
+  geolocationDenied: 'Sin permiso de ubicación: seguimos en la zona demo.',
+  geolocationUnavailable: 'Este navegador no dio la ubicación: seguimos en la zona demo.',
+  geolocationOutside: 'Estás fuera de la zona demo: el mapa y las distancias son de la zona demo.',
   pickerTitle: 'Perfiles demo',
   pickerHelp: 'Un slot en uso lo tiene otra sesión de demo. Podés esperar a que se libere o desalojarla.',
   inUse: 'en uso',
@@ -53,4 +61,3 @@ export function liveText(key: LiveCopyKey, params: Record<string, string> = {}):
   const template = liveCopy[key] as string;
   return template.replace(/\{(\w+)\}/g, (_match, name: string) => params[name] ?? `{${name}}`);
 }
-

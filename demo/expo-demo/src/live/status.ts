@@ -24,22 +24,31 @@ export function liveNoticeText(notice: LiveNotice | null): string | null {
   }
 }
 
-/** Línea de estado del switch: siempre una, nunca vacía. */
+/**
+ * Línea de estado de la barra: siempre una, nunca vacía.
+ *
+ * El estado manda sobre el origen: "conectando…" mientras se abre la sesión y
+ * "sin conexión" si se cayó, sin importar que el catálogo todavía sea el del
+ * build. Cuando no hay sesión —build sin API— la barra ni se monta, así que acá
+ * `statusDataset` es el caso "la sesión todavía no entregó la primera foto".
+ */
 export function liveStatusText(source: DemoSource, live: LiveState): string {
+  if (live.status === 'connecting') {
+    return liveText('statusConnecting');
+  }
+  if (live.status === 'offline') {
+    return liveText('statusOffline');
+  }
   if (source !== 'live') {
-    return liveText('statusMock');
+    return liveText('statusDataset');
   }
   switch (live.status) {
-    case 'connecting':
-      return liveText('statusConnecting');
     case 'live':
       return liveText('statusLive');
     case 'polling':
       return liveText('statusPolling');
-    case 'offline':
-      return liveText('statusOffline');
     case 'idle':
-      return liveText('statusMock');
+      return liveText('statusDataset');
   }
 }
 

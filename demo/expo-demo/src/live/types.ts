@@ -85,7 +85,8 @@ export type LiveTransport = 'none' | 'sse' | 'polling';
  * - `connecting`: abriendo sesión, presencia y primera foto.
  * - `live`: stream SSE abierto.
  * - `polling`: sin SSE (navegador sin soporte, ticket rechazado o stream caído).
- * - `offline`: no se pudo conectar o se perdió la sesión; la UI vuelve al mock.
+ * - `offline`: no se pudo conectar o se perdió la sesión; la UI vuelve al
+ *   dataset del build con un aviso.
  */
 export type LiveStatus = 'idle' | 'connecting' | 'live' | 'polling' | 'offline';
 

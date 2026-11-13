@@ -7,8 +7,15 @@ import type { Gender, Intention } from '../generated/fixtures';
 
 export type DemoView = 'radar' | 'map' | 'list';
 
-/** Origen del catálogo de descubrimiento: dataset del build o backend live. */
-export type DemoSource = 'mock' | 'live';
+/**
+ * Origen del catálogo de descubrimiento: el **dataset del build** o el backend
+ * live.
+ *
+ * `dataset` y no `mock` a propósito: en la UI publicada no hay ningún modo
+ * "Mock" que elegir. El dataset es el catálogo que viene compilado (y el que se
+ * sigue viendo si la API no está configurada o no responde), no una opción.
+ */
+export type DemoSource = 'dataset' | 'live';
 
 /**
  * Forma en la que la UI consume un perfil: los 13 campos del dataset
@@ -113,8 +120,8 @@ export type DemoState = {
   toastSeq: number;
   replyCursor: Record<string, number>;
   /**
-   * Dataset sobre el que corre la máquina de estados. El mock lo fija en
-   * `fixtures.profiles`; el modo live lo cambia por la última foto de
+   * Dataset sobre el que corre la máquina de estados. El dataset del build lo
+   * fija en `fixtures.profiles`; el modo live lo cambia por la última foto de
    * `/discovery`. No entra en `projectState`: el golden de paridad no lo ve.
    */
   catalog: readonly UiProfile[];

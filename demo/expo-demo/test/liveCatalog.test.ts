@@ -34,7 +34,7 @@ const LIVE_CATALOG: readonly UiProfile[] = [
 describe('catálogo del estado', () => {
   it('arranca con el dataset del build', () => {
     const state = initialState();
-    expect(state.source).toBe('mock');
+    expect(state.source).toBe('dataset');
     expect(state.catalog).toHaveLength(fixtures.profiles.length);
     expect(visibleProfiles(state)).toHaveLength(10);
   });
@@ -88,7 +88,7 @@ describe('catálogo del estado', () => {
     expect(store.getState().profileId).toBeNull();
   });
 
-  it('RESET reinicia la demo sobre el catálogo vivo en vez de saltar al mock', () => {
+  it('RESET reinicia la demo sobre el catálogo vivo en vez de saltar al dataset', () => {
     const store = createDemoStore();
     store.setCatalog(LIVE_CATALOG, 'live');
     store.dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: 'mx-p02' });
@@ -103,18 +103,18 @@ describe('catálogo del estado', () => {
     ]);
   });
 
-  it('volver al mock restaura los 10 perfiles del build', () => {
+  it('volver al dataset restaura los 10 perfiles del build', () => {
     const store = createDemoStore();
     store.setCatalog(LIVE_CATALOG, 'live');
-    store.setCatalog(fixtures.profiles, 'mock');
-    expect(store.getState().source).toBe('mock');
+    store.setCatalog(fixtures.profiles, 'dataset');
+    expect(store.getState().source).toBe('dataset');
     expect(visibleProfiles(store.getState())).toHaveLength(10);
   });
 
   it('el catálogo no entra en la proyección: el golden de paridad no se mueve', () => {
-    const mock = initialState();
-    const live = { ...mock, catalog: LIVE_CATALOG, source: 'live' as const };
-    expect(projectState(live)).toBe(projectState(mock));
+    const base = initialState();
+    const live = { ...base, catalog: LIVE_CATALOG, source: 'live' as const };
+    expect(projectState(live)).toBe(projectState(base));
   });
 
   it('los filtros existentes funcionan contra el catálogo del backend', () => {

@@ -206,7 +206,7 @@ describe('arranque de la sesión', () => {
     expect(catalogs.at(-1)?.source).toBe('live');
   });
 
-  it('sin base de API configurada no intenta nada: avisa y se queda en mock', async () => {
+  it('sin base de API configurada no intenta nada: avisa y se queda con el dataset', async () => {
     const server = makeServer();
     const stream = makeStream();
     const { controller } = makeController(server, stream, null);
@@ -218,7 +218,7 @@ describe('arranque de la sesión', () => {
     expect(server.counts.size).toBe(0);
   });
 
-  it('si la API no responde, vuelve al mock con un aviso y no deja la UI colgada', async () => {
+  it('si la API no responde, vuelve al dataset con un aviso y no deja la UI colgada', async () => {
     const server = makeServer({
       'POST /api/auth/demo-session': () => ({ status: 500, body: '{"code":"INTERNAL"}' }),
     });
@@ -230,7 +230,7 @@ describe('arranque de la sesión', () => {
     expect(controller.getState().status).toBe('offline');
     expect(controller.getState().notice).toBe('unreachable');
     expect(controller.getState().error).toBe('INTERNAL');
-    expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'mock' });
+    expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'dataset' });
   });
 
   it('una zona desconocida no se inventa: falla suave antes de pedir presencia', async () => {
@@ -379,7 +379,7 @@ describe('latido de presencia', () => {
     expect(controller.getState().status).toBe('live');
   });
 
-  it('dos latidos fallidos seguidos devuelven al mock sin romper la app', async () => {
+  it('dos latidos fallidos seguidos devuelven al dataset sin romper la app', async () => {
     vi.useFakeTimers();
     let fail = false;
     const server = makeServer({
@@ -396,7 +396,7 @@ describe('latido de presencia', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(controller.getState().status).toBe('offline');
     expect(controller.getState().notice).toBe('unreachable');
-    expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'mock' });
+    expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'dataset' });
     expect(stream.instances[0].closed).toBe(true);
   });
 
@@ -578,7 +578,7 @@ describe('filtros', () => {
 });
 
 describe('cierre', () => {
-  it('stop cierra sesión, corta el stream y devuelve el catálogo al mock', async () => {
+  it('stop cierra sesión, corta el stream y devuelve el catálogo al dataset', async () => {
     const server = makeServer();
     const stream = makeStream();
     const { controller, catalogs } = makeController(server, stream);
@@ -590,6 +590,6 @@ describe('cierre', () => {
     expect(stream.instances[0].closed).toBe(true);
     expect(controller.getState().status).toBe('idle');
     expect(controller.getState().session).toBeNull();
-    expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'mock' });
+    expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'dataset' });
   });
 });
