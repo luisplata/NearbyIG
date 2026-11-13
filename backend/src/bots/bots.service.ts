@@ -7,13 +7,16 @@ import { PG_POOL } from '../db/database.module';
 import type { VisibleSubjects } from '../events/events.types';
 
 /**
- * Predicado de "el dueño del bot está visible": una presencia viva de una sesión
+ * Predicado de "el dueño del bot está **vivo**": una presencia viva de una sesión
  * viva del mismo perfil. Es el mismo `expires_at > now()` que usa la lectura de
- * presencia (S2-A), así que el ghost y el TTL apagan los bots por la misma vía y
- * sin borrar filas: la fila del bot puede seguir, lo que deja de existir es la
- * razón para mostrarlo.
+ * presencia (S2-A).
+ *
+ * Éste es el predicado de **existencia** (reconciliación y movimiento): un dueño
+ * en ghost conserva sus bots. Si se usara el de visibilidad para borrarlos, el
+ * tick los recrearía en la pasada siguiente —`presence_anchors` no filtra
+ * ghost— y el dueño vería sus bots parpadear en su propio radar.
  */
-const OWNER_VISIBLE = `
+const OWNER_ALIVE = `
   EXISTS (
     SELECT 1
       FROM presence p
@@ -23,6 +26,48 @@ const OWNER_VISIBLE = `
        AND p.expires_at > now()
        AND s.revoked_at IS NULL
        AND s.expires_at > now()
+  )`;
+
+/**
+ * Predicado de "el dueño del bot está **visible**": vivo y con
+ * `visibility = 'visible'`.
+ *
+ * Es el que decide qué bots ven los demás (discovery y stream) y a qué bot se le
+ * puede pinguear. En ghost, el humano es invisible y sus bots también. El dueño
+ * se los sigue viendo porque `visibleBotIds` incluye los propios sin este
+ * predicado (ver ahí).
+ */
+const OWNER_VISIBLE = `
+  EXISTS (
+    SELECT 1
+      FROM presence p
+      JOIN sessions s ON s.session_id = p.session_id
+     WHERE p.region_key = b.region_key
+       AND s.profile_id = b.owner_profile_id
+       AND p.expires_at > now()
+       AND p.visibility = 'visible'
+       AND s.revoked_at IS NULL
+       AND s.expires_at > now()
+  )`;
+
+/**
+ * Predicado de "el par del observador (`$2`) con el dueño no está bloqueado, en
+ * ninguna dirección".
+ *
+ * Un bloqueo es asimétrico en la fila y simétrico en el efecto: si cualquiera de
+ * los dos bloqueó al otro, el par deja de verse. El dueño del bot es siempre un
+ * humano canónico (`blocks` guarda al dueño, no al bot), así que comparar
+ * `owner_profile_id` alcanza.
+ */
+const NOT_BLOCKED_WITH_OBSERVER = `
+  NOT EXISTS (
+    SELECT 1
+      FROM blocks bl
+     WHERE bl.region_key = b.region_key
+       AND (
+            (bl.blocker_profile_id = $2 AND bl.blocked_profile_id = b.owner_profile_id)
+         OR (bl.blocker_profile_id = b.owner_profile_id AND bl.blocked_profile_id = $2)
+       )
   )`;
 
 /**
@@ -140,7 +185,7 @@ export class BotsService {
     }
 
     const { rowCount } = await this.pool.query(
-      `DELETE FROM bots b WHERE NOT (${OWNER_VISIBLE})`,
+      `DELETE FROM bots b WHERE NOT (${OWNER_ALIVE})`,
     );
     if ((rowCount ?? 0) > 0) {
       this.logger.log(`bots retirados sin dueño vivo: ${rowCount}`);
@@ -179,7 +224,7 @@ export class BotsService {
                 ((b.waypoint_index + 1) % 4)::smallint AS next_index
            FROM bots b
           WHERE b.leg_started_at <= now() - make_interval(secs => $1)
-            AND ${OWNER_VISIBLE}
+            AND ${OWNER_ALIVE}
        ), moved AS (
          UPDATE bots b
             SET waypoint_index = d.next_index,
@@ -241,6 +286,11 @@ export class BotsService {
    * ajeno + 2 propios + 2 del otro. Un bot es una proyección del dueño, no un
    * desconocido, y esconderlo convertiría la densidad prometida en 1 + 2.
    *
+   * **Los propios entran siempre (v0.5).** Ni el ghost ni un bloqueo los
+   * esconden de su dueño: en ghost la sesión sigue viendo, y "sus bots incluidos"
+   * es lo que mantiene el radar propio con la densidad prometida. Para los
+   * demás, `OWNER_VISIBLE` exige `visibility = 'visible'` y el par no bloqueado.
+   *
    * **Por qué `bot_profile_id` y no `profileId` del dueño.** Los bots propios
    * entran sólo como bots: el humano sigue sin verse a sí mismo (eso lo decide
    * `visibleSubjects`, que excluye al perfil propio y deja entrar a sus bots).
@@ -261,7 +311,10 @@ export class BotsService {
       `SELECT b.bot_profile_id
          FROM bots b
         WHERE b.region_key = $1
-          AND ${OWNER_VISIBLE}
+          AND (
+               b.owner_profile_id = $2
+            OR (${OWNER_VISIBLE} AND ${NOT_BLOCKED_WITH_OBSERVER})
+          )
         ORDER BY (b.owner_profile_id = $2) DESC, b.bot_profile_id
         LIMIT $3`,
       [regionKey, observerProfileId, this.config.observerBotCap],
@@ -270,21 +323,47 @@ export class BotsService {
   }
 
   /**
-   * Sujetos visibles para un observador: los humanos de su región (menos él) y
-   * los bots visibles de `visibleBotIds` (propios incluidos, cap 6).
+   * Sujetos visibles para un observador: los humanos de su región (menos él,
+   * menos los que están en ghost y menos el par bloqueado) y los bots visibles de
+   * `visibleBotIds` (propios incluidos, cap 6).
    *
    * El humano no se ve a sí mismo, pero sí ve sus bots: son la densidad que la
    * demo promete y lo que el radar dibuja alrededor del propio punto.
    */
   async visibleSubjects(session: AuthContext): Promise<VisibleSubjects> {
     const [humans, bots] = await Promise.all([
+      // Humanos de la región, menos uno mismo, menos los que están en ghost y
+      // menos el par bloqueado (en cualquier dirección). No se filtra por
+      // presencia viva: un humano sin presencia tiene que seguir en la lista
+      // para que su `profile.presence online:false` llegue —si se filtrara por
+      // "vivo", el aviso de que se fue nunca saldría—.
       this.pool.query<{ profile_id: string }>(
-        `SELECT profile_id
-           FROM profiles
-          WHERE region_key = $1
-            AND source_type = 'human'
-            AND profile_id <> $2
-          ORDER BY profile_id`,
+        `SELECT p.profile_id
+           FROM profiles p
+          WHERE p.region_key = $1
+            AND p.source_type = 'human'
+            AND p.profile_id <> $2
+            AND NOT EXISTS (
+              SELECT 1
+                FROM presence pr
+                JOIN sessions s ON s.session_id = pr.session_id
+               WHERE pr.region_key = p.region_key
+                 AND s.profile_id = p.profile_id
+                 AND pr.expires_at > now()
+                 AND pr.visibility = 'ghost'
+                 AND s.revoked_at IS NULL
+                 AND s.expires_at > now()
+            )
+            AND NOT EXISTS (
+              SELECT 1
+                FROM blocks bl
+               WHERE bl.region_key = p.region_key
+                 AND (
+                      (bl.blocker_profile_id = $2 AND bl.blocked_profile_id = p.profile_id)
+                   OR (bl.blocker_profile_id = p.profile_id AND bl.blocked_profile_id = $2)
+                 )
+            )
+          ORDER BY p.profile_id`,
         [session.regionKey, session.profileId],
       ),
       this.visibleBotIds(session.regionKey, session.profileId),

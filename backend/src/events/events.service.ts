@@ -47,10 +47,17 @@ interface EventRow {
  * reloj puede invertirse.
  *
  * **Visibilidad.** El log es de la región; la proyección es del observador: pasan
- * los humanos de la región (menos él) y sus bots visibles, propios incluidos y
- * cortados en el cap de 6 (`BotsService.visibleBotIds`, la misma definición que
- * `GET /discovery`). Los bots de un dueño en ghost no pasan —ni los nuevos ni los
- * que ya estaban en el log— porque el filtro es de lectura y no de escritura.
+ * los humanos de la región (menos él, menos los que están en ghost o bloqueados)
+ * y sus bots visibles, propios incluidos y cortados en el cap de 6
+ * (`BotsService.visibleBotIds`, la misma definición que `GET /discovery`). Los
+ * bots de un dueño en ghost no pasan —ni los nuevos ni los que ya estaban en el
+ * log— porque el filtro es de lectura y no de escritura.
+ *
+ * **La excepción: `online:false`.** El aviso de que alguien dejó de estar
+ * (`DELETE /presence`, ghost o bloqueo) es lo que permite sacarle la tarjeta al
+ * cliente; por eso viaja siempre, aunque el sujeto ya no esté en la lista. Si se
+ * filtrara como el resto, el radar de los demás quedaría con un fantasma pegado
+ * hasta el próximo refresh de discovery.
  *
  * **Frame de las medidas.** `profile.moved` lleva `distanceM`/`bearingDeg` contra
  * el ancla de la zona (el frame del mundo), no contra el observador: el log es
@@ -223,7 +230,12 @@ export class EventsService {
         WHERE region_key = $1
           AND seq > $2
           AND (
-               (event_type = 'profile.presence' AND payload->>'profileId' = ANY($3::text[]))
+               -- Un online:false viaja siempre: es el aviso con el que el
+               -- radar de los demás saca a alguien que se fue, se puso en ghost
+               -- o lo bloquearon. Filtrarlo por sujeto visible dejaría la
+               -- tarjeta pegada en pantalla para siempre.
+               (event_type = 'profile.presence'
+                AND (payload->>'online' = 'false' OR payload->>'profileId' = ANY($3::text[])))
             OR (event_type = 'profile.moved'    AND payload->>'profileId' = ANY($4::text[]))
             OR (event_type IN ('message.created', 'typing.started')
                 AND payload->>'matchId' = ANY($6::text[]))

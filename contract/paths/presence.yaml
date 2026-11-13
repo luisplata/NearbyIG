@@ -29,7 +29,14 @@ presence:
     description: |
       Recibe **o** un `point` privado **o** una `demoZoneKey`, nunca los dos y
       nunca ninguno. El server resuelve región y zona contra el catálogo y
-      devuelve `PresenceState`: `profileId`, `regionKey`, `zoneKey` y `online`.
+      devuelve `PresenceState`: `profileId`, `regionKey`, `zoneKey`, `online`,
+      `visibility` y `fallbackRequired`.
+
+      `visibility` (opcional, desde v0.5) es `visible` o `ghost`. En `ghost` la
+      sesión sigue online y sigue viendo, pero ni el humano ni sus dos bots
+      aparecen en `GET /discovery` ni en el stream de los demás; el dueño se
+      sigue viendo a sí mismo (sus bots incluidos). Omitir `visibility` conserva
+      la vigente: el heartbeat de posición no saca a nadie de ghost.
 
       Fuera de todo polígono no es un error: responde 200 con
       `fallbackRequired: true` y `zoneKey: null`, y el cliente ofrece el selector
@@ -76,6 +83,12 @@ presence:
       La sesión deja de aparecer en el descubrimiento de los demás y `online` pasa
       a `false` para quien la tenía en su lista, con un `profile.presence` por el
       stream. No borra el perfil: `GET /demo/profiles` lo sigue devolviendo.
+
+      **No es lo mismo que `visibility: ghost`.** Apagar la presencia retira al
+      dueño y a sus bots para todos —incluido el dueño, que ya no tiene origen
+      para `GET /discovery`—; ghost los retira sólo para los demás y mantiene la
+      sesión viendo. Para "online pero invisible" es `PUT /presence` con
+      `visibility: ghost`.
 
       Es idempotente en el resultado pero no en el status: si no hay presencia
       viva —porque ya se borró o porque venció— responde 409 `PRESENCE_STALE` en

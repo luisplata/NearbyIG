@@ -14,6 +14,7 @@ export type ErrorCode =
   | 'REGION_MISMATCH'
   | 'CHAT_BLOCKED'
   | 'PING_FORBIDDEN'
+  | 'PROFILE_REQUIRED'
   | 'PROFILE_NOT_FOUND'
   | 'MATCH_NOT_FOUND'
   | 'PING_NOT_FOUND'
@@ -39,6 +40,7 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   REGION_MISMATCH: 403,
   CHAT_BLOCKED: 403,
   PING_FORBIDDEN: 403,
+  PROFILE_REQUIRED: 403,
   PROFILE_NOT_FOUND: 404,
   MATCH_NOT_FOUND: 404,
   PING_NOT_FOUND: 404,
@@ -64,6 +66,7 @@ const TITLE: Readonly<Record<ErrorCode, string>> = {
   REGION_MISMATCH: 'Region mismatch',
   CHAT_BLOCKED: 'Chat blocked',
   PING_FORBIDDEN: 'Ping forbidden',
+  PROFILE_REQUIRED: 'Profile required',
   PROFILE_NOT_FOUND: 'Profile not found',
   MATCH_NOT_FOUND: 'Match not found',
   PING_NOT_FOUND: 'Ping not found',

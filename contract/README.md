@@ -12,7 +12,7 @@ que sale de este directorio hacia el artefacto publicado es el doc HTML de
 | Sí hay | No hay (todavía) |
 |---|---|
 | OpenAPI 3.1 a mano + lint + tests | Server, DB, Docker, NestJS |
-| Superficie congelada S1–S4 con sprint por operation | Ninguna operation implementada |
+| Superficie congelada S1–S5 con sprint por operation | Ninguna operation implementada |
 | `ErrorCode` cerrado, envelope de eventos, catálogo MX/CO | Firebase, OAuth, secretos |
 | Cliente TS type-only generado y commiteado | Cliente runtime |
 
@@ -49,7 +49,7 @@ contract:validate      →  el spec es OpenAPI 3.1 y cumple sus invariantes
 contract:generate:check →  api.ts commiteado == regenerado (bytes)
 contract:seed:check    →  catálogo y manifest sin drift
 contract:event-log:check →  sample-log.json == derivado del catálogo
-contract:test          →  los casos de node:test (hoy 85)
+contract:test          →  los casos de node:test (hoy 92)
 contract:typecheck     →  el cliente compila en strict
 git diff --exit-code   →  red secundaria: nada quedó sin commitear
 ```
@@ -117,6 +117,9 @@ contract/
   paths/pings.yaml          POST y GET /pings, accept y reject (S4)
   paths/matches.yaml        GET /matches, mensajes y read (S4, delta v0.4)
   paths/me.yaml             GET /me: el perfil de la propia sesión (delta v0.4)
+  paths/blocks.yaml         GET/POST /blocks y DELETE /blocks/{profileId} (delta v0.5)
+  paths/reports.yaml        POST /reports (delta v0.5)
+  paths/notifications.yaml  GET /notifications y POST /notifications/read (delta v0.5)
   schemas/auth.yaml         DemoSession, DemoSessionRequest, TakeoverRequest, StreamTicket
   schemas/events.yaml       envelope, los 6 tipos, los 6 payloads, EventsPage
   schemas/region.yaml       Region, RegionList, ZoneSummary, ZoneList
@@ -125,6 +128,9 @@ contract/
   schemas/discovery.yaml    DiscoveryQuery, DiscoveryResult
   schemas/pings.yaml        Ping, PingList (con PingPeer), PingCreate y Match
   schemas/chat.yaml         Message, MessageCreate, MessagePage, MatchListItem y MatchList
+  schemas/blocks.yaml       Block, BlockCreate, BlockListItem y BlockList (v0.5)
+  schemas/reports.yaml      ReportReason, ReportCreate y ReportReceipt (v0.5)
+  schemas/notifications.yaml  NotificationKind, NotificationItem, NotificationList y read (v0.5)
   schemas/common.yaml       RegionKey, SourceType, Gender, Intention, KeyLabel, Page
   catalog/regions.json      dos regiones: mx, co (con defaultZoneKey)
   catalog/zones.json        geometría de CDMX y Bogotá: anillos [lng, lat]
@@ -149,6 +155,7 @@ contract/
   test/fixtures-parity.test.mjs  paridad campo a campo con fixtures (fixtures gana)
   test/seed-idempotent.test.mjs  doble emisión byte-idéntica + gate anti-drift
   test/chat-contract.test.mjs   el delta v0.4: chat, idempotencia y SelfProfile
+  test/privacy-contract.test.mjs  el delta v0.5: visibility, block, report y notifications
   test/presence-discovery.test.mjs  punto o zona, fallback y el filtro de discovery
   test/no-coordinates.test.mjs   walk de responses y eventos: ninguna coordenada sale
   test/client-drift.test.mjs     api.ts == regenerado, determinista y type-only
@@ -178,10 +185,10 @@ demo-session:
     x-implementation-sprint: 1
 ```
 
-## Superficie congelada (S1–S4)
+## Superficie congelada (S1–S5)
 
-Lo que está adentro es la superficie de la demo. Lo que está afuera se congela
-cuando exista un diseño que lo congele: block, report y `/health` no tienen path.
+Lo que está adentro es la superficie de la demo. Lo que sigue afuera es `/health`:
+es operación, no producto, y se congela el día que tenga diseño.
 Desde v0.4 un match **sí** es un recurso: `GET /matches` es la bandeja y su
 conversación cuelga de `GET|POST /matches/{matchId}/messages` (ver
 [Chat (delta v0.4)](#chat-delta-v04)).
@@ -203,6 +210,10 @@ conversación cuelga de `GET|POST /matches/{matchId}/messages` (ver
 | `GET /matches/{matchId}/messages`, `POST /matches/{matchId}/messages` | 4 | `paths/matches.yaml` | **v0.4** |
 | `POST /matches/{matchId}/read` | 4 | `paths/matches.yaml` | **v0.4** |
 | `GET /me` | 4 | `paths/me.yaml` | **v0.4** |
+| `GET /blocks`, `POST /blocks` | 5 | `paths/blocks.yaml` | **v0.5** |
+| `DELETE /blocks/{profileId}` | 5 | `paths/blocks.yaml` | **v0.5** |
+| `POST /reports` | 5 | `paths/reports.yaml` | **v0.5** |
+| `GET /notifications`, `POST /notifications/read` | 5 | `paths/notifications.yaml` | **v0.5** |
 
 ## Ocupación y takeover (delta v0.2)
 
@@ -364,6 +375,62 @@ lee por HTTP.
 `MATCH_CLOSED` (409) porque "la conversación ya no acepta mensajes" no se podía
 expresar con los códigos existentes sin mentir. **Desde v0.4 no queda ningún
 código reservado**: el bloqueo de S5 reusará `CHAT_BLOCKED`.
+
+## Privacidad (delta v0.5)
+
+Sprint 5 agrega la superficie de privacidad. Es un delta **aditivo**: ninguna
+operation de S1–S4 cambia de forma salvo `PresenceState`, que suma `visibility`
+(el único campo nuevo en un DTO que el cliente ya consume; el cliente generado lo
+recibe al regenerar y el front live lo ignora hasta que lo use).
+
+| Operation | Sprint | Respuesta | Qué hace |
+|---|---:|---|---|
+| `PUT /presence` (+ `visibility`) | 2 | 200 `PresenceState` | `visible` (default) o `ghost`: online pero invisible para los demás |
+| `GET /blocks` | 5 | 200 `BlockList` | lo que la sesión bloqueó, con la identidad del otro (`PingPeer`) |
+| `POST /blocks` | 5 | 201 `Block` | bloquea; **idempotente** (mismo `createdAt`) |
+| `DELETE /blocks/{profileId}` | 5 | 204 | revierte; idempotente, incluso si no había bloqueo |
+| `POST /reports` | 5 | 202 `ReportReceipt` | registra el reporte; sin consola de moderación ni PII en el acuse |
+| `GET /notifications` | 5 | 200 `NotificationList` | campana persistida + `unreadCount` |
+| `POST /notifications/read` | 5 | 200 `NotificationReadResult` | marca todas o por id; devuelve `marked` y `unreadCount` |
+
+Reglas que el contrato fija y el server no reinterpreta:
+
+| Caso | Respuesta | Por qué |
+|---|---|---|
+| ghost | 200, `online: true`, `visibility: "ghost"` | la presencia existe; cambia a quién se le muestra |
+| `PUT` sin `visibility` | conserva la vigente | el heartbeat de posición no saca a nadie de ghost |
+| `visibility` fuera del enum | 422 `VALIDATION_FAILED` | es schema, no estado |
+| bloquearse / reportarse a sí mismo | 422 `VALIDATION_FAILED` | el body está bien; el pedido no |
+| `profileId` inexistente en la región | 404 `PROFILE_NOT_FOUND` | un bloqueo no cruza regiones |
+| invitado de relleno | 403 `PROFILE_REQUIRED` | no tiene perfil que bloquear ni reportar |
+| ping entre bloqueados (cualquier dirección) | 403 `CHAT_BLOCKED` | el 403 del par, no un 409 de estado |
+| mensaje en conversación de par bloqueado | 403 `CHAT_BLOCKED` | la historia se lee; escribir, no |
+| conversación con un bot que cambió de zona | 409 `MATCH_CLOSED` | el bot ya no está donde nació el match; se lee pero no se escribe |
+| `notificationIds` con forma inválida | 422 `VALIDATION_FAILED` | un id que no es uuid no se adivina |
+
+**Ghost vs. apagar la presencia.** `DELETE /presence` es "me voy": la sesión deja
+de contar para todos, incluida ella misma. `visibility: ghost` es "estoy pero no me
+veas": la sesión sigue viendo y sus bots siguen orbitando para el dueño. Por eso
+`PresenceState.online` sigue en `true` en ghost: el campo dice si la presencia
+existe, no si es visible.
+
+**Un solo código nuevo.** `PROFILE_REQUIRED` (403) para el invitado de relleno en
+bloqueos y reportes. `CHAT_BLOCKED` y `MATCH_CLOSED` ya existían y se reusan con su
+significado de v0.4 extendido. `x-reserved` sigue vacío: no hay código sin
+operation.
+
+**Bloquear un bot bloquea a su dueño.** La fila guarda al humano canónico; un bot
+no tiene identidad propia que sobreviva a la persona. Lo mismo vale para reportar.
+
+**Notificaciones sin evento nuevo.** La campana no agrega tipos al stream: se
+refresca con `GET /notifications`, y el contenido se lee con la API del recurso. El
+badge de pings pendientes del cliente sigue funcionando igual (ver
+`backend/README.md`, "Compatibilidad del badge"); la campana nueva es aditiva.
+
+**El reporte no modera.** `POST /reports` no bloquea, no oculta y no cambia el
+descubrimiento; registra la señal con un motivo cerrado y devuelve un acuse sin
+identidad del reportado. Un `GET /reports` no existe a propósito: sería una lectura
+de PII sin diseño que la sostenga.
 
 ## Regiones y zonas: la geometría existe y nunca viaja
 
@@ -682,7 +749,7 @@ Consecuencias que importan al revisar:
 ## Cómo extender en Sprint 1
 
 1. Declarar el path item en `paths/<recurso>.yaml`: clave sin `/`, `operationId`
-   único, `summary`, `description`, `tags` y `x-implementation-sprint` (1, 2, 3 o 4).
+   único, `summary`, `description`, `tags` y `x-implementation-sprint` (1 a 5).
 2. Montarlo en `openapi.yaml` → `paths`.
 3. Si hay DTO nuevo, `schemas/<recurso>.yaml` con `additionalProperties: false` y
    los nombres del dataset (no `distanceMeters`, no `intent`).
@@ -701,8 +768,8 @@ Consecuencias que importan al revisar:
 - **El generado no se edita.** `generated/api.ts` y `event/sample-log.json` se
   regeneran con `contract:generate` y `contract:event-log`; los gates comparan
   bytes, así que una edición a mano no sobrevive ni al primer `contract:test`.
-- **Sprint por operation.** `x-implementation-sprint` ∈ {1,2,3,4}. Ninguna
-  operation declara 0 ni 5.
+- **Sprint por operation.** `x-implementation-sprint` ∈ {1,2,3,4,5}. Ninguna
+  operation declara 0.
 - **Errores en `application/problem+json`** (RFC 9457) con `code` del enum cerrado.
   `operation-4xx-response` está activa en `redocly.yaml`, pero su severidad es
   `warning`: el gate duro son los tests "toda operation declara ≥1 error 4xx/5xx" y

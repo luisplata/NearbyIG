@@ -17,6 +17,7 @@ ErrorCode:
     - REGION_MISMATCH
     - CHAT_BLOCKED
     - PING_FORBIDDEN
+    - PROFILE_REQUIRED
     # 404 — recurso
     - PROFILE_NOT_FOUND
     - MATCH_NOT_FOUND
@@ -40,7 +41,7 @@ ErrorCode:
     - INTERNAL
     - NOT_IMPLEMENTED
   description: |
-    Motivo del error, cerrado a estos 22 valores. `code` es el discriminante
+    Motivo del error, cerrado a estos 23 valores. `code` es el discriminante
     estable: el cliente decide con él, nunca con `title` ni con `detail` (esos
     son texto para humanos, traducible y variable).
 
@@ -58,6 +59,7 @@ ErrorCode:
     REGION_MISMATCH: 403
     CHAT_BLOCKED: 403
     PING_FORBIDDEN: 403
+    PROFILE_REQUIRED: 403
     PROFILE_NOT_FOUND: 404
     MATCH_NOT_FOUND: 404
     PING_NOT_FOUND: 404
@@ -85,8 +87,9 @@ ErrorCode:
   # los dos códigos se usan de verdad. v0.4 saca los dos últimos —
   # `MATCH_NOT_FOUND` (el chat ya tiene paths) y `CHAT_BLOCKED` (403 de una
   # conversación ajena)— y suma `MATCH_CLOSED`, que nace ya en uso. **Hoy no queda
-  # ninguno reservado**: el bloqueo de S5 reusará `CHAT_BLOCKED`, no necesita un
-  # código nuevo.
+  # ninguno reservado**: v0.5 reusa `CHAT_BLOCKED` para el bloqueo real y suma
+  # `PROFILE_REQUIRED` (403 del invitado de relleno en bloqueos y reportes), que
+  # nace con operation.
   x-reserved: {}
 
 Problem:

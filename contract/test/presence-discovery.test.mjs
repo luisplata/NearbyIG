@@ -158,12 +158,12 @@ test('PresenceState cierra y el fallback vive en el body, no en un Problem', () 
   assert.equal(state.additionalProperties, false);
   assert.deepEqual(
     Object.keys(state.properties).sort(),
-    ['fallbackRequired', 'online', 'profileId', 'regionKey', 'zoneKey'],
+    ['fallbackRequired', 'online', 'profileId', 'regionKey', 'visibility', 'zoneKey'],
   );
   assert.deepEqual([...state.required].sort(), Object.keys(state.properties).sort());
   assert.equal(state.properties.fallbackRequired.type, 'boolean');
 
-  const base = { profileId: 'mx-p03', regionKey: 'mx', online: true };
+  const base = { profileId: 'mx-p03', regionKey: 'mx', online: true, visibility: 'visible' };
   assert.deepEqual(
     validate(state, { ...base, zoneKey: 'cdmx', fallbackRequired: false }),
     [],

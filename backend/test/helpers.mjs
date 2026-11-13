@@ -372,6 +372,136 @@ export async function getMe(token) {
   return api('/me', { token });
 }
 
+/** `GET /blocks` — los bloqueos propios (S5). */
+export async function listBlocks(token) {
+  return api('/blocks', { token });
+}
+
+/** `POST /blocks`. El body se manda tal cual: los casos de validación se provocan. */
+export async function createBlock(token, body) {
+  return api('/blocks', { method: 'POST', token, body });
+}
+
+/** `DELETE /blocks/{profileId}`. El id se manda tal cual (bots y vacíos incluidos). */
+export async function deleteBlock(token, profileId) {
+  return api(`/blocks/${encodeURIComponent(profileId)}`, { method: 'DELETE', token });
+}
+
+/** `POST /reports`. El body se manda tal cual. */
+export async function createReport(token, body) {
+  return api('/reports', { method: 'POST', token, body });
+}
+
+/** `GET /notifications` — la campana de S5. */
+export async function listNotifications(token) {
+  return api('/notifications', { token });
+}
+
+/** `POST /notifications/read`. Sin body = todas. */
+export async function markNotificationsRead(token, body) {
+  return api('/notifications/read', { method: 'POST', token, ...(body === undefined ? {} : { body }) });
+}
+
+/** Filas de `blocks` de un bloqueador: para probar la idempotencia y el dueño. */
+export async function blockRowsOf(regionKey, blockerProfileId) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT blocker_profile_id, blocked_profile_id, created_at
+         FROM blocks
+        WHERE region_key = $1 AND blocker_profile_id = $2
+        ORDER BY blocked_profile_id`,
+      [regionKey, blockerProfileId],
+    );
+    return rows;
+  });
+}
+
+/** Filas de `reports` de un reportante (sin motivo: el test no lo necesita). */
+export async function reportRowsOf(regionKey, reporterProfileId) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT report_id, reported_profile_id, reason, created_at
+         FROM reports
+        WHERE region_key = $1 AND reporter_profile_id = $2
+        ORDER BY created_at`,
+      [regionKey, reporterProfileId],
+    );
+    return rows;
+  });
+}
+
+/** Filas de `notifications` de un destinatario, con estado de lectura. */
+export async function notificationRowsOf(regionKey, recipientProfileId) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT notification_id, kind, actor_profile_id, ping_id, match_id, message_id,
+              read_at IS NOT NULL AS read
+         FROM notifications
+        WHERE region_key = $1 AND recipient_profile_id = $2
+        ORDER BY created_at, notification_id`,
+      [regionKey, recipientProfileId],
+    );
+    return rows;
+  });
+}
+
+/** Mueve la zona de un bot sin esperar al ticker (simula al dueño mudándose). */
+export async function setBotZone(regionKey, botProfileId, zoneKey) {
+  await withDb((client) =>
+    client.query(
+      'UPDATE bots SET zone_key = $3 WHERE region_key = $1 AND bot_profile_id = $2',
+      [regionKey, botProfileId, zoneKey],
+    ),
+  );
+}
+
+/** Vence la sesión ahora: es el estado que deja el TTL sin esperar 2 h. */
+export async function expireSession(sessionId) {
+  await withDb((client) =>
+    client.query(
+      `UPDATE sessions
+          SET issued_at = now() - interval '3 hours',
+              expires_at = now() - interval '1 second'
+        WHERE session_id = $1`,
+      [sessionId],
+    ),
+  );
+}
+
+/** `visibility` de la fila de presencia, sin leer geometría. */
+export async function presenceVisibility(sessionId) {
+  return withDb(async (client) => {
+    const { rows } = await client.query('SELECT visibility FROM presence WHERE session_id = $1', [
+      sessionId,
+    ]);
+    return rows[0]?.visibility;
+  });
+}
+
+/** Borra los bloqueos/reportes/notificaciones del escenario (limpieza local). */
+export async function clearPrivacyOf(regionKey, profileIds) {
+  await withDb(async (client) => {
+    await client.query(
+      `DELETE FROM notifications
+        WHERE region_key = $1
+          AND (recipient_profile_id = ANY($2::text[]) OR actor_profile_id = ANY($2::text[]))`,
+      [regionKey, profileIds],
+    );
+    await client.query(
+      `DELETE FROM blocks
+        WHERE region_key = $1
+          AND (blocker_profile_id = ANY($2::text[]) OR blocked_profile_id = ANY($2::text[]))`,
+      [regionKey, profileIds],
+    );
+    await client.query(
+      `DELETE FROM reports
+        WHERE region_key = $1
+          AND (reporter_profile_id = ANY($2::text[]) OR reported_profile_id = ANY($2::text[]))`,
+      [regionKey, profileIds],
+    );
+  });
+}
+
 /** Filas de `messages` de un match, sin body ni identidad: sólo conteos y orden. */
 export async function messageRowsOf(matchId) {
   return withDb(async (client) => {

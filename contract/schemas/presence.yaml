@@ -12,11 +12,31 @@
 # `contract/catalog/zones.json`. El contrato describe el resultado (`regionKey`,
 # `zoneKey`), nunca el algoritmo; por eso acá no hay polígonos ni centro.
 
+Visibility:
+  type: string
+  enum:
+    - visible
+    - ghost
+  description: |
+    Visibilidad de la presencia. Es una **preferencia de la sesión**, no un
+    estado de la conexión:
+
+    - `visible` (default): la presencia aparece en el descubrimiento de los demás
+      y sus bots se mueven para ellos.
+    - `ghost`: la sesión sigue viva y sigue viendo (a los demás y a sus propios
+      bots), pero ni el humano ni sus bots aparecen en el descubrimiento ni en el
+      stream de nadie más. Es "online pero invisible", distinto de
+      `DELETE /presence`, que apaga la presencia para todos —incluido uno mismo—.
+
+    Un `PUT /presence` sin `visibility` no cambia la visibilidad vigente: el
+    heartbeat de posición del cliente (cada pocos segundos) no puede sacar a
+    alguien de ghost por olvidar el campo. Un `PUT` con `visibility` la fija.
+
 PresenceUpdate:
   type: object
   additionalProperties: false
   description: |
-    Cuerpo de `PUT /presence`. Exactamente uno de los dos caminos:
+    Cuerpo de `PUT /presence`. Exactamente uno de los dos caminos de posición:
 
     - `point`: la posición privada de la sesión (geolocalización del navegador).
     - `demoZoneKey`: la zona demo elegida a mano, para el flujo sin permiso de
@@ -29,6 +49,10 @@ PresenceUpdate:
     El punto se redondea a 6 decimales antes de `ST_Covers`, igual que los
     vértices del catálogo: dos pedidos con el mismo punto redondeado caen en la
     misma zona.
+
+    `visibility` es opcional y ortogonal al camino de posición: se puede fijar
+    ghost o volver a visible sin cambiar de punto ni de zona. Omitirla conserva la
+    visibilidad vigente (default `visible` para una presencia nueva).
   properties:
     point:
       $ref: '#/PrivatePoint'
@@ -42,6 +66,8 @@ PresenceUpdate:
         mismo caso: esa zona no es una opción).
       examples:
         - cdmx
+    visibility:
+      $ref: '#/Visibility'
 
   oneOf:
     - required:
@@ -89,6 +115,7 @@ PresenceState:
     - regionKey
     - zoneKey
     - online
+    - visibility
     - fallbackRequired
   description: |
     Respuesta de `PUT /presence`: la presencia **proyectada**, sin coordenadas.
@@ -103,6 +130,11 @@ PresenceState:
     falló la derivación, y el cliente tiene una acción concreta que ofrecer.
 
     Invariante: `zoneKey == null` si y sólo si `fallbackRequired == true`.
+
+    `visibility` es la vigente después del `PUT`: `ghost` deja la sesión online
+    pero fuera del descubrimiento y del stream de los demás (sus bots incluidos),
+    sin apagar la sesión. `online` sigue siendo `true` en ghost: la presencia
+    existe; lo que cambia es a quién se le muestra.
   properties:
     profileId:
       type: string
@@ -130,6 +162,12 @@ PresenceState:
       description: |
         Presencia activa de la sesión. Se apaga con `DELETE /presence`; los
         cambios de presencia ajena llegan por `profile.presence`, no por acá.
+
+        `ghost` **no** apaga `online`: una sesión en ghost sigue viva y sigue
+        viendo; lo que no hace es mostrarse. `online: false` sólo llega por
+        `DELETE /presence` o por vencimiento del TTL.
+    visibility:
+      $ref: '#/Visibility'
     fallbackRequired:
       type: boolean
       description: |

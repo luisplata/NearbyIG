@@ -112,10 +112,10 @@ function parseFlag(raw: unknown, name: string): boolean {
  * | Excluido | Cómo |
  * |---|---|
  * | el propio humano | `profile_id <> $2` (los bots propios sí entran) |
- * | pausados / ghost | sin presencia viva (`expires_at > now()`) no hay fila |
+ * | pausados / ghost | sin presencia viva **o** `visibility = 'ghost'` no hay fila visible |
  * | fuera de región | `zone_key IS NOT NULL` + `region_key` de la sesión |
  * | dueño de bot en ghost | `OWNER_VISIBLE` dentro de `visibleBotIds` |
- * | bloqueados | **no hay tabla `blocks`**: la exclusión es vacía hasta S5 (ver README) |
+ * | bloqueados | `blocks` en cualquier dirección, en humanos y en bots (v0.5) |
  *
  * **Geometría: el frame es el observador, no el ancla de zona.** `distanceM` y
  * `bearingDeg` se miden desde la presencia de la sesión. El origen del radar es
@@ -220,6 +220,7 @@ export class DiscoveryService {
                 AND s.profile_id = p.profile_id
                 AND pr.zone_key IS NOT NULL
                 AND pr.expires_at > now()
+                AND pr.visibility = 'visible'
                 AND s.revoked_at IS NULL
                 AND s.expires_at > now()
               ORDER BY pr.expires_at DESC, s.session_id
@@ -228,6 +229,17 @@ export class DiscoveryService {
           WHERE p.region_key = (SELECT region_key FROM observer)
             AND p.source_type = 'human'
             AND p.profile_id <> $2
+            -- Bloqueo (v0.5): desaparece en las dos direcciones. El bloqueo
+            -- ajeno es invisible para el bloqueado, pero el efecto no.
+            AND NOT EXISTS (
+              SELECT 1
+                FROM blocks bl
+               WHERE bl.region_key = p.region_key
+                 AND (
+                      (bl.blocker_profile_id = $2 AND bl.blocked_profile_id = p.profile_id)
+                   OR (bl.blocker_profile_id = p.profile_id AND bl.blocked_profile_id = $2)
+                 )
+            )
        ), live_humans AS (
          -- Quién está en la página **ahora**: presencia viva, con zona y sesión
          -- viva, en la región del observador. Es el mismo predicado que alimenta

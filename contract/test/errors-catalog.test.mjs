@@ -34,8 +34,8 @@ const STATUS_BY_CODE = errorCode?.['x-status'] ?? {};
 const RESERVED = errorCode?.['x-reserved'] ?? {};
 const PROBLEM_FIELDS = ['code', 'detail', 'requestId', 'status', 'title', 'type'];
 
-/** Códigos congelados en el contrato S1–S4. v0.4 cierra el catálogo. */
-const EXPECTED_ENUM_SIZE = 22;
+/** Códigos congelados en el contrato S1–S5. v0.5 suma PROFILE_REQUIRED (403). */
+const EXPECTED_ENUM_SIZE = 23;
 
 /** Códigos reservados: existen para una operation que todavía no está en `paths/`. */
 const EXPECTED_RESERVED = [];

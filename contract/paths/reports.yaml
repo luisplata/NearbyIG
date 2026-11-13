@@ -1,0 +1,55 @@
+# Reportes (Sprint 5, delta v0.5): una sola operation, `POST /reports`.
+#
+# **Registrar, no moderar.** No hay consola, ni cola de revisión, ni estado del
+# reporte en el contrato: la demo registra la señal y la deja para el análisis
+# posterior. Inventar `GET /reports` sería abrir una lectura de PII que nadie
+# pidió.
+#
+# **202, no 201.** El reporte se **acepta**: entra a un registro que no produce
+# un recurso consultable. El acuse (`ReportReceipt`) lleva el id y la fecha, y
+# nada más: ni el perfil reportado, ni el motivo, ni su identidad.
+#
+# Errores: 401 de `demoSession`; 403 `PROFILE_REQUIRED` para un invitado de
+# relleno; 404 `PROFILE_NOT_FOUND` si el `profileId` no existe en la región; 422
+# `VALIDATION_FAILED` para un body inválido o un auto-reporte.
+
+reports:
+  post:
+    operationId: createReport
+    summary: Registra un reporte contra un perfil
+    description: |
+      Guarda el reporte de la sesión contra `profileId` con uno de los motivos
+      del enum y devuelve `202` con el acuse.
+
+      Reportar **no bloquea ni oculta** al reportado: para eso está
+      `POST /blocks`, que es una decisión distinta y con efecto inmediato. El
+      reporte tampoco cambia el descubrimiento de quien reporta.
+
+      Un bot se canoniza a su dueño: el reporte nombra a la persona, igual que el
+      bloqueo. Reportarse a sí mismo es `422 VALIDATION_FAILED`.
+    tags:
+      - reports
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/reports.yaml#/ReportCreate'
+    responses:
+      '202':
+        description: Reporte registrado; sólo el acuse, sin identidad del reportado.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/reports.yaml#/ReportReceipt'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/ProfileRequired'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/ProfileNotFound'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 5

@@ -29,7 +29,7 @@ import {
   splitRef,
 } from './lib/spec.mjs';
 
-const SUPPORTED_SPRINTS = [1, 2, 3, 4];
+const SUPPORTED_SPRINTS = [1, 2, 3, 4, 5];
 const REPO_ROOT = resolve(CONTRACT_ROOT, '..');
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 

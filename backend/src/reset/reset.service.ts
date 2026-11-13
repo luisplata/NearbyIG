@@ -16,10 +16,11 @@ import type { AuthContext, SourceType } from '../auth/session.types';
  *
  * Qué borra y qué no:
  *   * Borra `sessions` (invitados incluidos), `stream_tickets`, `bots`, `events`,
- *     `event_seq`, `messages`, `match_reads`, `pings` y `matches`: es el estado
- *     que ocupa slots, que sobrevive a un refresh, que hace que el stream de una
- *     corrida no se mezcle con el de la anterior y que deja la bandeja de pings y
- *     las conversaciones vacías.
+ *     `event_seq`, `messages`, `match_reads`, `pings`, `matches` y —desde S5—
+ *     `notifications`, `blocks` y `reports`: es el estado que ocupa slots, que
+ *     sobrevive a un refresh, que hace que el stream de una corrida no se mezcle
+ *     con el de la anterior, que deja las bandejas vacías y que no arrastra
+ *     bloqueos ni avisos de una demo anterior.
  *   * **No** borra `regions`, `zones`, `profiles`, `presence` ni `demo_meta`: el
  *     catálogo lo escribe el seed y la presencia cae en cascada con la sesión.
  *     Los 10 slots quedan libres sólo porque no hay sesiones vivas.
@@ -81,6 +82,23 @@ export class ResetService {
           sessions.rows[0].profile_id,
         ]);
       }
+
+      // Privacidad (v0.5): se borra lo **propio**, no lo ajeno. Un bloqueo que
+      // otra persona puso sobre mí es estado de esa persona: mi reset no puede
+      // liberar a alguien más de su decisión ("reset por usuario no afecta a
+      // otros"). Las notificaciones son mías por definición.
+      const notifications = await client.query(
+        'DELETE FROM notifications WHERE region_key = $1 AND recipient_profile_id = $2',
+        [session.regionKey, session.profileId],
+      );
+      const blocks = await client.query(
+        'DELETE FROM blocks WHERE region_key = $1 AND blocker_profile_id = $2',
+        [session.regionKey, session.profileId],
+      );
+      const reports = await client.query(
+        'DELETE FROM reports WHERE region_key = $1 AND reporter_profile_id = $2',
+        [session.regionKey, session.profileId],
+      );
       await client.query('COMMIT');
 
       const row = sessions.rows[0];
@@ -93,7 +111,8 @@ export class ResetService {
         sourceType: (row?.source_type ?? session.sourceType) as SourceType,
       };
       this.logger.log(
-        `reset propio sessions=${result.sessionsDeleted} tickets=${result.ticketsDeleted}`,
+        `reset propio sessions=${result.sessionsDeleted} tickets=${result.ticketsDeleted} ` +
+          `notifications=${notifications.rowCount ?? 0} blocks=${blocks.rowCount ?? 0} reports=${reports.rowCount ?? 0}`,
       );
       return result;
     } catch (error) {
@@ -126,10 +145,18 @@ export class ResetService {
       // Pings antes que matches: `pings.match_id` apunta a `matches`, así que
       // las dos tablas no se pueden vaciar en cualquier orden. El chat va antes
       // por la misma razón: `messages` y `match_reads` cuelgan de un match.
+      //
+      // Las notificaciones van primero: referencian pings, matches y messages
+      // con CASCADE, así que borrarlas explícitamente es el orden que no depende
+      // del cascade para ser correcto. Bloqueos y reportes no tienen
+      // dependencias y se borran al final del grupo.
+      const notifications = await client.query('DELETE FROM notifications');
       const messages = await client.query('DELETE FROM messages');
       const reads = await client.query('DELETE FROM match_reads');
       const pings = await client.query('DELETE FROM pings');
       const matches = await client.query('DELETE FROM matches');
+      const blocks = await client.query('DELETE FROM blocks');
+      const reports = await client.query('DELETE FROM reports');
       await client.query('DELETE FROM bots');
       await client.query('DELETE FROM events');
       await client.query('DELETE FROM event_seq');
@@ -154,7 +181,7 @@ export class ResetService {
         })),
       };
       this.logger.log(
-        `reset global sessions=${result.sessionsDeleted} guests=${result.guestsDeleted} tickets=${result.ticketsDeleted} pings=${pings.rowCount ?? 0} matches=${matches.rowCount ?? 0} messages=${messages.rowCount ?? 0} reads=${reads.rowCount ?? 0}`,
+        `reset global sessions=${result.sessionsDeleted} guests=${result.guestsDeleted} tickets=${result.ticketsDeleted} pings=${pings.rowCount ?? 0} matches=${matches.rowCount ?? 0} messages=${messages.rowCount ?? 0} reads=${reads.rowCount ?? 0} notifications=${notifications.rowCount ?? 0} blocks=${blocks.rowCount ?? 0} reports=${reports.rowCount ?? 0}`,
       );
       return result;
     } catch (error) {

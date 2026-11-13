@@ -37,7 +37,8 @@ import {
  *  - ninguna response repite la coordenada, aunque la base la guarde.
  */
 
-const PRESENCE_FIELDS = ['fallbackRequired', 'online', 'profileId', 'regionKey', 'zoneKey'];
+/** v0.5 suma `visibility`: es la única forma existente que cambia en S5. */
+const PRESENCE_FIELDS = ['fallbackRequired', 'online', 'profileId', 'regionKey', 'visibility', 'zoneKey'];
 
 /** CDMX y Bogotá centro: caen dentro de los polígonos de `catalog/zones.json`. */
 const CDMX = { lat: 19.432608, lng: -99.133209 };
@@ -46,7 +47,7 @@ const BOGOTA = { lat: 4.711, lng: -74.0721 };
 const OCEAN = { lat: 0, lng: 0 };
 
 /**
- * La response es exactamente `PresenceState`: cinco campos y ni un número con
+ * La response es exactamente `PresenceState`: seis campos y ni un número con
  * pinta de coordenada. Se mira el JSON serializado, no sólo las claves, porque
  * una coordenada podría viajar dentro de un campo con otro nombre.
  */

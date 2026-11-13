@@ -58,6 +58,12 @@ pings:
       sin que ningún humano toque nada: es el camino que hace que la demo se
       sienta viva.
 
+      **Bloqueo (v0.5).** Si el emisor bloqueó al destinatario, o el destinatario
+      bloqueó al emisor, el ping es `403 CHAT_BLOCKED`. El mensaje no dice quién
+      bloqueó a quién: para el bloqueado, el otro simplemente dejó de existir.
+      Bloquear un bot bloquea a su dueño, así que el caso del bot cae en la misma
+      regla.
+
       **Cuota.** Hay un tope de envíos por ventana. Superarlo es `429
       RATE_LIMITED`: el pedido está bien, falta cuota.
     tags:
@@ -80,7 +86,7 @@ pings:
       '401':
         $ref: '../openapi.yaml#/components/responses/Unauthorized'
       '403':
-        $ref: '../openapi.yaml#/components/responses/PingForbidden'
+        $ref: '../openapi.yaml#/components/responses/PingForbiddenOrBlocked'
       '404':
         $ref: '../openapi.yaml#/components/responses/PingTargetNotFound'
       '409':

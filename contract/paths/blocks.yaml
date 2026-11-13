@@ -1,0 +1,131 @@
+# Bloqueo (Sprint 5, delta v0.5): `GET /blocks`, `POST /blocks` y
+# `DELETE /blocks/{profileId}`.
+#
+# **Un bloqueo, tres verbos.** `POST` crea (idempotente), `DELETE` revierte
+# (idempotente) y `GET` lista con la identidad del otro. No hay "bloquearse a sí
+# mismo", no hay bloqueo de invitados y no hay bloqueo que cruce regiones: el
+# `profileId` se resuelve contra la región de la sesión.
+#
+# **Efecto, no sólo fila.** Un bloqueo excluye el par de `GET /discovery` en las
+# dos direcciones, impide `POST /pings` entre los dos (`403 CHAT_BLOCKED`) y cierra
+# la escritura de una conversación existente (`403 CHAT_BLOCKED`); la historia
+# sigue legible. El detalle de la regla vive en `schemas/blocks.yaml` y en
+# `backend/README.md`.
+#
+# **Bloquear un bot es bloquear a su dueño.** Un bot (`mx-p03-b1`) no tiene
+# identidad propia: es una proyección de la persona. El server canoniza
+# `profileId` al dueño y la response publica el canonizado.
+#
+# Errores: 401 de `demoSession`; 403 `PROFILE_REQUIRED` si la sesión es un
+# invitado de relleno (no tiene perfil que bloquee); 404 `PROFILE_NOT_FOUND` si el
+# `profileId` no existe en la región; 422 `VALIDATION_FAILED` para un body
+# inválido o el auto-bloqueo.
+
+blocks:
+  get:
+    operationId: listBlocks
+    summary: Lista los perfiles que bloqueó la sesión
+    description: |
+      Los bloqueos propios, más reciente primero, cada uno con la proyección
+      pública del otro perfil (`PingPeer`) y la fecha en que se creó.
+
+      Es una lista de **lo que yo bloqueé**, no de quién me bloqueó: el bloqueo
+      ajeno es invisible para el bloqueado, que sólo nota el efecto (deja de
+      aparecer y sus pings reciben `403 CHAT_BLOCKED`).
+
+      Un perfil que ya no está en el catálogo no se lista, pero el bloqueo sigue
+      en la base y se revierte con `DELETE`.
+    tags:
+      - blocks
+    responses:
+      '200':
+        description: Los bloqueos propios, más reciente primero.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/blocks.yaml#/BlockList'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/ProfileRequired'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 5
+
+  post:
+    operationId: createBlock
+    summary: Bloquea un perfil
+    description: |
+      Crea el bloqueo de la sesión contra `profileId` y devuelve el bloqueo
+      canonizado con `201`.
+
+      Es **idempotente**: repetirlo sobre un par ya bloqueado devuelve el mismo
+      `Block` con el `createdAt` original y no crea una segunda fila. Por eso no
+      hay `409` de duplicado: bloquear dos veces es la misma intención, no un
+      conflicto.
+
+      Bloquearse a sí mismo es `422 VALIDATION_FAILED`. Un bot se canoniza a su
+      dueño; un `profileId` inexistente en la región es `404 PROFILE_NOT_FOUND`.
+    tags:
+      - blocks
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/blocks.yaml#/BlockCreate'
+    responses:
+      '201':
+        description: Bloqueo creado (o el existente, si era idempotente).
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/blocks.yaml#/Block'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/ProfileRequired'
+      '404':
+        $ref: '../openapi.yaml#/components/responses/ProfileNotFound'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 5
+
+blocks-profile:
+  delete:
+    operationId: deleteBlock
+    summary: Revierte el bloqueo de un perfil
+    description: |
+      Borra el bloqueo propio contra `profileId` y responde `204`.
+
+      Es **idempotente en el resultado**: si el par no estaba bloqueado, también
+      es `204`. No hay `404` por "no había nada que borrar" porque el cliente que
+      desbloquea dos veces (doble toque, reintento) no tiene que distinguir un
+      no-op de un error.
+
+      `profileId` se canoniza igual que en `POST`: desbloquear un bot revierte el
+      bloqueo de su dueño. Un invitado de relleno recibe `403 PROFILE_REQUIRED`.
+    tags:
+      - blocks
+    parameters:
+      - name: profileId
+        in: path
+        required: true
+        description: |
+          Perfil a desbloquear: el humano canonizado, o el bot cuyo dueño se
+          quiere desbloquear (se canoniza al dueño).
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      '204':
+        description: El par quedó sin bloqueo; no hay body.
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '403':
+        $ref: '../openapi.yaml#/components/responses/ProfileRequired'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 5

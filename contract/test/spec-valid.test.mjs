@@ -26,7 +26,8 @@ const { raw, spec } = loadSpec();
  * **v0.3** agrega las cuatro operations de pings (enviar, bandeja, accept y
  * reject). **v0.4** agrega el chat que le faltaba al match —bandeja, conversación,
  * envío y lectura— más `GET /me`, que le da consumer al `SelfProfile` declarado
- * desde S0.
+ * desde S0. **v0.5** agrega la privacidad de S5: bloqueos, reportes y
+ * notificaciones (seis operations).
  */
 const EXPECTED_OPERATIONS = [
   'POST /auth/demo-session',
@@ -50,12 +51,18 @@ const EXPECTED_OPERATIONS = [
   'POST /matches/{matchId}/messages',
   'POST /matches/{matchId}/read',
   'GET /me',
+  'GET /blocks',
+  'POST /blocks',
+  'DELETE /blocks/{profileId}',
+  'POST /reports',
+  'GET /notifications',
+  'POST /notifications/read',
 ];
 
-/** Paths que la superficie congelada S1–S4 deja afuera a propósito. */
-const FORBIDDEN_PATHS = /chat|block|report|\/health/;
+/** Paths que la superficie congelada S1–S5 deja afuera a propósito. */
+const FORBIDDEN_PATHS = /\/health/;
 
-const SUPPORTED_SPRINTS = [1, 2, 3, 4];
+const SUPPORTED_SPRINTS = [1, 2, 3, 4, 5];
 const operations = listOperations(spec);
 const label = ({ method, path }) => `${method.toUpperCase()} ${path}`;
 
@@ -69,7 +76,7 @@ test('el documento parsea como OpenAPI 3.1 y resuelve todos los $ref', () => {
   assert.equal(JSON.stringify(spec).includes('"$ref"'), false, 'quedó un $ref sin expandir');
 });
 
-test('toda operation declara x-implementation-sprint entero en 1..4', () => {
+test('toda operation declara x-implementation-sprint entero en 1..5', () => {
   assert.ok(operations.length > 0, 'el contrato no declara ninguna operation');
 
   for (const operation of operations) {
@@ -77,7 +84,7 @@ test('toda operation declara x-implementation-sprint entero en 1..4', () => {
     assert.ok(Number.isInteger(sprint), `${label(operation)}: x-implementation-sprint no es entero`);
     assert.ok(
       SUPPORTED_SPRINTS.includes(sprint),
-      `${label(operation)}: sprint ${sprint} fuera de 1..4`,
+      `${label(operation)}: sprint ${sprint} fuera de 1..5`,
     );
   }
 });
@@ -120,12 +127,12 @@ test('ningún path lleva prefijo de versión', () => {
   }
 });
 
-test('la superficie no incluye chat, block, report ni health', () => {
+test('la superficie no incluye /health', () => {
   for (const path of Object.keys(spec.paths ?? {})) {
     assert.doesNotMatch(
       path,
       FORBIDDEN_PATHS,
-      `${path}: esa superficie no está congelada; entra cuando exista un diseño que la congele (S5)`,
+      `${path}: /health es operación, no producto; no entra en el contrato`,
     );
   }
 });

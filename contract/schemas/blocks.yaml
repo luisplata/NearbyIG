@@ -1,0 +1,105 @@
+# Bloqueo (Sprint 5, delta v0.5).
+#
+# Un bloqueo es unidireccional **en la fila** y simétrico **en el efecto**: `A`
+# bloquea a `B` y guarda una sola fila (`A → B`), pero la lectura de discovery y
+# del stream excluye el par en las dos direcciones. Guardar la dirección permite
+# que `A` sepa a quién bloqueó sin exponer "quién me bloqueó": el contrato sólo
+# publica la lista propia (`GET /blocks`), nunca la ajena.
+#
+# **No hay FK al catálogo en la columna del bloqueado** (ver `backend/sql/007_privacy.sql`):
+# un bloqueo puede apuntar a un humano del catálogo o a un bot, y el server lo
+# canoniza al humano. Un bot es una proyección de su dueño, así que bloquear a
+# `mx-p03-b1` bloquea a `mx-p03`; la fila guarda el dueño y no el bot.
+#
+# Sin coordenadas y sin distancia: bloquear a alguien no publica dónde estaba.
+
+BlockCreate:
+  type: object
+  additionalProperties: false
+  required:
+    - profileId
+  description: |
+    Body de `POST /blocks`. Nombra a quién bloquear y nada más: el bloqueador es
+    la sesión.
+
+    `profileId` puede ser un humano del catálogo (`mx-p03`) o un bot
+    (`mx-p03-b1`). En el segundo caso el server canoniza al dueño: bloquear un
+    bot bloquea a su dueño, porque el bot no tiene identidad propia que
+    sobreviva al dueño. La response publica el `profileId` canonizado, así el
+    cliente no tiene que repetir la regla.
+
+    Bloquearse a sí mismo es `422 VALIDATION_FAILED`; un `profileId` que no
+    existe en la región es `404 PROFILE_NOT_FOUND`.
+  properties:
+    profileId:
+      type: string
+      minLength: 1
+      description: |
+        `profileId` del perfil a bloquear, tal como lo devolvió `GET /discovery`
+        o `GET /matches` (humano o bot).
+      examples:
+        - mx-p04
+
+Block:
+  type: object
+  additionalProperties: false
+  required:
+    - profileId
+    - createdAt
+  description: |
+    Un bloqueo propio. `profileId` es el perfil **canonizado** (si se pidió un
+    bot, el dueño): es la identidad con la que el bloqueo se guardó y con la que
+    `DELETE /blocks/{profileId}` lo revierte.
+
+    `createdAt` es cuándo se creó el bloqueo. Repetir `POST /blocks` sobre un par
+    ya bloqueado es idempotente: devuelve el mismo `createdAt` y no crea una
+    segunda fila.
+  properties:
+    profileId:
+      type: string
+      minLength: 1
+      description: Perfil bloqueado, ya canonizado al humano.
+      examples:
+        - mx-p04
+    createdAt:
+      type: string
+      format: date-time
+      description: Cuándo se creó el bloqueo (RFC 3339 UTC con ms).
+
+BlockListItem:
+  type: object
+  additionalProperties: false
+  required:
+    - block
+    - peer
+  description: |
+    Una fila de `GET /blocks`: el bloqueo y la identidad del otro, con la misma
+    proyección que la bandeja de pings (`PingPeer`). Sin eso el cliente tendría
+    que cruzar el `profileId` contra `/demo/profiles` para dibujar la fila.
+
+    Un perfil que ya no está en el catálogo no se lista: la lista es una
+    proyección de perfiles, no un log. El bloqueo sigue en la base y se
+    revierte con `DELETE` aunque no se pueda dibujar.
+  properties:
+    block:
+      $ref: '#/Block'
+    peer:
+      $ref: './pings.yaml#/PingPeer'
+
+BlockList:
+  type: object
+  additionalProperties: false
+  required:
+    - blocks
+  description: |
+    Respuesta de `GET /blocks`: objeto con array adentro —mismo idioma que
+    `PingList` y `MatchList`—, no un array pelado.
+
+    Orden: `createdAt` descendente, el bloqueo más reciente arriba. Sin cursor:
+    la demo no acumula bloqueos y el server corta en los 100 más recientes.
+  properties:
+    blocks:
+      type: array
+      maxItems: 100
+      items:
+        $ref: '#/BlockListItem'

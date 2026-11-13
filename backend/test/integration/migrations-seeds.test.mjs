@@ -148,6 +148,48 @@ describe('migraciones y seeds', () => {
     });
   });
 
+  /**
+   * Rollback de 007 probado de verdad, pero **dentro de una transacción**: la
+   * suite comparte la base con los demás archivos, así que el `ROLLBACK` final
+   * devuelve el esquema y los datos al estado aplicado. Se prueba el SQL que
+   * corre `migrate.mjs --rollback`, no una paráfrasis.
+   */
+  test('007_privacy aplica y su down deshace exactamente el delta', async () => {
+    const up = await readFile('sql/007_privacy.sql', 'utf8');
+    const down = await readFile('sql/007_privacy.down.sql', 'utf8');
+
+    const shape = (client) =>
+      client
+        .query(`
+          SELECT to_regclass('public.blocks')        IS NOT NULL AS blocks,
+                 to_regclass('public.reports')       IS NOT NULL AS reports,
+                 to_regclass('public.notifications') IS NOT NULL AS notifications,
+                 EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'presence'
+                            AND column_name = 'visibility')        AS visibility,
+                 EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'matches'
+                            AND column_name = 'bot_zone_key')      AS bot_zone_key
+        `)
+        .then(({ rows }) => rows[0]);
+
+    const applied = { blocks: true, reports: true, notifications: true, visibility: true, bot_zone_key: true };
+    const reverted = { blocks: false, reports: false, notifications: false, visibility: false, bot_zone_key: false };
+
+    await withDb(async (client) => {
+      await client.query('BEGIN');
+      try {
+        assert.deepEqual(await shape(client), applied, 'la migración está aplicada en la base viva');
+        await client.query(down);
+        assert.deepEqual(await shape(client), reverted, 'el down se lleva las tablas y las columnas');
+        await client.query(up);
+        assert.deepEqual(await shape(client), applied, 'el up vuelve a dejar el delta completo');
+      } finally {
+        await client.query('ROLLBACK');
+      }
+    });
+  });
+
   test('la base recuerda qué seed se aplicó', async () => {
     const manifest = await seedManifest();
     const { rows } = await withDb((client) =>

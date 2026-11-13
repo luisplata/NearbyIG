@@ -1,0 +1,75 @@
+# Reportes (Sprint 5, delta v0.5).
+#
+# Un reporte es un **registro**, no una acción: no bloquea, no oculta, no abre
+# una consola de moderación. La demo no tiene moderadores y no va a inventarlos;
+# lo que sí tiene es la obligación de no perder la señal de un usuario.
+#
+# **Sin PII en la respuesta.** `ReportReceipt` devuelve el id y la fecha del
+# registro. No repite el `profileId` reportado, ni su nickname, ni la foto, ni el
+# motivo: el reportante ya sabe a quién reportó, y el registro no es una lectura
+# de perfiles. El motivo se guarda para el análisis posterior, no se publica.
+#
+# **Sin consecuencia en discovery.** Reportar no excluye al reportado de nada y
+# no altera el descubrimiento del reportante: para eso está `POST /blocks`, que
+# es una decisión distinta y con efecto inmediato.
+#
+# Sin coordenadas: un reporte habla de quién, no de dónde.
+
+ReportReason:
+  type: string
+  enum:
+    - spam
+    - harassment
+    - inappropriate
+    - impersonation
+    - other
+  description: |
+    Motivo del reporte, cerrado a cinco valores. Es el vocabulario mínimo que un
+    moderador humano puede accionar sin un formulario libre: texto libre en un
+    reporte es una bandeja de PII que nadie va a leer en la demo.
+
+ReportCreate:
+  type: object
+  additionalProperties: false
+  required:
+    - profileId
+    - reason
+  description: |
+    Body de `POST /reports`. Nombra a quién se reporta y por qué; el reportante
+    es la sesión.
+
+    `profileId` acepta un humano del catálogo o un bot. Como en los bloqueos, un
+    bot se canoniza a su dueño: el bot no existe sin la persona.
+
+    Reportarse a sí mismo es `422 VALIDATION_FAILED`; un `profileId` inexistente
+    en la región es `404 PROFILE_NOT_FOUND`.
+  properties:
+    profileId:
+      type: string
+      minLength: 1
+      description: |
+        Perfil reportado (humano o bot). Se guarda canonizado al humano.
+      examples:
+        - mx-p07
+    reason:
+      $ref: '#/ReportReason'
+
+ReportReceipt:
+  type: object
+  additionalProperties: false
+  required:
+    - reportId
+    - createdAt
+  description: |
+    Acuse de `POST /reports` (202): el registro existe, sin más datos. Es
+    deliberadamente corto —id y fecha— porque un acuse que repite el motivo o el
+    perfil reportado convierte cada reporte en una lectura de PII.
+  properties:
+    reportId:
+      type: string
+      format: uuid
+      description: Identidad del reporte. Opaca para el cliente.
+    createdAt:
+      type: string
+      format: date-time
+      description: Cuándo se registró (RFC 3339 UTC con ms).

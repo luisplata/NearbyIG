@@ -3,7 +3,7 @@
  *
  * Source: contract/openapi.yaml
  * Generator: openapi-typescript 7.13.0 (pinned exact in package.json)
- * Contract: x-contract-id f6fc7983cefc
+ * Contract: x-contract-id 3225f7e3ecd7
  *
  * Type-only client: no runtime code and no imports. Regenerate with
  * `npm run contract:generate`. The drift gate is `npm run contract:generate:check`.
@@ -256,7 +256,14 @@ export interface paths {
          * Registra la presencia de la sesión
          * @description Recibe **o** un `point` privado **o** una `demoZoneKey`, nunca los dos y
          *     nunca ninguno. El server resuelve región y zona contra el catálogo y
-         *     devuelve `PresenceState`: `profileId`, `regionKey`, `zoneKey` y `online`.
+         *     devuelve `PresenceState`: `profileId`, `regionKey`, `zoneKey`, `online`,
+         *     `visibility` y `fallbackRequired`.
+         *
+         *     `visibility` (opcional, desde v0.5) es `visible` o `ghost`. En `ghost` la
+         *     sesión sigue online y sigue viendo, pero ni el humano ni sus dos bots
+         *     aparecen en `GET /discovery` ni en el stream de los demás; el dueño se
+         *     sigue viendo a sí mismo (sus bots incluidos). Omitir `visibility` conserva
+         *     la vigente: el heartbeat de posición no saca a nadie de ghost.
          *
          *     Fuera de todo polígono no es un error: responde 200 con
          *     `fallbackRequired: true` y `zoneKey: null`, y el cliente ofrece el selector
@@ -275,6 +282,12 @@ export interface paths {
          * @description La sesión deja de aparecer en el descubrimiento de los demás y `online` pasa
          *     a `false` para quien la tenía en su lista, con un `profile.presence` por el
          *     stream. No borra el perfil: `GET /demo/profiles` lo sigue devolviendo.
+         *
+         *     **No es lo mismo que `visibility: ghost`.** Apagar la presencia retira al
+         *     dueño y a sus bots para todos —incluido el dueño, que ya no tiene origen
+         *     para `GET /discovery`—; ghost los retira sólo para los demás y mantiene la
+         *     sesión viendo. Para "online pero invisible" es `PUT /presence` con
+         *     `visibility: ghost`.
          *
          *     Es idempotente en el resultado pero no en el status: si no hay presencia
          *     viva —porque ya se borró o porque venció— responde 409 `PRESENCE_STALE` en
@@ -377,6 +390,12 @@ export interface paths {
          *     **Bot.** Un bot acepta solo. El ping vuelve ya `accepted`, con `matchId` y
          *     sin que ningún humano toque nada: es el camino que hace que la demo se
          *     sienta viva.
+         *
+         *     **Bloqueo (v0.5).** Si el emisor bloqueó al destinatario, o el destinatario
+         *     bloqueó al emisor, el ping es `403 CHAT_BLOCKED`. El mensaje no dice quién
+         *     bloqueó a quién: para el bloqueado, el otro simplemente dejó de existir.
+         *     Bloquear un bot bloquea a su dueño, así que el caso del bot cae en la misma
+         *     regla.
          *
          *     **Cuota.** Hay un tope de envíos por ventana. Superarlo es `429
          *     RATE_LIMITED`: el pedido está bien, falta cuota.
@@ -603,6 +622,155 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lista los perfiles que bloqueó la sesión
+         * @description Los bloqueos propios, más reciente primero, cada uno con la proyección
+         *     pública del otro perfil (`PingPeer`) y la fecha en que se creó.
+         *
+         *     Es una lista de **lo que yo bloqueé**, no de quién me bloqueó: el bloqueo
+         *     ajeno es invisible para el bloqueado, que sólo nota el efecto (deja de
+         *     aparecer y sus pings reciben `403 CHAT_BLOCKED`).
+         *
+         *     Un perfil que ya no está en el catálogo no se lista, pero el bloqueo sigue
+         *     en la base y se revierte con `DELETE`.
+         */
+        get: operations["listBlocks"];
+        put?: never;
+        /**
+         * Bloquea un perfil
+         * @description Crea el bloqueo de la sesión contra `profileId` y devuelve el bloqueo
+         *     canonizado con `201`.
+         *
+         *     Es **idempotente**: repetirlo sobre un par ya bloqueado devuelve el mismo
+         *     `Block` con el `createdAt` original y no crea una segunda fila. Por eso no
+         *     hay `409` de duplicado: bloquear dos veces es la misma intención, no un
+         *     conflicto.
+         *
+         *     Bloquearse a sí mismo es `422 VALIDATION_FAILED`. Un bot se canoniza a su
+         *     dueño; un `profileId` inexistente en la región es `404 PROFILE_NOT_FOUND`.
+         */
+        post: operations["createBlock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blocks/{profileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revierte el bloqueo de un perfil
+         * @description Borra el bloqueo propio contra `profileId` y responde `204`.
+         *
+         *     Es **idempotente en el resultado**: si el par no estaba bloqueado, también
+         *     es `204`. No hay `404` por "no había nada que borrar" porque el cliente que
+         *     desbloquea dos veces (doble toque, reintento) no tiene que distinguir un
+         *     no-op de un error.
+         *
+         *     `profileId` se canoniza igual que en `POST`: desbloquear un bot revierte el
+         *     bloqueo de su dueño. Un invitado de relleno recibe `403 PROFILE_REQUIRED`.
+         */
+        delete: operations["deleteBlock"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Registra un reporte contra un perfil
+         * @description Guarda el reporte de la sesión contra `profileId` con uno de los motivos
+         *     del enum y devuelve `202` con el acuse.
+         *
+         *     Reportar **no bloquea ni oculta** al reportado: para eso está
+         *     `POST /blocks`, que es una decisión distinta y con efecto inmediato. El
+         *     reporte tampoco cambia el descubrimiento de quien reporta.
+         *
+         *     Un bot se canoniza a su dueño: el reporte nombra a la persona, igual que el
+         *     bloqueo. Reportarse a sí mismo es `422 VALIDATION_FAILED`.
+         */
+        post: operations["createReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lista las notificaciones de la sesión
+         * @description Hasta 100 notificaciones del perfil de la sesión, más reciente primero, con
+         *     `unreadCount` sobre **todas** las del perfil (no sólo las de la página).
+         *
+         *     La lista es una proyección de perfiles: una notificación cuyo otro extremo
+         *     ya no está en el catálogo no se dibuja. El contador de no leídas se cuenta
+         *     sobre la tabla, no sobre las filas proyectadas, para que el badge no mienta
+         *     por un filtro de presentación.
+         */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Marca notificaciones como leídas
+         * @description Marca leídas **todas** las no leídas del perfil (sin body o con
+         *     `notificationIds` ausente) o **sólo las nombradas** (`notificationIds`).
+         *     Devuelve cuántas se marcaron y cuántas quedan.
+         *
+         *     Es idempotente por resultado: la segunda llamada devuelve `marked: 0` y el
+         *     mismo `unreadCount`. Un id ajeno o inexistente se ignora —la operación ya
+         *     está acotada al perfil de la sesión—; un body mal formado es 422.
+         */
+        post: operations["readNotifications"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -772,7 +940,7 @@ export interface components {
             profileId: string;
         };
         /**
-         * @description Motivo del error, cerrado a estos 22 valores. `code` es el discriminante
+         * @description Motivo del error, cerrado a estos 23 valores. `code` es el discriminante
          *     estable: el cliente decide con él, nunca con `title` ni con `detail` (esos
          *     son texto para humanos, traducible y variable).
          *
@@ -781,7 +949,7 @@ export interface components {
          *     corresponde cada uno— vive en la spec del change.
          * @enum {string}
          */
-        ErrorCode: "UNAUTHENTICATED" | "TICKET_EXPIRED" | "TICKET_REUSED" | "REGION_MISMATCH" | "CHAT_BLOCKED" | "PING_FORBIDDEN" | "PROFILE_NOT_FOUND" | "MATCH_NOT_FOUND" | "PING_NOT_FOUND" | "PROFILE_IN_USE" | "PRESENCE_STALE" | "PING_DUPLICATE" | "PING_RESOLVED" | "MATCH_CLOSED" | "CURSOR_EXPIRED" | "PING_EXPIRED" | "RATE_LIMITED" | "REGION_UNAVAILABLE" | "ZONE_UNKNOWN" | "VALIDATION_FAILED" | "INTERNAL" | "NOT_IMPLEMENTED";
+        ErrorCode: "UNAUTHENTICATED" | "TICKET_EXPIRED" | "TICKET_REUSED" | "REGION_MISMATCH" | "CHAT_BLOCKED" | "PING_FORBIDDEN" | "PROFILE_REQUIRED" | "PROFILE_NOT_FOUND" | "MATCH_NOT_FOUND" | "PING_NOT_FOUND" | "PROFILE_IN_USE" | "PRESENCE_STALE" | "PING_DUPLICATE" | "PING_RESOLVED" | "MATCH_CLOSED" | "CURSOR_EXPIRED" | "PING_EXPIRED" | "RATE_LIMITED" | "REGION_UNAVAILABLE" | "ZONE_UNKNOWN" | "VALIDATION_FAILED" | "INTERNAL" | "NOT_IMPLEMENTED";
         /**
          * @description Cuerpo único de error, RFC 9457 (`application/problem+json`). Toda respuesta
          *     4xx/5xx del contrato devuelve exactamente esto: un shape cerrado, sin campos
@@ -1064,6 +1232,11 @@ export interface components {
          *     falló la derivación, y el cliente tiene una acción concreta que ofrecer.
          *
          *     Invariante: `zoneKey == null` si y sólo si `fallbackRequired == true`.
+         *
+         *     `visibility` es la vigente después del `PUT`: `ghost` deja la sesión online
+         *     pero fuera del descubrimiento y del stream de los demás (sus bots incluidos),
+         *     sin apagar la sesión. `online` sigue siendo `true` en ghost: la presencia
+         *     existe; lo que cambia es a quién se le muestra.
          */
         PresenceState: {
             /**
@@ -1083,8 +1256,13 @@ export interface components {
             /**
              * @description Presencia activa de la sesión. Se apaga con `DELETE /presence`; los
              *     cambios de presencia ajena llegan por `profile.presence`, no por acá.
+             *
+             *     `ghost` **no** apaga `online`: una sesión en ghost sigue viva y sigue
+             *     viendo; lo que no hace es mostrarse. `online: false` sólo llega por
+             *     `DELETE /presence` o por vencimiento del TTL.
              */
             online: boolean;
+            visibility: components["schemas"]["Visibility"];
             /**
              * @description `true` = el punto no cae en ninguna zona del catálogo y el cliente tiene
              *     que ofrecer el selector de zona. `false` = la zona se derivó.
@@ -1427,6 +1605,233 @@ export interface components {
             matches: components["schemas"]["MatchListItem"][];
         };
         /**
+         * @description Visibilidad de la presencia. Es una **preferencia de la sesión**, no un
+         *     estado de la conexión:
+         *
+         *     - `visible` (default): la presencia aparece en el descubrimiento de los demás
+         *       y sus bots se mueven para ellos.
+         *     - `ghost`: la sesión sigue viva y sigue viendo (a los demás y a sus propios
+         *       bots), pero ni el humano ni sus bots aparecen en el descubrimiento ni en el
+         *       stream de nadie más. Es "online pero invisible", distinto de
+         *       `DELETE /presence`, que apaga la presencia para todos —incluido uno mismo—.
+         *
+         *     Un `PUT /presence` sin `visibility` no cambia la visibilidad vigente: el
+         *     heartbeat de posición del cliente (cada pocos segundos) no puede sacar a
+         *     alguien de ghost por olvidar el campo. Un `PUT` con `visibility` la fija.
+         * @enum {string}
+         */
+        Visibility: "visible" | "ghost";
+        /**
+         * @description Body de `POST /blocks`. Nombra a quién bloquear y nada más: el bloqueador es
+         *     la sesión.
+         *
+         *     `profileId` puede ser un humano del catálogo (`mx-p03`) o un bot
+         *     (`mx-p03-b1`). En el segundo caso el server canoniza al dueño: bloquear un
+         *     bot bloquea a su dueño, porque el bot no tiene identidad propia que
+         *     sobreviva al dueño. La response publica el `profileId` canonizado, así el
+         *     cliente no tiene que repetir la regla.
+         *
+         *     Bloquearse a sí mismo es `422 VALIDATION_FAILED`; un `profileId` que no
+         *     existe en la región es `404 PROFILE_NOT_FOUND`.
+         */
+        BlockCreate: {
+            /**
+             * @description `profileId` del perfil a bloquear, tal como lo devolvió `GET /discovery`
+             *     o `GET /matches` (humano o bot).
+             * @example mx-p04
+             */
+            profileId: string;
+        };
+        /**
+         * @description Un bloqueo propio. `profileId` es el perfil **canonizado** (si se pidió un
+         *     bot, el dueño): es la identidad con la que el bloqueo se guardó y con la que
+         *     `DELETE /blocks/{profileId}` lo revierte.
+         *
+         *     `createdAt` es cuándo se creó el bloqueo. Repetir `POST /blocks` sobre un par
+         *     ya bloqueado es idempotente: devuelve el mismo `createdAt` y no crea una
+         *     segunda fila.
+         */
+        Block: {
+            /**
+             * @description Perfil bloqueado, ya canonizado al humano.
+             * @example mx-p04
+             */
+            profileId: string;
+            /**
+             * Format: date-time
+             * @description Cuándo se creó el bloqueo (RFC 3339 UTC con ms).
+             */
+            createdAt: string;
+        };
+        /**
+         * @description Una fila de `GET /blocks`: el bloqueo y la identidad del otro, con la misma
+         *     proyección que la bandeja de pings (`PingPeer`). Sin eso el cliente tendría
+         *     que cruzar el `profileId` contra `/demo/profiles` para dibujar la fila.
+         *
+         *     Un perfil que ya no está en el catálogo no se lista: la lista es una
+         *     proyección de perfiles, no un log. El bloqueo sigue en la base y se
+         *     revierte con `DELETE` aunque no se pueda dibujar.
+         */
+        BlockListItem: {
+            block: components["schemas"]["Block"];
+            peer: components["schemas"]["PingPeer"];
+        };
+        /**
+         * @description Respuesta de `GET /blocks`: objeto con array adentro —mismo idioma que
+         *     `PingList` y `MatchList`—, no un array pelado.
+         *
+         *     Orden: `createdAt` descendente, el bloqueo más reciente arriba. Sin cursor:
+         *     la demo no acumula bloqueos y el server corta en los 100 más recientes.
+         */
+        BlockList: {
+            blocks: components["schemas"]["BlockListItem"][];
+        };
+        /**
+         * @description Motivo del reporte, cerrado a cinco valores. Es el vocabulario mínimo que un
+         *     moderador humano puede accionar sin un formulario libre: texto libre en un
+         *     reporte es una bandeja de PII que nadie va a leer en la demo.
+         * @enum {string}
+         */
+        ReportReason: "spam" | "harassment" | "inappropriate" | "impersonation" | "other";
+        /**
+         * @description Body de `POST /reports`. Nombra a quién se reporta y por qué; el reportante
+         *     es la sesión.
+         *
+         *     `profileId` acepta un humano del catálogo o un bot. Como en los bloqueos, un
+         *     bot se canoniza a su dueño: el bot no existe sin la persona.
+         *
+         *     Reportarse a sí mismo es `422 VALIDATION_FAILED`; un `profileId` inexistente
+         *     en la región es `404 PROFILE_NOT_FOUND`.
+         */
+        ReportCreate: {
+            /**
+             * @description Perfil reportado (humano o bot). Se guarda canonizado al humano.
+             * @example mx-p07
+             */
+            profileId: string;
+            reason: components["schemas"]["ReportReason"];
+        };
+        /**
+         * @description Acuse de `POST /reports` (202): el registro existe, sin más datos. Es
+         *     deliberadamente corto —id y fecha— porque un acuse que repite el motivo o el
+         *     perfil reportado convierte cada reporte en una lectura de PII.
+         */
+        ReportReceipt: {
+            /**
+             * Format: uuid
+             * @description Identidad del reporte. Opaca para el cliente.
+             */
+            reportId: string;
+            /**
+             * Format: date-time
+             * @description Cuándo se registró (RFC 3339 UTC con ms).
+             */
+            createdAt: string;
+        };
+        /**
+         * @description Tipo de aviso. Los tres valores son los tres hechos de la demo que generan
+         *     una notificación, con los mismos nombres que los eventos del stream.
+         *
+         *     `ping.received` lo produce `POST /pings` para el destinatario humano;
+         *     `match.created`, la aceptación de un ping; `message.created`, un mensaje
+         *     nuevo del otro lado (incluida la respuesta automática de un bot).
+         * @enum {string}
+         */
+        NotificationKind: "ping.received" | "match.created" | "message.created";
+        /**
+         * @description Una notificación con lo que la campana necesita para dibujarse: el tipo, la
+         *     fecha, si está leída y la identidad del otro.
+         *
+         *     **`readAt` es el estado, no un flag aparte.** `null` = no leída. El cliente
+         *     cuenta las que tienen `readAt: null`, y `POST /notifications/read` lo
+         *     completa. No hay `unread: boolean` que pueda contradecir la fecha.
+         *
+         *     **Las referencias son opcionales por tipo.** `ping.received` llena `pingId`;
+         *     `match.created` llena `matchId`; `message.created` llena `matchId` y
+         *     `messageId`. Las tres no viajan como una unión de schemas: dos `null` y una
+         *     referencia es más simple para el cliente que tres shapes distintos.
+         */
+        NotificationItem: {
+            /**
+             * Format: uuid
+             * @description Identidad de la notificación. Opaca.
+             */
+            id: string;
+            kind: components["schemas"]["NotificationKind"];
+            /**
+             * Format: date-time
+             * @description Cuándo se generó (RFC 3339 UTC con ms).
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description Cuándo se marcó leída, o `null` si sigue sin leer. Es la única autoridad
+             *     del estado de lectura.
+             */
+            readAt: string | null;
+            peer: components["schemas"]["PingPeer"];
+            /**
+             * Format: uuid
+             * @description El ping recibido, cuando `kind` es `ping.received`.
+             */
+            pingId: string | null;
+            /**
+             * Format: uuid
+             * @description El match creado (`match.created`) o el match del mensaje
+             *     (`message.created`).
+             */
+            matchId: string | null;
+            /**
+             * Format: uuid
+             * @description El mensaje nuevo, cuando `kind` es `message.created`.
+             */
+            messageId: string | null;
+        };
+        /**
+         * @description Respuesta de `GET /notifications`: la campana completa (hasta 100, más
+         *     reciente primero) y el total de no leídas.
+         *
+         *     **`unreadCount` es del perfil de la sesión, no de la página.** Se cuenta
+         *     sobre todas las notificaciones del perfil, no sobre las 100 que viajan: si la
+         *     campana creciera, el badge no puede mentir por el corte. No hay cursor: la
+         *     demo no acumula avisos y 100 es el techo declarado.
+         */
+        NotificationList: {
+            notifications: components["schemas"]["NotificationItem"][];
+            /** @description Notificaciones propias con `readAt: null`. */
+            unreadCount: number;
+        };
+        /**
+         * @description Body de `POST /notifications/read`. Marca leídas **todas** o **las que
+         *     nombra**:
+         *
+         *     - sin body, `{}` o `notificationIds` ausente → todas las no leídas del perfil;
+         *     - `notificationIds: [...]` → sólo esas (1 a 100 ids).
+         *
+         *     Un id de otra región o de otro perfil no falla ni se marca: se ignora, porque
+         *     la operación ya está acotada al perfil de la sesión. Lo que sí es 422 es un
+         *     body con una forma inválida (`notificationIds` no es un array de uuid, o hay
+         *     campos de más).
+         */
+        NotificationReadRequest: {
+            /** @description Ids a marcar. Ausente = todas las no leídas. */
+            notificationIds?: string[];
+        };
+        /**
+         * @description Resultado de `POST /notifications/read`: cuántas se marcaron en esta llamada
+         *     y cuántas quedan sin leer. El cliente actualiza el badge con el segundo sin
+         *     un `GET` extra.
+         *
+         *     Repetirlo es idempotente por resultado: la segunda vez `marked` es `0` y
+         *     `unreadCount` no cambia.
+         */
+        NotificationReadResult: {
+            /** @description Notificaciones que pasaron de no leídas a leídas en esta llamada. */
+            marked: number;
+            /** @description Notificaciones propias que siguen sin leer después de la llamada. */
+            unreadCount: number;
+        };
+        /**
          * @description Punto privado de la sesión, en grados decimales WGS 84. Es la contraparte de
          *     los vértices de `contract/catalog/zones.json`, que se guardan posicionales y
          *     en orden `[lng, lat]`; acá las dos componentes llevan nombre para que el body
@@ -1450,7 +1855,7 @@ export interface components {
             lng: number;
         };
         /**
-         * @description Cuerpo de `PUT /presence`. Exactamente uno de los dos caminos:
+         * @description Cuerpo de `PUT /presence`. Exactamente uno de los dos caminos de posición:
          *
          *     - `point`: la posición privada de la sesión (geolocalización del navegador).
          *     - `demoZoneKey`: la zona demo elegida a mano, para el flujo sin permiso de
@@ -1463,6 +1868,10 @@ export interface components {
          *     El punto se redondea a 6 decimales antes de `ST_Covers`, igual que los
          *     vértices del catálogo: dos pedidos con el mismo punto redondeado caen en la
          *     misma zona.
+         *
+         *     `visibility` es opcional y ortogonal al camino de posición: se puede fijar
+         *     ghost o volver a visible sin cambiar de punto ni de zona. Omitirla conserva la
+         *     visibilidad vigente (default `visible` para una presencia nueva).
          */
         PresenceUpdate: {
             point?: components["schemas"]["PrivatePoint"];
@@ -1474,6 +1883,7 @@ export interface components {
              * @example cdmx
              */
             demoZoneKey?: string;
+            visibility?: components["schemas"]["Visibility"];
         } & (unknown | unknown);
     };
     responses: {
@@ -1601,6 +2011,21 @@ export interface components {
             };
         };
         /**
+         * @description La sesión no encarna un perfil del catálogo (`PROFILE_REQUIRED`): es un
+         *     invitado de relleno, porque los 10 slots de la región estaban ocupados.
+         *     Bloquear y reportar son actos de una persona contra otra y el invitado no
+         *     es una persona de la demo. Es un 403 y no un 404: la credencial es válida,
+         *     lo que falta es el sujeto.
+         */
+        ProfileRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
          * @description No hay presencia viva que apagar (`PRESENCE_STALE`): nunca se registró, ya
          *     se borró o venció. La operación es idempotente en el resultado, no en el
          *     status, para que el cliente distinga "apagué mi presencia" de "no había
@@ -1664,6 +2089,21 @@ export interface components {
          *     que otro pueda contestarle.
          */
         PingForbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description El emisor no puede pinguear a ese destinatario por una de dos razones, y
+         *     `Problem.code` las separa: `PING_FORBIDDEN` cuando la sesión no tiene
+         *     perfil propio (invitado de relleno) y `CHAT_BLOCKED` cuando el par está
+         *     bloqueado en cualquier dirección. El mensaje no revela quién bloqueó a
+         *     quién.
+         */
+        PingForbiddenOrBlocked: {
             headers: {
                 [name: string]: unknown;
             };
@@ -1756,8 +2196,13 @@ export interface components {
         /**
          * @description El match existe en la región pero la sesión no es parte de él
          *     (`CHAT_BLOCKED`). Es un 403 y no un 404: el recurso está, lo que falta es
-         *     el derecho a leer o escribir esa conversación. El mismo código es el que
-         *     S5 usará cuando el otro lado bloquee la conversación.
+         *     el derecho a leer o escribir esa conversación.
+         *
+         *     Desde v0.5 el mismo código cubre el bloqueo real en las dos puertas del
+         *     par: `POST /pings` cuando cualquiera de los dos bloqueó al otro, y
+         *     `POST /matches/{matchId}/messages` cuando la conversación existe pero el
+         *     par está bloqueado. El mensaje de error no dice quién bloqueó a quién:
+         *     el bloqueo ajeno es invisible para el bloqueado.
          */
         ChatBlocked: {
             headers: {
@@ -1770,8 +2215,10 @@ export interface components {
         /**
          * @description La conversación no acepta mensajes nuevos (`MATCH_CLOSED`): el otro lado
          *     ya no existe para la demo (un bot cuyo dueño se fue, un perfil regenerado
-         *     por un seed) o la conversación se cerró. Se puede leer —la historia queda
-         *     legible— y marcar leída; lo que no se puede es escribir.
+         *     por un seed) o la conversación se cerró porque el dueño del bot cambió de
+         *     zona demo y el bot se volvió a sembrar en otra (`v0.5`). Se puede leer
+         *     —la historia queda legible— y marcar leída; lo que no se puede es
+         *     escribir.
          */
         MatchClosed: {
             headers: {
@@ -1961,13 +2408,13 @@ export interface components {
             };
         };
         /**
-         * @description El ping existe pero la sesión no es su destinatario (`PING_FORBIDDEN`).
-         *     Es un 403 y no un 404: el recurso está, lo que falta es el derecho a
-         *     resolverlo. También es el 403 de `POST /pings` cuando la sesión no tiene
-         *     perfil propio (invitado de relleno): un invitado no es una persona a la
-         *     que otro pueda contestarle.
+         * @description El emisor no puede pinguear a ese destinatario por una de dos razones, y
+         *     `Problem.code` las separa: `PING_FORBIDDEN` cuando la sesión no tiene
+         *     perfil propio (invitado de relleno) y `CHAT_BLOCKED` cuando el par está
+         *     bloqueado en cualquier dirección. El mensaje no revela quién bloqueó a
+         *     quién.
          */
-        "responses-PingForbidden": {
+        "responses-PingForbiddenOrBlocked": {
             headers: {
                 [name: string]: unknown;
             };
@@ -2018,6 +2465,21 @@ export interface components {
             };
         };
         /**
+         * @description El ping existe pero la sesión no es su destinatario (`PING_FORBIDDEN`).
+         *     Es un 403 y no un 404: el recurso está, lo que falta es el derecho a
+         *     resolverlo. También es el 403 de `POST /pings` cuando la sesión no tiene
+         *     perfil propio (invitado de relleno): un invitado no es una persona a la
+         *     que otro pueda contestarle.
+         */
+        "responses-PingForbidden": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
          * @description El `pingId` del path no existe (`PING_NOT_FOUND`). Un id malformado (no
          *     uuid) es 422 `VALIDATION_FAILED`, no un 404: el pedido está mal escrito
          *     antes de que el recurso falte.
@@ -2046,8 +2508,13 @@ export interface components {
         /**
          * @description El match existe en la región pero la sesión no es parte de él
          *     (`CHAT_BLOCKED`). Es un 403 y no un 404: el recurso está, lo que falta es
-         *     el derecho a leer o escribir esa conversación. El mismo código es el que
-         *     S5 usará cuando el otro lado bloquee la conversación.
+         *     el derecho a leer o escribir esa conversación.
+         *
+         *     Desde v0.5 el mismo código cubre el bloqueo real en las dos puertas del
+         *     par: `POST /pings` cuando cualquiera de los dos bloqueó al otro, y
+         *     `POST /matches/{matchId}/messages` cuando la conversación existe pero el
+         *     par está bloqueado. El mensaje de error no dice quién bloqueó a quién:
+         *     el bloqueo ajeno es invisible para el bloqueado.
          */
         "responses-ChatBlocked": {
             headers: {
@@ -2074,10 +2541,27 @@ export interface components {
         /**
          * @description La conversación no acepta mensajes nuevos (`MATCH_CLOSED`): el otro lado
          *     ya no existe para la demo (un bot cuyo dueño se fue, un perfil regenerado
-         *     por un seed) o la conversación se cerró. Se puede leer —la historia queda
-         *     legible— y marcar leída; lo que no se puede es escribir.
+         *     por un seed) o la conversación se cerró porque el dueño del bot cambió de
+         *     zona demo y el bot se volvió a sembrar en otra (`v0.5`). Se puede leer
+         *     —la historia queda legible— y marcar leída; lo que no se puede es
+         *     escribir.
          */
         "responses-MatchClosed": {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description La sesión no encarna un perfil del catálogo (`PROFILE_REQUIRED`): es un
+         *     invitado de relleno, porque los 10 slots de la región estaban ocupados.
+         *     Bloquear y reportar son actos de una persona contra otra y el invitado no
+         *     es una persona de la demo. Es un 403 y no un 404: la credencial es válida,
+         *     lo que falta es el sujeto.
+         */
+        "responses-ProfileRequired": {
             headers: {
                 [name: string]: unknown;
             };
@@ -2477,7 +2961,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["responses-Unauthorized"];
-            403: components["responses"]["responses-PingForbidden"];
+            403: components["responses"]["responses-PingForbiddenOrBlocked"];
             404: components["responses"]["responses-PingTargetNotFound"];
             409: components["responses"]["responses-PingDuplicate"];
             410: components["responses"]["responses-PingExpired"];
@@ -2684,6 +3168,163 @@ export interface operations {
             };
             401: components["responses"]["responses-Unauthorized"];
             404: components["responses"]["responses-ProfileNotFound"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    listBlocks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Los bloqueos propios, más reciente primero. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockList"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-ProfileRequired"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    createBlock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockCreate"];
+            };
+        };
+        responses: {
+            /** @description Bloqueo creado (o el existente, si era idempotente). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Block"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-ProfileRequired"];
+            404: components["responses"]["responses-ProfileNotFound"];
+            422: components["responses"]["responses-Unprocessable"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    deleteBlock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Perfil a desbloquear: el humano canonizado, o el bot cuyo dueño se
+                 *     quiere desbloquear (se canoniza al dueño).
+                 */
+                profileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description El par quedó sin bloqueo; no hay body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-ProfileRequired"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    createReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportCreate"];
+            };
+        };
+        responses: {
+            /** @description Reporte registrado; sólo el acuse, sin identidad del reportado. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportReceipt"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            403: components["responses"]["responses-ProfileRequired"];
+            404: components["responses"]["responses-ProfileNotFound"];
+            422: components["responses"]["responses-Unprocessable"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notificaciones propias y total de no leídas. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationList"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            500: components["responses"]["responses-Internal"];
+        };
+    };
+    readNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["NotificationReadRequest"];
+            };
+        };
+        responses: {
+            /** @description Cuántas se marcaron y cuántas quedan sin leer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationReadResult"];
+                };
+            };
+            401: components["responses"]["responses-Unauthorized"];
+            422: components["responses"]["responses-Unprocessable"];
             500: components["responses"]["responses-Internal"];
         };
     };

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
+import { BlocksModule } from './blocks/blocks.module';
 import { BotsModule } from './bots/bots.module';
 import { ChatModule } from './chat/chat.module';
 import { ConfigModule } from './config/config.module';
@@ -7,9 +8,11 @@ import { DatabaseModule } from './db/database.module';
 import { DiscoveryModule } from './discovery/discovery.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PingsModule } from './pings/pings.module';
 import { PresenceModule } from './presence/presence.module';
 import { ProfilesModule } from './profiles/profiles.module';
+import { ReportsModule } from './reports/reports.module';
 import { ResetModule } from './reset/reset.module';
 
 /**
@@ -27,6 +30,9 @@ import { ResetModule } from './reset/reset.module';
  *   ProfilesModule → GET /demo/profiles y GET /me
  *   PingsModule    → POST/GET /pings y accept/reject (S4)
  *   ChatModule     → GET /matches, mensajes y read (S4, delta v0.4)
+ *   BlocksModule   → GET/POST /blocks y DELETE /blocks/{profileId} (S5)
+ *   ReportsModule  → POST /reports (S5)
+ *   NotificationsModule → GET /notifications y POST /notifications/read (S5)
  *   ResetModule    → POST /demo/reset y /demo/reset/self (fuera del contrato)
  */
 @Module({
@@ -42,6 +48,9 @@ import { ResetModule } from './reset/reset.module';
     ProfilesModule,
     PingsModule,
     ChatModule,
+    BlocksModule,
+    ReportsModule,
+    NotificationsModule,
     ResetModule,
   ],
 })

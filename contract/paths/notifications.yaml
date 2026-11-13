@@ -1,0 +1,85 @@
+# Notificaciones (Sprint 5, delta v0.5): `GET /notifications` y
+# `POST /notifications/read`.
+#
+# **La campana de la demo.** Tres hechos generan un aviso persistido: un ping
+# recibido, un match creado y un mensaje nuevo. `GET` trae la lista y el
+# `unreadCount`; `POST /notifications/read` apaga el badge (todas o una
+# selección).
+#
+# **Compatibilidad con el badge actual.** El cliente live ya usa los pings
+# pendientes para la campana (`App.tsx`: `bellBadgeCount(state, live.pings.pending)`).
+# Esta superficie es **aditiva**: no cambia `GET /pings`, ni `Ping.status`, ni
+# `unreadCount` de `MatchListItem`. El día que la app migre la campana a
+# `unreadCount` de acá, el pings pendientes sigue disponible como antes. Está
+# documentado en `contract/README.md` y `backend/README.md`.
+#
+# **Sin realtime propio.** No hay evento nuevo en el stream: la campana se
+# refresca con `GET /notifications` (y con el polling/SSE existente para el
+# contenido del match). Sumar un tipo de evento habría cambiado la unión de
+# `EventPayload` que el cliente ya consume.
+#
+# Errores: 401 de `demoSession`; 422 `VALIDATION_FAILED` para un body inválido en
+# el `read`; 500 `INTERNAL`. Un invitado de relleno no falla: su lista está
+# vacía, porque nadie le puede pingear y no es parte de ningún match.
+
+notifications:
+  get:
+    operationId: listNotifications
+    summary: Lista las notificaciones de la sesión
+    description: |
+      Hasta 100 notificaciones del perfil de la sesión, más reciente primero, con
+      `unreadCount` sobre **todas** las del perfil (no sólo las de la página).
+
+      La lista es una proyección de perfiles: una notificación cuyo otro extremo
+      ya no está en el catálogo no se dibuja. El contador de no leídas se cuenta
+      sobre la tabla, no sobre las filas proyectadas, para que el badge no mienta
+      por un filtro de presentación.
+    tags:
+      - notifications
+    responses:
+      '200':
+        description: Notificaciones propias y total de no leídas.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/notifications.yaml#/NotificationList'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 5
+
+notifications-read:
+  post:
+    operationId: readNotifications
+    summary: Marca notificaciones como leídas
+    description: |
+      Marca leídas **todas** las no leídas del perfil (sin body o con
+      `notificationIds` ausente) o **sólo las nombradas** (`notificationIds`).
+      Devuelve cuántas se marcaron y cuántas quedan.
+
+      Es idempotente por resultado: la segunda llamada devuelve `marked: 0` y el
+      mismo `unreadCount`. Un id ajeno o inexistente se ignora —la operación ya
+      está acotada al perfil de la sesión—; un body mal formado es 422.
+    tags:
+      - notifications
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/notifications.yaml#/NotificationReadRequest'
+    responses:
+      '200':
+        description: Cuántas se marcaron y cuántas quedan sin leer.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/notifications.yaml#/NotificationReadResult'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
+      '500':
+        $ref: '../openapi.yaml#/components/responses/Internal'
+    x-implementation-sprint: 5

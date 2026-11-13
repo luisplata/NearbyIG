@@ -14,9 +14,26 @@ import { APP_CONFIG } from '../config/config.module';
 import type { AppConfig } from '../config/env';
 import { PG_POOL } from '../db/database.module';
 import { EventsService } from '../events/events.service';
-import type { PresenceState, PresenceUpdate } from './presence.types';
+import type { PresenceState, PresenceUpdate, Visibility } from './presence.types';
 
 const ZONE_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * `visibility` del body (v0.5): opcional, `visible` o `ghost`.
+ *
+ * Ausente es `null` y **no** `'visible'`: el contrato dice que omitirla conserva
+ * la vigente, así el heartbeat de posición (cada pocos segundos) no puede sacar a
+ * alguien de ghost por no repetir el campo. `null` también es lo que el SQL usa
+ * para "dejá la que estaba" (`coalesce($7, presence.visibility)`).
+ */
+function parseVisibility(record: Record<string, unknown>): Visibility | null {
+  const value = record['visibility'];
+  if (value === undefined) return null;
+  if (value !== 'visible' && value !== 'ghost') {
+    throw validationFailed('visibility debe ser "visible" o "ghost".');
+  }
+  return value as Visibility;
+}
 
 /**
  * Predicado de presencia viva (`TTL` de 12 s).
@@ -60,7 +77,8 @@ function round6(value: number): number {
  */
 function parsePresenceUpdate(body: unknown): PresenceUpdate {
   const record = asOptionalRecord(body);
-  rejectUnknownKeys(record, ['point', 'demoZoneKey']);
+  rejectUnknownKeys(record, ['point', 'demoZoneKey', 'visibility']);
+  const visibility = parseVisibility(record);
 
   const hasPoint = record['point'] !== undefined;
   const hasZone = record['demoZoneKey'] !== undefined;
@@ -75,7 +93,7 @@ function parsePresenceUpdate(body: unknown): PresenceUpdate {
     if (typeof demoZoneKey !== 'string' || !ZONE_KEY_PATTERN.test(demoZoneKey)) {
       throw validationFailed('demoZoneKey debe cumplir ^[a-z][a-z0-9-]*$ (por ejemplo "cdmx").');
     }
-    return { kind: 'zone', demoZoneKey };
+    return { kind: 'zone', demoZoneKey, visibility };
   }
 
   const point = record['point'];
@@ -84,13 +102,15 @@ function parsePresenceUpdate(body: unknown): PresenceUpdate {
   // El orden importa sólo para el mensaje: `lat` primero es como se lee un punto.
   const lat = requiredNumber(point, 'lat', -90, 90);
   const lng = requiredNumber(point, 'lng', -180, 180);
-  return { kind: 'point', lat: round6(lat), lng: round6(lng) };
+  return { kind: 'point', lat: round6(lat), lng: round6(lng), visibility };
 }
 
 interface PresenceRow {
   region_key: string;
   zone_key: string | null;
+  visibility: Visibility;
   prior_live: boolean;
+  prior_visibility: Visibility | null;
 }
 
 /**
@@ -122,6 +142,15 @@ export class PresenceService {
    * Un segundo `PUT` **reemplaza** la presencia anterior (upsert por
    * `session_id`): una sesión tiene una sola presencia viva, y es lo que evita
    * el estado duplicado cuando el navegador se mueve.
+   *
+   * **Ghost (v0.5).** `visibility: ghost` deja la fila viva y con la posición
+   * que el cliente mandó; lo que cambia es el filtro de lectura de los demás
+   * (discovery, stream, pings). Los bots **no** se borran: el dueño se sigue
+   * viendo a sí mismo y sus bots orbitan alrededor suyo. Apagar todo es
+   * `DELETE /presence`, no ghost.
+   *
+   * Omitir `visibility` conserva la vigente (`coalesce($7, presence.visibility)`),
+   * así el heartbeat de posición del cliente no saca a nadie de ghost.
    */
   async update(session: AuthContext, body: unknown): Promise<PresenceState> {
     const update = parsePresenceUpdate(body);
@@ -147,43 +176,77 @@ export class PresenceService {
     // consulta ni una carrera, si la presencia **ya estaba viva**: sólo una
     // transición a online emite `profile.presence`. Mover el punto de una
     // presencia viva no es un cambio de estado.
+    // `$7` es `null` cuando el body no trae `visibility`: en el INSERT cae al
+    // default (`visible`) y en el UPDATE conserva la fila. La misma sentencia
+    // resuelve las dos cosas, sin una lectura previa ni una carrera.
     const { rows } = await this.pool.query<PresenceRow>(
       `WITH prior AS (
-         SELECT (expires_at > now()) AS live
+         SELECT (expires_at > now()) AS live, visibility
            FROM presence
           WHERE session_id = $1
        ), upserted AS (
-         INSERT INTO presence (session_id, region_key, zone_key, point, expires_at)
+         INSERT INTO presence (session_id, region_key, zone_key, point, expires_at, visibility)
          VALUES ($1, $2, $3,
                  ST_SetSRID(ST_MakePoint($4, $5), 4326),
-                 now() + make_interval(secs => $6::int))
+                 now() + make_interval(secs => $6::int),
+                 coalesce($7::text, 'visible'))
          ON CONFLICT (session_id) DO UPDATE
             SET region_key = EXCLUDED.region_key,
                 zone_key   = EXCLUDED.zone_key,
                 point      = EXCLUDED.point,
-                expires_at = EXCLUDED.expires_at
-         RETURNING region_key, zone_key
+                expires_at = EXCLUDED.expires_at,
+                visibility = coalesce($7::text, presence.visibility)
+         RETURNING region_key, zone_key, visibility
        )
-       SELECT u.region_key, u.zone_key,
-              coalesce((SELECT live FROM prior), false) AS prior_live
+       SELECT u.region_key, u.zone_key, u.visibility,
+              coalesce((SELECT live FROM prior), false) AS prior_live,
+              (SELECT visibility FROM prior) AS prior_visibility
          FROM upserted u`,
-      [session.sessionId, session.regionKey, zoneKey, lng, lat, this.config.presenceTtlSeconds],
+      [
+        session.sessionId,
+        session.regionKey,
+        zoneKey,
+        lng,
+        lat,
+        this.config.presenceTtlSeconds,
+        update.visibility,
+      ],
     );
 
     const row = rows[0];
     if (row === undefined) throw new Error('INSERT de presencia sin RETURNING');
 
-    // Transición a online: el evento de presencia es del humano, no de la zona.
-    if (!row.prior_live) {
+    // El evento de presencia es del humano, no de la zona. Se emite sólo en un
+    // cambio de visibilidad **observable por los demás**:
+    //
+    //   visible → visible : nada (mover el punto no es un cambio de estado)
+    //   ghost   → visible : online:true (reaparece)
+    //   visible → ghost   : online:false (desaparece, pero sigue online)
+    //   ghost   → ghost   : nada (ni un aviso de que existe)
+    //   (sin fila viva) → ghost : nada: avisar "online" de un fantasma es
+    //                             justo la fuga que ghost evita
+    //
+    // `online:false` de un ghost es la forma de que el radar de los demás lo
+    // saque sin revelar que sigue conectado. El filter de `readRows` deja pasar
+    // siempre los `online:false` para que ese aviso llegue aunque el sujeto ya
+    // no esté en `visibleSubjects`.
+    const wasVisible = row.prior_live && row.prior_visibility === 'visible';
+    const isVisible = row.visibility === 'visible';
+    if (isVisible && !wasVisible) {
       await this.events.append(row.region_key, 'profile.presence', {
         profileId: session.profileId,
         online: true,
+      });
+    } else if (!isVisible && wasVisible) {
+      await this.events.append(row.region_key, 'profile.presence', {
+        profileId: session.profileId,
+        online: false,
       });
     }
 
     // Sin coordenadas en el log: sólo la proyección (región, zona, fallback).
     this.logger.log(
-      `presencia registrada region=${row.region_key} zone=${row.zone_key ?? 'none'} fallback=${row.zone_key === null}`,
+      `presencia registrada region=${row.region_key} zone=${row.zone_key ?? 'none'} fallback=${row.zone_key === null} visibility=${row.visibility}`,
     );
 
     return {
@@ -191,6 +254,7 @@ export class PresenceService {
       regionKey: row.region_key,
       zoneKey: row.zone_key,
       online: true,
+      visibility: row.visibility,
       fallbackRequired: row.zone_key === null,
     };
   }
