@@ -6,8 +6,13 @@
 # Así el path real vive en un solo lugar y el `$ref` se lee sin punteros
 # escapados (`~1`).
 #
-# Sin errores declarados todavía: el catálogo `ErrorCode` + `Problem` entra en
-# PR2 y con él los 401 de logout/stream-ticket y el 409/422 de demo-session.
+# Sin 401: `demo-session` es la única operation pública del contrato. Los
+# errores de esta operation son de estado (slot tomado) y de schema (slot fuera
+# de rango), no de credencial.
+#
+# Logout y stream-ticket heredan `demoSession`, así que sí declaran 401. Las
+# responses viven en `openapi.yaml#/components/responses` y se referencian desde
+# acá: una forma de error, un lugar donde cambiarla.
 
 demo-session:
   post:
@@ -33,6 +38,10 @@ demo-session:
           application/json:
             schema:
               $ref: '../schemas/auth.yaml#/DemoSession'
+      '409':
+        $ref: '../openapi.yaml#/components/responses/Conflict'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/Unprocessable'
     x-implementation-sprint: 1
 
 logout:
@@ -47,6 +56,8 @@ logout:
     responses:
       '204':
         description: Sesión cerrada. Sin body.
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
     x-implementation-sprint: 1
 
 stream-ticket:
@@ -66,4 +77,6 @@ stream-ticket:
           application/json:
             schema:
               $ref: '../schemas/auth.yaml#/StreamTicket'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
     x-implementation-sprint: 1

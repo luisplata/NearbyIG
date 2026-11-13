@@ -5,11 +5,6 @@ extends:
   - recommended
 
 rules:
-  # Los responses 4xx/5xx no existen todavía: el catálogo `ErrorCode` + `Problem`
-  # entra en PR2 y con él se reactiva esta regla. Dejarla en `warn` ahora sólo
-  # agregaría ruido de deuda ya planificada.
-  operation-4xx-response: off
-
   # `components.schemas` declara piezas compartidas (KeyLabel, Page, RegionKey)
   # antes que sus consumidores: S2 y S3 las usan. No es código muerto, es el
   # orden de la cadena. La regla se puede reactivar cuando la superficie cierre.

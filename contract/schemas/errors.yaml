@@ -1,0 +1,133 @@
+# Catálogo de errores del contrato. Fuente única: el enum cerrado de códigos, el
+# HTTP que le corresponde a cada uno y la forma del cuerpo de error viven acá.
+#
+# El servidor NO inventa códigos: si necesita uno nuevo, primero lo agrega a este
+# archivo, y `contract/test/errors-catalog.test.mjs` lo obliga a usarlo en alguna
+# operation. `contract/redocly.yaml` exige además que toda operation declare al
+# menos un 4xx/5xx, así que no hay forma de agregar superficie sin error.
+
+ErrorCode:
+  type: string
+  enum:
+    # 401 — credencial
+    - UNAUTHENTICATED
+    - TICKET_EXPIRED
+    - TICKET_REUSED
+    # 403 — región y bloqueo
+    - REGION_MISMATCH
+    - CHAT_BLOCKED
+    # 404 — recurso
+    - PROFILE_NOT_FOUND
+    - MATCH_NOT_FOUND
+    # 409 — estado que el cliente no esperaba
+    - PROFILE_IN_USE
+    - PRESENCE_STALE
+    - PING_DUPLICATE
+    # 410 — lo que estaba ya no está
+    - CURSOR_EXPIRED
+    - PING_EXPIRED
+    # 429 — límite
+    - RATE_LIMITED
+    # 422 — el pedido no cumple el schema
+    - REGION_UNAVAILABLE
+    - ZONE_UNKNOWN
+    - VALIDATION_FAILED
+    # 5xx — el server
+    - INTERNAL
+    - NOT_IMPLEMENTED
+  description: |
+    Motivo del error, cerrado a estos 18 valores. `code` es el discriminante
+    estable: el cliente decide con él, nunca con `title` ni con `detail` (esos
+    son texto para humanos, traducible y variable).
+
+    No existe código 400: un cursor malformado es `VALIDATION_FAILED` (422) y uno
+    fuera de retención es `CURSOR_EXPIRED` (410). La tabla completa —cuándo
+    corresponde cada uno— vive en la spec del change.
+
+  # code → HTTP status. Un código tiene un único status y un status puede
+  # repetirse entre códigos (tres códigos son 401). La tabla vive al lado del
+  # enum a propósito: separarlas las deja divergir.
+  x-status:
+    UNAUTHENTICATED: 401
+    TICKET_EXPIRED: 401
+    TICKET_REUSED: 401
+    REGION_MISMATCH: 403
+    CHAT_BLOCKED: 403
+    PROFILE_NOT_FOUND: 404
+    MATCH_NOT_FOUND: 404
+    PROFILE_IN_USE: 409
+    PRESENCE_STALE: 409
+    PING_DUPLICATE: 409
+    CURSOR_EXPIRED: 410
+    PING_EXPIRED: 410
+    RATE_LIMITED: 429
+    REGION_UNAVAILABLE: 422
+    ZONE_UNKNOWN: 422
+    VALIDATION_FAILED: 422
+    INTERNAL: 500
+    NOT_IMPLEMENTED: 501
+
+  # Códigos que existen para S4/S5 (chat, matches, pings) y todavía no tienen
+  # operation en la superficie congelada S1–S3. La marca no es decorativa: es lo
+  # único que permite exigir "cada código no reservado se usa al menos una vez"
+  # sin inventar paths que la spec prohíbe. Cuando S4/S5 cablee su path, el
+  # código se saca de acá y queda sujeto a la regla de uso como cualquier otro.
+  x-reserved:
+    CHAT_BLOCKED: true
+    MATCH_NOT_FOUND: true
+    PING_DUPLICATE: true
+    PING_EXPIRED: true
+
+Problem:
+  type: object
+  additionalProperties: false
+  required:
+    - type
+    - title
+    - status
+    - code
+    - requestId
+    - detail
+  description: |
+    Cuerpo único de error, RFC 9457 (`application/problem+json`). Toda respuesta
+    4xx/5xx del contrato devuelve exactamente esto: un shape cerrado, sin campos
+    por operation, así el cliente tiene un solo parser de errores.
+
+    `type` y `title` son estables y traducibles sólo uno de los dos a la vez:
+    `type` identifica el problema para el código del cliente, `title` es el copy
+    —el server lo devuelve ya resuelto en el idioma de la sesión, igual que
+    `KeyLabel.label`— y `detail` explica esta ocurrencia concreta (qué campo,
+    qué slot). `requestId` es el único dato que se usa para reportar el bug.
+  properties:
+    type:
+      type: string
+      format: uri
+      description: |
+        URI que identifica el tipo de problema, estable entre ocurrencias. Con
+        `about:blank` el problema es exactamente lo que dice el status HTTP.
+      examples:
+        - about:blank
+    title:
+      type: string
+      minLength: 1
+      description: Resumen corto del status, listo para mostrar. No se decide con él.
+    status:
+      type: integer
+      minimum: 400
+      maximum: 599
+      description: |
+        Status HTTP, repetido en el body para que un log o un proxy que se come el
+        header igual conserve el dato. Debe coincidir con `ErrorCode.x-status`.
+    code:
+      $ref: '#/ErrorCode'
+    requestId:
+      type: string
+      minLength: 1
+      description: |
+        Identificador de la request. El cliente lo reporta tal cual: es lo que
+        permite encontrar el log de esa ocurrencia sin adivinar por timestamp.
+    detail:
+      type: string
+      description: |
+        Explicación de esta ocurrencia, en el idioma de la sesión. Puede venir
+        vacía cuando no hay nada útil que agregar al `title`.
