@@ -4,6 +4,7 @@ import { liveText } from '../live/liveCopy';
 import { useLive } from '../live/LiveProvider';
 import {
   liveCountText,
+  liveLocationText,
   liveNoticeText,
   liveSessionText,
   liveStatusText,
@@ -18,12 +19,16 @@ import { Chip } from './Chip';
  * Barra de la sesión live, debajo del header.
  *
  * **No hay switch.** Cuando el build tiene API, la sesión arranca sola y la barra
- * cuenta qué pasa (estado, línea de sesión, transporte, perfiles). El dataset del
- * build no es un modo que se elija: es el catálogo con el que la app arranca y al
- * que vuelve si la API no responde, con un aviso que explica el porqué.
+ * cuenta qué pasa: estado, línea de sesión, transporte, perfiles y si las
+ * distancias salen del GPS o de la zona demo. El dataset del build no es un modo
+ * que se elija: es el catálogo con el que la app arranca y al que vuelve si la
+ * API no responde, con un aviso que explica el porqué.
  *
- * Sin `EXPO_PUBLIC_API_URL` la barra no se monta: el artefacto publicado se ve
- * exactamente como antes (CONTRACT.md §6 y §9).
+ * La ubicación se pide al entrar en live (una vez) y se puede reintentar con el
+ * chip "Usar mi ubicación": no hay tracking ni prompt repetido en cada latido.
+ *
+ * Sin API configurada (`EXPO_PUBLIC_API_URL` o `?api=`) la barra no se monta: el
+ * artefacto publicado se ve exactamente como antes (CONTRACT.md §6 y §9).
  */
 export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
   const { state } = useDemo();
@@ -32,6 +37,7 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
   const notice = liveNoticeText(live.state.notice);
   const session = liveSessionText(live.state);
   const transport = liveTransportText(live.state);
+  const location = liveLocationText(live.state);
 
   // Sin base de API en el build no hay nada que contar: la barra no se monta.
   if (!live.available) {
@@ -39,6 +45,9 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
   }
 
   const offline = live.state.status === 'offline';
+  const meta = [session, transport, location, liveCountText(state.catalog.length)].filter(
+    (part): part is string => part !== null,
+  );
 
   return (
     <View style={styles.bar}>
@@ -49,17 +58,21 @@ export function LiveBar({ onOpenProfiles }: { onOpenProfiles: () => void }) {
         {isLive && live.enabled ? (
           <Chip label={liveText('changeProfile')} icon="person" onPress={onOpenProfiles} />
         ) : null}
-        {offline ? (
-          <Chip label={liveText('retry')} onPress={() => void live.enable()} />
-        ) : null}
+        {offline ? <Chip label={liveText('retry')} onPress={() => void live.enable()} /> : null}
       </View>
 
-      {isLive && session !== null ? (
-        <Text numberOfLines={1} style={[text.small, styles.meta]}>
-          {[session, transport, liveCountText(state.catalog.length)]
-            .filter((part): part is string => part !== null)
-            .join(' · ')}
-        </Text>
+      {isLive && meta.length > 0 ? (
+        <View style={styles.row}>
+          <Text numberOfLines={1} style={[text.small, styles.meta]}>
+            {meta.join(' · ')}
+          </Text>
+          {live.state.location === 'demo' && live.enabled ? (
+            <Chip
+              label={liveText('useMyLocation')}
+              onPress={() => void live.requestLocation()}
+            />
+          ) : null}
+        </View>
       ) : null}
 
       {notice === null ? null : (
@@ -87,6 +100,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   meta: {
+    flex: 1,
     fontSize: fontSize[0],
     opacity: 0.9,
   },

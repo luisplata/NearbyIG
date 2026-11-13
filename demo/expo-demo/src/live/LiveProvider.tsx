@@ -13,13 +13,14 @@ import { fixtures } from '../generated/fixtures';
 import { useDemo } from '../state/DemoProvider';
 import type { DemoStore } from '../state/store';
 
-import { readLiveSettings, type LiveSettings } from './config';
+import { readRuntimeLiveSettings, type LiveSettings } from './config';
 import {
   createLiveController,
   type EventSourceLike,
   type LiveActionResult,
   type LiveController,
 } from './controller';
+import { requestBrowserPoint } from './geolocation';
 import { emptyLiveState, type LiveState } from './types';
 
 /**
@@ -41,6 +42,8 @@ export type LiveBinding = {
   enabled: boolean;
   /** Abre (o reintenta abrir) la sesión. La UI no ofrece "apagar el live". */
   enable: () => Promise<void>;
+  /** Reintenta la ubicación real (botón "Usar mi ubicación"). */
+  requestLocation: () => Promise<void>;
   refresh: () => Promise<void>;
   refreshRows: () => Promise<void>;
   claim: (slot: number) => Promise<LiveActionResult>;
@@ -77,8 +80,13 @@ export function LiveProvider({
   autoStart = true,
 }: LiveProviderProps) {
   // `EXPO_PUBLIC_*` se inlinea al compilar: el acceso tiene que ser estático.
+  // El override de runtime (`?api=` y storage) entra después, en `config`.
   const settings = useMemo(
-    () => readLiveSettings(process.env.EXPO_PUBLIC_API_URL, process.env.EXPO_PUBLIC_DEMO_REGION),
+    () =>
+      readRuntimeLiveSettings(
+        process.env.EXPO_PUBLIC_API_URL,
+        process.env.EXPO_PUBLIC_DEMO_REGION,
+      ),
     [],
   );
 
@@ -86,6 +94,7 @@ export function LiveProvider({
     createLiveController({
       settings,
       createEventSource: createEventSource ?? defaultEventSource,
+      requestPoint: requestBrowserPoint,
       onCatalog: (profiles, source) => {
         store.setCatalog(profiles === null ? fixtures.profiles : profiles, source);
       },
@@ -132,6 +141,10 @@ export function LiveProvider({
     await controller.refresh();
   }, [controller]);
 
+  const requestLocation = useCallback(async () => {
+    await controller.requestLocation();
+  }, [controller]);
+
   const refreshRows = useCallback(async () => {
     await controller.refreshRows();
   }, [controller]);
@@ -147,6 +160,7 @@ export function LiveProvider({
         state: live,
         enabled,
         enable,
+        requestLocation,
         refresh,
         refreshRows,
         claim,

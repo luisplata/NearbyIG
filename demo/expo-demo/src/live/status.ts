@@ -21,6 +21,8 @@ export function liveNoticeText(notice: LiveNotice | null): string | null {
       return liveText('noticeSessionLost');
     case 'degraded':
       return liveText('noticeDegraded');
+    case 'outside-zone':
+      return liveText('geolocationOutside');
   }
 }
 
@@ -75,6 +77,20 @@ export function liveTransportText(live: LiveState): string | null {
   }
   if (live.transport === 'polling') {
     return liveText('transportPolling');
+  }
+  return null;
+}
+
+/**
+ * De dónde salen las distancias: `GPS` o `zona demo`. Texto corto porque va en
+ * la línea de la barra, al lado del transporte y del conteo.
+ */
+export function liveLocationText(live: LiveState): string | null {
+  if (live.location === 'gps') {
+    return liveText('gps');
+  }
+  if (live.location === 'demo') {
+    return liveText('demoZone');
   }
   return null;
 }

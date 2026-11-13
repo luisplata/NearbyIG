@@ -1,15 +1,24 @@
 import type { DemoSource, DiscoveryFilters, UiProfile } from '../state/types';
 
 import { toUiProfiles } from './adapter';
-import { createLiveApi, LiveApiError, type DiscoveryQuery, type FetchLike, type LiveApi } from './api';
+import {
+  createLiveApi,
+  LiveApiError,
+  type DiscoveryQuery,
+  type FetchLike,
+  type LiveApi,
+  type PresenceTarget,
+} from './api';
 import type { LiveSettings } from './config';
 import { applyEvents } from './events';
+import type { GeoResult } from './geolocation';
 import { defaultZoneFor } from './regions';
 import {
   emptyLiveState,
   EVENT_TYPES,
   parseEvent,
   type LiveEvent,
+  type LiveLocation,
   type LiveNotice,
   type LiveState,
 } from './types';
@@ -29,6 +38,14 @@ import {
  * un ghost no debe poder hacer"). Por eso el latido repite `PUT /presence` cada
  * 8 s (4 s de margen) y, en la misma vuelta, refresca la foto: eso es también el
  * mecanismo que repara cualquier hueco del stream.
+ *
+ * **Presencia: GPS o zona demo.** Al abrir la sesión se pide el punto una vez
+ * (`ports.requestPoint`). Si el navegador lo da, el `PUT /presence` lleva
+ * `point`; si lo niega, no hay soporte o el contexto no es seguro, lleva la
+ * `demoZoneKey` de la región. Si el server responde `fallbackRequired` (el punto
+ * no cae en ninguna zona del catálogo) se re-registra con la zona demo y queda un
+ * aviso: el mapa y las distancias son de la zona demo, no de donde está el
+ * usuario. El punto no se guarda ni se repite en ningún otro pedido.
  *
  * **Transporte.** SSE es la actualización fina; el polling (`/events/poll` con
  * `cursor`) es el fallback si el navegador no soporta `EventSource`, si el
@@ -63,6 +80,11 @@ export type LiveControllerPorts = {
   fetchImpl?: FetchLike;
   /** `null` = el runtime no tiene `EventSource`; se usa polling. */
   createEventSource?: (url: string) => EventSourceLike | null;
+  /**
+   * Punto del navegador. `undefined` = no se pide (tests, runtimes sin DOM) y la
+   * presencia va con la zona demo, que es el camino sin permiso.
+   */
+  requestPoint?: () => Promise<GeoResult>;
   /** Catálogo para la UI. `null` significa "volvé al dataset del build". */
   onCatalog?: (profiles: readonly UiProfile[] | null, source: DemoSource) => void;
   heartbeatMs?: number;
@@ -80,6 +102,8 @@ export type LiveController = {
   refresh(): Promise<void>;
   refreshRows(): Promise<void>;
   setFilters(filters: DiscoveryFilters): void;
+  /** Reintenta el punto del navegador (botón "Usar mi ubicación"). */
+  requestLocation(): Promise<void>;
   claim(slot: number): Promise<LiveActionResult>;
   takeover(slot: number): Promise<LiveActionResult>;
 };
@@ -102,6 +126,8 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   let state: LiveState = emptyLiveState();
   const listeners = new Set<() => void>();
   let zone: string | null = null;
+  /** Lo que se repite en cada latido: el punto (si se pudo) o la zona demo. */
+  let presence: PresenceTarget | null = null;
   let cursor: string | null = null;
   let filters: DiscoveryFilters | null = null;
   let queryKey = '';
@@ -173,6 +199,36 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     return 'unreachable';
   };
 
+  /**
+   * Decide con qué se registra la presencia y la registra.
+   *
+   * `gps` sólo si el navegador dio un punto **y** el server lo pudo proyectar a
+   * una zona (`fallbackRequired: false`). El punto fuera de zona no es un error
+   * del contrato: es el caso "estoy en otra ciudad", y la respuesta correcta es
+   * caer a la zona demo con un aviso, no dejar la presencia sin zona.
+   */
+  const applyPresence = async (demoZoneKey: string): Promise<LiveLocation> => {
+    if (api === null) {
+      return 'demo';
+    }
+    const geo = ports.requestPoint === undefined ? null : await ports.requestPoint();
+    if (geo !== null && geo.status === 'ok') {
+      const projected = await api.presence({ point: geo.point });
+      if (!projected.fallbackRequired) {
+        presence = { point: geo.point };
+        return 'gps';
+      }
+      // Fuera de la zona demo: la presencia va con zona y el aviso lo explica.
+      await api.presence({ demoZoneKey });
+      presence = { demoZoneKey };
+      set({ notice: 'outside-zone' });
+      return 'demo';
+    }
+    await api.presence({ demoZoneKey });
+    presence = { demoZoneKey };
+    return 'demo';
+  };
+
   const clearTimers = (): void => {
     if (heartbeatTimer !== null) {
       clearInterval(heartbeatTimer);
@@ -213,7 +269,8 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     closeStream();
     cursor = null;
     failures = 0;
-    set({ status: 'offline', transport: 'none', notice, error: code });
+    presence = null;
+    set({ status: 'offline', transport: 'none', notice, error: code, location: null });
     emitDataset();
     if (api !== null && state.session !== null) {
       // Best effort: la sesión ya puede estar revocada.
@@ -361,11 +418,11 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   };
 
   const beat = async (): Promise<void> => {
-    if (api === null || zone === null || state.session === null) {
+    if (api === null || presence === null || state.session === null) {
       return;
     }
     try {
-      await api.presence(zone);
+      await api.presence(presence);
       await refreshDiscovery();
       failures = 0;
     } catch (error) {
@@ -453,7 +510,8 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       api.setToken(session.token);
       set({ session });
       try {
-        await api.presence(nextZone);
+        const location = await applyPresence(nextZone);
+        set({ location });
         await refreshDiscovery();
       } catch (error) {
         degrade(error);
@@ -472,11 +530,27 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       cursor = null;
       failures = 0;
       zone = null;
+      presence = null;
       state = emptyLiveState();
       notify();
       emitDataset();
       if (api !== null && hadSession) {
         await api.logout().catch(() => undefined);
+      }
+    },
+    requestLocation: async () => {
+      if (api === null || zone === null || state.session === null) {
+        return;
+      }
+      try {
+        const location = await applyPresence(zone);
+        set({ location });
+        await refreshDiscovery();
+      } catch (error) {
+        failures += 1;
+        if (failures >= 2) {
+          degrade(error);
+        }
       }
     },
     refresh: async () => {

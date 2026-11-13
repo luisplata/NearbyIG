@@ -91,12 +91,21 @@ export type LiveTransport = 'none' | 'sse' | 'polling';
 export type LiveStatus = 'idle' | 'connecting' | 'live' | 'polling' | 'offline';
 
 /** Aviso para la UI, sin copy adentro: el texto lo resuelve `liveCopy`. */
-export type LiveNotice = 'unconfigured' | 'unreachable' | 'session-lost' | 'degraded';
+export type LiveNotice = 'unconfigured' | 'unreachable' | 'session-lost' | 'degraded' | 'outside-zone';
+
+/** Cómo se registró la presencia: ubicación real o zona demo. */
+export type LiveLocation = 'gps' | 'demo';
 
 export type LiveState = {
   status: LiveStatus;
   transport: LiveTransport;
   session: LiveSession | null;
+  /**
+   * `gps` = `PUT /presence` con el punto del navegador; `demo` = con la
+   * `demoZoneKey` de la región (sin permiso, sin soporte, contexto inseguro o
+   * punto fuera de zona). `null` = todavía no se registró presencia.
+   */
+  location: LiveLocation | null;
   /** Catálogo de la región (`/demo/profiles`), con `inUse`. */
   rows: LiveProfileRow[];
   /** Última foto de `/discovery`. Es la fuente del catálogo de la UI. */
@@ -113,6 +122,7 @@ export function emptyLiveState(): LiveState {
     status: 'idle',
     transport: 'none',
     session: null,
+    location: null,
     rows: [],
     discovery: [],
     lastSeq: 0,

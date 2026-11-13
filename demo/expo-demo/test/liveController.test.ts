@@ -593,3 +593,150 @@ describe('cierre', () => {
     expect(catalogs.at(-1)).toEqual({ profiles: null, source: 'dataset' });
   });
 });
+
+describe('presencia con ubicación real', () => {
+  const GPS = { status: 'ok' as const, point: { lat: 19.432608, lng: -99.13321 } };
+
+  /**
+   * Controller con la ubicación inyectada. Se registran las URLs completas para
+   * poder afirmar que el punto **sólo** viaja al `PUT /presence`: discovery y
+   * eventos no llevan coordenadas (el contrato no las acepta en la salida).
+   */
+  function makeGeoController(
+    server: ReturnType<typeof makeServer>,
+    geo: () => Promise<{ status: string; point?: { lat: number; lng: number } }>,
+  ) {
+    const urls: string[] = [];
+    const bodies: { url: string; body: string | undefined }[] = [];
+    const fetchImpl = async (url: string, init?: { method?: string; body?: string }) => {
+      urls.push(url);
+      bodies.push({ url, body: init?.body });
+      return server.fetchImpl(url as never, init as never);
+    };
+    const controller = createLiveController({
+      settings: SETTINGS,
+      fetchImpl: fetchImpl as never,
+      createEventSource: () => null,
+      requestPoint: geo as never,
+      pollMs: 10,
+      heartbeatMs: 10_000,
+    });
+    return { controller, urls, bodies };
+  }
+
+  it('con GPS la presencia va con el punto y la barra dice GPS', async () => {
+    const server = makeServer();
+    const { controller, urls, bodies } = makeGeoController(server, async () => GPS);
+
+    expect(await controller.start()).toBe(true);
+    expect(controller.getState().location).toBe('gps');
+    expect(controller.getState().notice).toBeNull();
+
+    const presence = bodies.filter((call) => call.url.endsWith('/presence'));
+    expect(presence).toHaveLength(1);
+    expect(JSON.parse(String(presence[0].body))).toEqual({
+      point: { lat: 19.432608, lng: -99.13321 },
+    });
+
+    // El punto no se repite: ninguna otra URL lo lleva en la query.
+    for (const url of urls.filter((candidate) => !candidate.endsWith('/presence'))) {
+      expect(url).not.toMatch(/lat=|lng=/);
+    }
+  });
+
+  it('si el permiso se niega, la presencia va con la zona demo y sin romper', async () => {
+    const server = makeServer();
+    const { controller, bodies } = makeGeoController(server, async () => ({ status: 'denied' }));
+
+    expect(await controller.start()).toBe(true);
+    expect(controller.getState().location).toBe('demo');
+    expect(controller.getState().status).toBe('polling');
+    const presence = bodies.filter((call) => call.url.endsWith('/presence'));
+    expect(JSON.parse(String(presence[0].body))).toEqual({ demoZoneKey: 'cdmx' });
+  });
+
+  it('sin soporte o con contexto inseguro tampoco se rompe', async () => {
+    for (const status of ['unsupported', 'insecure', 'unavailable']) {
+      const server = makeServer();
+      const { controller, bodies } = makeGeoController(server, async () => ({ status }));
+      expect(await controller.start(), status).toBe(true);
+      expect(controller.getState().location).toBe('demo');
+      const presence = bodies.filter((call) => call.url.endsWith('/presence'));
+      expect(JSON.parse(String(presence[0].body))).toEqual({ demoZoneKey: 'cdmx' });
+    }
+  });
+
+  it('un punto fuera de la zona demo re-registra con zona y deja el aviso', async () => {
+    let calls = 0;
+    const server = makeServer({
+      'PUT /api/presence': () => {
+        calls += 1;
+        const fallback = calls === 1;
+        return {
+          status: 200,
+          body: JSON.stringify({
+            profileId: 'mx-p05',
+            regionKey: 'mx',
+            zoneKey: fallback ? null : 'cdmx',
+            online: true,
+            fallbackRequired: fallback,
+          }),
+        };
+      },
+    });
+    // Buenos Aires: el punto existe, pero el catálogo no tiene esa zona.
+    const { controller, bodies } = makeGeoController(server, async () => ({
+      status: 'ok',
+      point: { lat: -34.5889, lng: -58.4306 },
+    }));
+
+    expect(await controller.start()).toBe(true);
+    expect(controller.getState().location).toBe('demo');
+    expect(controller.getState().notice).toBe('outside-zone');
+
+    const presence = bodies.filter((call) => call.url.endsWith('/presence'));
+    expect(presence).toHaveLength(2);
+    expect(JSON.parse(String(presence[1].body))).toEqual({ demoZoneKey: 'cdmx' });
+  });
+
+  it('el latido repite la presencia sin volver a pedir el punto', async () => {
+    vi.useFakeTimers();
+    const server = makeServer();
+    let geoCalls = 0;
+    const urls: string[] = [];
+    const controller = createLiveController({
+      settings: SETTINGS,
+      fetchImpl: (async (url: string, init?: { method?: string; body?: string }) => {
+        urls.push(url);
+        return server.fetchImpl(url as never, init as never);
+      }) as never,
+      createEventSource: () => null,
+      requestPoint: async () => {
+        geoCalls += 1;
+        return GPS;
+      },
+      pollMs: 1_000,
+      heartbeatMs: 50,
+    });
+
+    await controller.start();
+    await vi.advanceTimersByTimeAsync(60);
+    expect(geoCalls).toBe(1);
+    expect(urls.filter((url) => url.endsWith('/presence')).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('el botón de ubicación reintenta el punto y puede pasar de demo a GPS', async () => {
+    const server = makeServer();
+    let attempt = 0;
+    const { controller } = makeGeoController(server, async () => {
+      attempt += 1;
+      return attempt === 1 ? { status: 'denied' } : GPS;
+    });
+
+    await controller.start();
+    expect(controller.getState().location).toBe('demo');
+
+    await controller.requestLocation();
+    expect(controller.getState().location).toBe('gps');
+  });
+});

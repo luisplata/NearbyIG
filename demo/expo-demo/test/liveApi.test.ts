@@ -169,3 +169,65 @@ describe('cliente de la API', () => {
     expect(await api.streamTicket()).toBe('');
   });
 });
+
+describe('presencia', () => {
+  it('con punto manda `point` y devuelve la proyección sin coordenadas', async () => {
+    const { fetchImpl, calls } = recorder(() => ({
+      status: 200,
+      body: JSON.stringify({
+        profileId: 'mx-p05',
+        regionKey: 'mx',
+        zoneKey: 'cdmx',
+        online: true,
+        fallbackRequired: false,
+      }),
+    }));
+    const api = createLiveApi({ baseUrl: '/api', fetchImpl });
+    const presence = await api.presence({ point: { lat: 19.432608, lng: -99.13321 } });
+
+    expect(calls[0].method).toBe('PUT');
+    expect(calls[0].url).toBe('/api/presence');
+    expect(JSON.parse(String(calls[0].body))).toEqual({
+      point: { lat: 19.432608, lng: -99.13321 },
+    });
+    expect(presence).toEqual({
+      regionKey: 'mx',
+      zoneKey: 'cdmx',
+      online: true,
+      fallbackRequired: false,
+    });
+  });
+
+  it('con zona demo manda sólo `demoZoneKey`: nunca las dos cosas', async () => {
+    const { fetchImpl, calls } = recorder(() => ({
+      status: 200,
+      body: JSON.stringify({
+        profileId: 'mx-p05',
+        regionKey: 'mx',
+        zoneKey: 'cdmx',
+        online: true,
+        fallbackRequired: false,
+      }),
+    }));
+    const api = createLiveApi({ baseUrl: '/api', fetchImpl });
+    await api.presence({ demoZoneKey: 'cdmx' });
+    expect(JSON.parse(String(calls[0].body))).toEqual({ demoZoneKey: 'cdmx' });
+  });
+
+  it('un punto fuera de zona se lee como fallback, no como error', async () => {
+    const { fetchImpl } = recorder(() => ({
+      status: 200,
+      body: JSON.stringify({
+        profileId: 'mx-p05',
+        regionKey: 'mx',
+        zoneKey: null,
+        online: true,
+        fallbackRequired: true,
+      }),
+    }));
+    const api = createLiveApi({ baseUrl: '/api', fetchImpl });
+    const presence = await api.presence({ point: { lat: -34.5889, lng: -58.4306 } });
+    expect(presence.fallbackRequired).toBe(true);
+    expect(presence.zoneKey).toBeNull();
+  });
+});

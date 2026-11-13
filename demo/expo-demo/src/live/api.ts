@@ -51,6 +51,22 @@ export type DiscoveryQuery = {
   online?: boolean;
 };
 
+/**
+ * `PresenceUpdate` del contrato: **exactamente uno** de `point` o
+ * `demoZoneKey`. El punto va y no vuelve: la respuesta es `PresenceState`.
+ */
+export type PresenceTarget =
+  | { readonly point: { readonly lat: number; readonly lng: number } }
+  | { readonly demoZoneKey: string };
+
+/** `PresenceState` (lo que sale): región y zona derivadas, sin coordenadas. */
+export type PresenceState = {
+  regionKey: string;
+  zoneKey: string | null;
+  online: boolean;
+  fallbackRequired: boolean;
+};
+
 export type LiveApi = {
   readonly baseUrl: string;
   setToken(token: string | null): void;
@@ -58,7 +74,8 @@ export type LiveApi = {
   claimSlot(regionKey: string, demoSlot: number): Promise<LiveSession>;
   takeover(regionKey: string, demoSlot: number): Promise<LiveSession>;
   logout(): Promise<void>;
-  presence(demoZoneKey: string): Promise<void>;
+  /** `PUT /presence`: punto privado o zona demo, nunca los dos. */
+  presence(target: PresenceTarget): Promise<PresenceState>;
   listProfiles(regionKey: string): Promise<LiveProfileRow[]>;
   discovery(query: DiscoveryQuery): Promise<LiveProfileRow[]>;
   streamTicket(): Promise<string>;
@@ -259,8 +276,20 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
         token = null;
       }
     },
-    presence: async (demoZoneKey) => {
-      await request('/presence', { method: 'PUT', body: { demoZoneKey } });
+    presence: async (target) => {
+      const body =
+        'point' in target ? { point: { lat: target.point.lat, lng: target.point.lng } } : target;
+      const payload = (await request('/presence', { method: 'PUT', body })) as Record<
+        string,
+        unknown
+      > | null;
+      const zoneKey = payload?.['zoneKey'];
+      return {
+        regionKey: readString(payload ?? {}, 'regionKey'),
+        zoneKey: typeof zoneKey === 'string' ? zoneKey : null,
+        online: readBool(payload ?? {}, 'online'),
+        fallbackRequired: readBool(payload ?? {}, 'fallbackRequired'),
+      };
     },
     listProfiles: async (regionKey) =>
       readRows(await request(`/demo/profiles${queryString({ regionKey })}`), 'profiles'),
