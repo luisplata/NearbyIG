@@ -1,0 +1,58 @@
+name: contract
+
+# Gate del contrato, separado del workflow de Pages: acá no se publica nada,
+# sólo se verifica lo mismo que un reviewer corre en local (`npm run contract:check`),
+# sin server, sin DB y sin secretos.
+#
+# Node 22 es el mismo de pages.yml (y el que exige `engines` en package.json).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'contract/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/contract.yml'
+  pull_request:
+    paths:
+      - 'contract/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install tooling
+        run: npm ci
+
+      # validate → test → git diff --exit-code. El detalle vive en el script,
+      # no en el YAML: el workflow no duplica pasos del gate.
+      - name: Contract gate
+        run: npm run contract:check
+
+      # El contrato vive al lado del tooling de la demo: si este workflow corre,
+      # el mock tiene que seguir verde.
+      - name: Test tooling (mock intacto)
+        run: npm run test:scripts

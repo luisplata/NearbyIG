@@ -5,14 +5,35 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 /**
- * El deploy es un contrato: un solo workflow, base path resuelto antes de los
- * builds, gate antes del upload y permisos de Pages sólo en el job de deploy.
+ * El deploy es un contrato: un solo workflow **de Pages**, base path resuelto antes
+ * de los builds, gate antes del upload y permisos de Pages sólo en el job de deploy.
  * Estos checks son estáticos: no reemplazan la corrida real en Actions.
+ *
+ * Otros workflows están permitidos mientras no publiquen Pages. `contract.yml`, por
+ * ejemplo, sólo corre el gate del contrato: leer el directorio entero no dice nada
+ * sobre quién deploya, así que la regla se expresa sobre lo que el workflow hace.
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WORKFLOWS = join(ROOT, '.github', 'workflows');
-const source = readFileSync(join(WORKFLOWS, 'pages.yml'), 'utf8');
+const PAGES_WORKFLOW = 'pages.yml';
+const source = readFileSync(join(WORKFLOWS, PAGES_WORKFLOW), 'utf8');
+const workflowFiles = () => readdirSync(WORKFLOWS).filter((file) => /\.ya?ml$/.test(file));
+
+/**
+ * Marcadores de un workflow que publica Pages: desplegar, subir el artefacto, pedir
+ * el permiso o declarar el environment del deploy. `pages: read` también cuenta:
+ * un workflow que lee Pages es un workflow de Pages, y acá hay uno solo.
+ */
+const PAGES_MARKERS = [
+  { pattern: /uses:\s*actions\/deploy-pages@/, label: 'usa actions/deploy-pages' },
+  { pattern: /uses:\s*actions\/upload-pages-artifact@/, label: 'usa actions/upload-pages-artifact' },
+  { pattern: /^\s+pages:\s*(read|write)\s*$/m, label: 'declara permisos de Pages' },
+  {
+    pattern: /^\s+environment:\s*\n\s+name:\s*github-pages\s*$/m,
+    label: 'declara el environment github-pages',
+  },
+];
 
 /** Devuelve el bloque de un job (desde su clave hasta el próximo job de nivel 2). */
 function job(name) {
@@ -23,11 +44,37 @@ function job(name) {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
-test('hay un único workflow de Pages y no habilita el sitio', () => {
-  const files = readdirSync(WORKFLOWS).filter((file) => /\.ya?ml$/.test(file));
-  assert.deepEqual(files, ['pages.yml'], 'debe existir un solo workflow de Pages');
+test('pages.yml es el workflow que publica Pages y no habilita el sitio', () => {
+  assert.ok(workflowFiles().includes(PAGES_WORKFLOW), `falta ${PAGES_WORKFLOW}`);
+  // El guard no puede ser vacío: el dueño del deploy tiene que deployar de verdad.
+  assert.match(source, /actions\/deploy-pages@v4/, 'pages.yml debe desplegar con actions/deploy-pages');
   assert.ok(!/enablement:\s*true/.test(source), 'el workflow no debe habilitar Pages');
   assert.ok(!/enable-pages|create-pages-site|POST \/repos\/.*\/pages/.test(source), 'sin pasos que creen el sitio');
+});
+
+test('ningún otro workflow publica Pages ni pide sus permisos', () => {
+  for (const file of workflowFiles().filter((name) => name !== PAGES_WORKFLOW)) {
+    const content = readFileSync(join(WORKFLOWS, file), 'utf8');
+    for (const { pattern, label } of PAGES_MARKERS) {
+      assert.ok(!pattern.test(content), `${file} ${label}: el deploy de Pages es sólo de ${PAGES_WORKFLOW}`);
+    }
+  }
+});
+
+test('el gate del contrato corre en su propio workflow, con el Node de Pages', () => {
+  const contract = readFileSync(join(WORKFLOWS, 'contract.yml'), 'utf8');
+  const pagesNode = /node-version:\s*([0-9.]+)/.exec(source)?.[1];
+  assert.ok(pagesNode, 'pages.yml debe fijar node-version');
+
+  for (const command of ['npm ci', 'npm run contract:check', 'npm run test:scripts']) {
+    assert.ok(contract.includes(command), `contract.yml no corre "${command}"`);
+  }
+  assert.match(contract, /permissions:\n {2}contents: read\n/, 'contract.yml sólo necesita leer el repo');
+  assert.match(contract, /concurrency:\n {2}group: /, 'contract.yml debe cancelar runs viejos del mismo ref');
+  assert.ok(
+    contract.includes(`node-version: ${pagesNode}`),
+    `contract.yml debe usar Node ${pagesNode}, el mismo que pages.yml`,
+  );
 });
 
 test('dispara en push a main, PR y ejecución manual', () => {

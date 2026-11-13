@@ -31,6 +31,12 @@ pinneadas: `@redocly/cli` y `yaml`).
 `contract:check` es el gate. Suma un guard por PR: seeds en PR7, `generate:check`
 y `typecheck` en PR8.
 
+Corre en CI en `.github/workflows/contract.yml`, un workflow propio: `push` a `main`
+y PRs que toquen `contract/`, `package.json`, `package-lock.json` o el workflow.
+Permisos mínimos (`contents: read`) y `concurrency` por ref. El workflow de Pages
+(`pages.yml`) no se toca y sigue siendo el único que publica Pages; un test lo
+verifica en `scripts/lib/workflow.test.mjs`.
+
 ## Estructura
 
 ```text
