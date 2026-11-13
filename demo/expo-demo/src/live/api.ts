@@ -197,7 +197,12 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
   let token: string | null = null;
 
   const headers = (withBody: boolean): Record<string, string> => {
-    const result: Record<string, string> = { accept: 'application/json' };
+    const result: Record<string, string> = {
+      accept: 'application/json',
+      // ngrok free sirve un interstitial HTML a los navegadores. El header lo
+      // saltea y el backend lo ignora; sin esto el JSON llega como HTML.
+      'ngrok-skip-browser-warning': '1',
+    };
     if (withBody) {
       result['content-type'] = 'application/json';
     }
