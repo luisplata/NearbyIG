@@ -20,7 +20,7 @@ export const QUICK_REPLY_KEYS = ['chat.self.1', 'chat.self.2', 'chat.self.3'] as
 export function ChatScreen() {
   const { state, dispatch } = useDemo();
   const chatId = state.chatId;
-  const profile = profileById(chatId);
+  const profile = profileById(chatId, state.catalog);
   if (chatId === null || profile === null) {
     return null;
   }

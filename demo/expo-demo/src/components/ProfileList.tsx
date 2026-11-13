@@ -1,9 +1,8 @@
 import { ScrollView, StyleSheet } from 'react-native';
 
 import { fmt } from '../generated/copy';
-import type { Profile } from '../generated/fixtures';
 import { avatarState } from '../state/selectors';
-import type { DemoState } from '../state/types';
+import type { DemoState, UiProfile } from '../state/types';
 import { space } from '../theme/theme';
 
 import { EmptyState } from './EmptyState';
@@ -20,8 +19,8 @@ export function ProfileList({
   onClearFilters,
 }: {
   state: DemoState;
-  profiles: Profile[];
-  onOpen: (profile: Profile) => void;
+  profiles: UiProfile[];
+  onOpen: (profile: UiProfile) => void;
   onClearFilters: () => void;
 }) {
   if (profiles.length === 0) {

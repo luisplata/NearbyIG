@@ -4,10 +4,10 @@ import { Animated, Easing, StyleSheet, Text, View, type LayoutChangeEvent } from
 import Svg, { Path } from 'react-native-svg';
 
 import { fmt } from '../generated/copy';
-import type { Profile } from '../generated/fixtures';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { MapBasemap } from '../map/MapBasemap';
 import { showsRealTiles, type MapPhase } from '../map/mapStatus';
+import type { UiProfile } from '../state/types';
 import { colors, fontSize, fontFamily, lineHeight, mapScrim, radii, space } from '../theme/theme';
 
 import { Chip } from './Chip';
@@ -31,9 +31,9 @@ export function RadarMapView({
   radiusM,
   onOpen,
 }: {
-  profiles: Profile[];
+  profiles: UiProfile[];
   radiusM: number;
-  onOpen: (profile: Profile) => void;
+  onOpen: (profile: UiProfile) => void;
 }) {
   const reduced = useReducedMotion();
   const spin = useRef(new Animated.Value(0)).current;

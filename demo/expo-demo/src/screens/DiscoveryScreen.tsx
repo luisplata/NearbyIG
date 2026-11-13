@@ -2,10 +2,10 @@ import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
-import type { Profile } from '../generated/fixtures';
 import { useDemo } from '../state/DemoProvider';
 import { formatRadius } from '../state/format';
 import { visibleProfiles } from '../state/selectors';
+import type { UiProfile } from '../state/types';
 import { colors, fontSize, space, text } from '../theme/theme';
 
 import { BottomNav } from '../components/BottomNav';
@@ -32,7 +32,7 @@ export function DiscoveryScreen() {
     state.filters.verifiedOnly ||
     state.filters.onlineOnly;
 
-  const onOpen = (profile: Profile): void => {
+  const onOpen = (profile: UiProfile): void => {
     dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: profile.id });
   };
 

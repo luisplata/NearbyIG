@@ -7,9 +7,11 @@ import type {
   ChatMessage,
   DemoEffect,
   DemoNotification,
+  DemoSource,
   DemoState,
   DiscoveryFilters,
   ReduceResult,
+  UiProfile,
 } from './types';
 
 const timers = fixtures.timers;
@@ -53,11 +55,22 @@ export function cloneState(state: DemoState): DemoState {
     notifSeq: state.notifSeq,
     toastSeq: state.toastSeq,
     replyCursor: { ...state.replyCursor },
+    catalog: state.catalog,
+    source: state.source,
   };
 }
 
-/** Estado inicial derivado del dataset: refresh, RESET y primer arranque. */
-export function initialState(): DemoState {
+/**
+ * Estado inicial derivado del dataset: refresh, RESET y primer arranque.
+ *
+ * `catalog` y `source` entran por parámetro porque son el dataset, no estado de
+ * usuario: `RESET` reinicia la demo **sobre el catálogo activo** en vez de
+ * arrastrar al usuario de vuelta al mock en medio de una sesión live.
+ */
+export function initialState(
+  catalog: readonly UiProfile[] = fixtures.profiles,
+  source: DemoSource = 'mock',
+): DemoState {
   return {
     view: 'list',
     overlay: null,
@@ -87,6 +100,8 @@ export function initialState(): DemoState {
     notifSeq: 0,
     toastSeq: 0,
     replyCursor: {},
+    catalog,
+    source,
   };
 }
 
@@ -229,7 +244,7 @@ export function reduce(state: DemoState, action: DemoAction): ReduceResult {
 
     case 'SEND_PING': {
       const id = action.profileId;
-      if (profileById(id) === null) {
+      if (profileById(id, state.catalog) === null) {
         return noop(state);
       }
       if (
@@ -475,7 +490,7 @@ export function reduce(state: DemoState, action: DemoAction): ReduceResult {
     }
 
     case 'RESET':
-      return { state: initialState(), effects: [] };
+      return { state: initialState(state.catalog, state.source), effects: [] };
   }
 }
 
@@ -486,7 +501,7 @@ function timerIncomingPing(state: DemoState, id: string): ReduceResult {
     state.incomingPings.includes(id) ||
     state.matches.includes(id) ||
     state.pingsSent.includes(id) ||
-    profileById(id) === null
+    profileById(id, state.catalog) === null
   ) {
     return noop(state);
   }

@@ -2,10 +2,10 @@ import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
-import type { Profile } from '../generated/fixtures';
 import { useDemo } from '../state/DemoProvider';
 import { formatDistance } from '../state/format';
 import { profileById } from '../state/selectors';
+import type { UiProfile } from '../state/types';
 import { colors, fontSize, radii, space, text } from '../theme/theme';
 
 import { Avatar } from '../components/Avatar';
@@ -22,13 +22,13 @@ import { Icon } from '../components/Icon';
 export function PingsScreen() {
   const { state } = useDemo();
   const incoming = state.incomingPings.flatMap((id) => {
-    const profile = profileById(id);
+    const profile = profileById(id, state.catalog);
     return profile === null ? [] : [profile];
   });
   // Un ping enviado sigue "esperando respuesta" hasta que hay match (ahí la
   // conversación vive en el chat) o el perfil se bloquea.
   const sent = state.pingsSent.flatMap((id) => {
-    const profile = profileById(id);
+    const profile = profileById(id, state.catalog);
     if (profile === null || state.matches.includes(id) || state.blocked.includes(id)) {
       return [];
     }
@@ -73,7 +73,7 @@ function Card({
   subtitle,
   children,
 }: {
-  profile: Profile;
+  profile: UiProfile;
   subtitle: string;
   children?: ReactNode;
 }) {
@@ -95,7 +95,7 @@ function Card({
   );
 }
 
-function ReceivedCard({ profile }: { profile: Profile }) {
+function ReceivedCard({ profile }: { profile: UiProfile }) {
   const { dispatch } = useDemo();
   return (
     <Card profile={profile} subtitle={`${fmt('notif.ping')} · ${formatDistance(profile.distanceM)}`}>
@@ -120,7 +120,7 @@ function ReceivedCard({ profile }: { profile: Profile }) {
   );
 }
 
-function SentCard({ profile }: { profile: Profile }) {
+function SentCard({ profile }: { profile: UiProfile }) {
   const status = fmt('ping.sentStatus');
   return (
     <Card profile={profile} subtitle={formatDistance(profile.distanceM)}>

@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
-import type { Profile } from '../generated/fixtures';
+import type { UiProfile } from '../state/types';
 import { colors, fontSize, space, text } from '../theme/theme';
 
 import { Avatar } from './Avatar';
@@ -16,7 +16,7 @@ export function MatchOverlay({
   onOpenChat,
   onDismiss,
 }: {
-  profile: Profile;
+  profile: UiProfile;
   onOpenChat: () => void;
   onDismiss: () => void;
 }) {

@@ -7,6 +7,35 @@ import type { Gender, Intention } from '../generated/fixtures';
 
 export type DemoView = 'radar' | 'map' | 'list';
 
+/** Origen del catálogo de descubrimiento: dataset del build o backend live. */
+export type DemoSource = 'mock' | 'live';
+
+/**
+ * Forma en la que la UI consume un perfil: los 13 campos del dataset
+ * (`fixtures.profiles[]`), que son los mismos 13 que proyecta
+ * `ProfileSummary` del contrato. El backend agrega `regionKey`, `demoSlot`,
+ * `sourceType` e `inUse`; eso no lo dibuja la tarjeta ni el radar, así que el
+ * adapter live lo descarta en vez de ensuciar la UI con identidad de slot.
+ *
+ * No se usa `Profile` (el tipo literal derivado de `fixtures`) porque el modo
+ * live entrega números arbitrarios: `distanceM: 240 | 480 | …` no admite 1060.
+ */
+export type UiProfile = {
+  id: string;
+  nickname: string;
+  initials: string;
+  gender: Gender;
+  intention: Intention;
+  verified: boolean;
+  online: boolean;
+  distanceM: number;
+  bearingDeg: number;
+  photoId: string;
+  instagramHandle: string;
+  statusKey: string;
+  bioKey: string;
+};
+
 /** Diez overlays: el inventario de CONTRACT.md §6, incluida la bandeja de pings. */
 export type DemoOverlay =
   | 'profile'
@@ -83,6 +112,14 @@ export type DemoState = {
   notifSeq: number;
   toastSeq: number;
   replyCursor: Record<string, number>;
+  /**
+   * Dataset sobre el que corre la máquina de estados. El mock lo fija en
+   * `fixtures.profiles`; el modo live lo cambia por la última foto de
+   * `/discovery`. No entra en `projectState`: el golden de paridad no lo ve.
+   */
+  catalog: readonly UiProfile[];
+  /** Origen del catálogo. La UI lo usa para el switch y los avisos. */
+  source: DemoSource;
 };
 
 /** Efecto a agendar por el store. El reducer nunca agenda nada. */
