@@ -153,9 +153,26 @@ filtra `expires_at > now()`; no hay cron ni barrido (ver "Decisiones").
 ### Eventos, bots y ghost (Sprint 2 · S2-B)
 
 Un humano con presencia viva arrastra **2 bots** derivados de su perfil
-(`<profileId>-b1`, `<profileId>-b2`) que orbitan su zona en 4 waypoints y avanzan
-uno cada 5 s. Lo que se mueve nunca es una coordenada en el wire: el evento lleva
-`profileId` + `distanceM`/`bearingDeg` contra el ancla de la zona.
+(`<profileId>-b1`, `<profileId>-b2`) que orbitan **su punto** en 4 waypoints y
+avanzan uno cada 5 s. Lo que se mueve nunca es una coordenada en el wire: el
+evento lleva `profileId` + `distanceM`/`bearingDeg` contra la presencia del dueño.
+
+**El ancla es la persona, no la ciudad.** Si el dueño tiene GPS, el loop se siembra
+a 900–1200 m de su punto con 300–449 m de radio; si eligió una zona demo (sin
+coordenada), el ancla es el centroide de la zona. `presence_anchors` (migración
+`004`) es la única definición de ese punto y la comparten reconciliación,
+waypoints y métricas. Antes el ancla era `ST_PointOnSurface(zones.polygon)` para
+todos: un humano en el norte de Bogotá (a ~7.7 km del centroide) veía sus propios
+bots a kilómetros, fuera de cualquier radio del radar, porque discovery mide desde
+su punto real.
+
+`bots.anchor` guarda el ancla con la que se sembró el loop y es privada. Sirve
+para decidir si un `PUT /presence` con otro punto obliga a reubicar: se recrea
+cuando el dueño se movió **más de 250 m** del ancla (menos que el radio mínimo del
+loop, para que el círculo siga rodeándolo) y no por el ruido del GPS. La
+comparación es `ST_Distance` en PostGIS, así que TypeScript no ve la distancia ni
+el punto. Cerca del borde del polígono no se recorta nada: el loop puede salir de
+la zona mientras la persona siga en el centro.
 
 Dos proyecciones del **mismo** log, con la misma secuencia para el mismo cursor:
 
@@ -294,17 +311,19 @@ documenta como exclusión server-side y por eso no hay ningún parámetro.
 
 #### Frames de distancia
 
-`GET /discovery` mide desde el observador. El payload de `profile.moved` sigue
-midiendo contra el ancla de la zona: un log compartido y append-only no puede
-llevar una medida por receptor sin guardar una coordenada (el contrato prohíbe que
-salga alguna) o recalcular en lectura (el mismo `seq` dejaría de valer lo mismo y
-el replay dejaría de ser honesto). El contrato de `ProfileMovedPayload` dice
-"relativos a quien recibe", así
-que el stream tiene una deuda de frame declarada. Consecuencia práctica para S3-B:
-**las posiciones del radar salen de discovery** (y se interpolan entre snapshots);
+`GET /discovery` mide desde el observador. El payload de `profile.moved` mide
+desde **el dueño del bot** (su presencia o el centroide de su zona demo): un log
+compartido y append-only no puede llevar una medida por receptor sin guardar una
+coordenada (el contrato prohíbe que salga alguna) o recalcular en lectura (el
+mismo `seq` dejaría de valer lo mismo y el replay dejaría de ser honesto). El
+contrato de `ProfileMovedPayload` dice "relativos a quien recibe", así que el
+stream conserva una deuda de frame declarada para el observador ajeno; lo que sí
+cambió con la migración `004` es que el dueño ve en su radar exactamente la
+distancia que publica el evento de sus propios bots. Consecuencia práctica: **las
+posiciones del radar salen de discovery** (y se interpolan entre snapshots);
 `profile.moved` sirve para saber que algo se movió, no para sumarle su `distanceM`
-a la fila de discovery. Las dos proyecciones **sí** coinciden en el conjunto de
-perfiles visibles, que es lo que este batch corrigió.
+a la fila de discovery de un tercero. Las dos proyecciones **sí** coinciden en el
+conjunto de perfiles visibles, que es lo que corrigió S3-A.
 
 ### CORS
 
@@ -390,6 +409,7 @@ Migraciones actuales:
 | 001 | `001_init.sql` | `regions`, `zones`, `profiles`, `sessions`, `stream_tickets`, `demo_meta` | dropea las 6 tablas |
 | 002 | `002_presence.sql` | `presence` (una fila por sesión, `Point,4326` privado, `expires_at`) | `DROP TABLE presence`; catálogo y sesiones intactas |
 | 003 | `003_bots_events.sql` | `bots`, `bot_waypoints`, `event_seq`, `events` | dropea las 4 tablas; catálogo, sesiones y presencia intactas |
+| 004 | `004_bots_anchor.sql` | `bots.anchor` (ancla privada del loop) + vista `presence_anchors` (punto del dueño: GPS o centroide de su zona) | `DROP VIEW presence_anchors` + `DROP COLUMN bots.anchor`; los bots siguen y el ticker los vuelve a sembrar con el ancla de zona |
 
 `002` es aditiva y reversible sin pérdida: la única tabla nueva referencia a
 `sessions` y `zones` (no al revés), así que el `down` no desarma nada. Aplicar y
@@ -406,6 +426,13 @@ docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate
 `profiles`/`zones` (nunca al revés). Un `003` revertido deja `GET /events` sin
 esquema (500) hasta volver a aplicarlo; no hay datos de catálogo que se pierdan y
 el log de la demo no es histórico (la retención ya lo recorta).
+
+`004` es aditiva pero **el orden del rollback importa**: el código que usa
+`presence_anchors` es el de este batch, así que revertir la migración con ese
+binario corriendo deja el ticker sin vista (`relation "presence_anchors" does not
+exist` en el `warn` del tick, sin tumbar la API). Para volver atrás hay que
+revertir el código primero (o aceptar que los bots no se resiembren hasta
+re-aplicarla). El `down` no borra sesiones, presencia ni catálogo.
 
 Dentro de Docker los comandos son los mismos, con `docker compose exec`:
 
@@ -439,10 +466,12 @@ Cubren health, sesión demo (claim, 409, invitado, slot vencido), perfiles
 (401/403/422, orden, shape exacto, cero coordenadas), logout (token revocado en el
 acto), tickets de stream (un solo uso), reset propio y global, presencia (punto
 real → zona, fallback, TTL, cambio de región, `DELETE`), bots (2 por humano,
-waypoints, ghost, cap de 6, aislamiento regional), descubrimiento (5 perfiles con
-los bots propios, medidas por observador, filtros y combinados, 422, ghost,
-región, cap y tope de página), eventos (ticket, cursor, replay, paridad
-SSE↔polling, dedupe), logs sin PII y migraciones/seeds idempotentes + `ST_Covers`.
+waypoints, ghost, cap de 6, aislamiento regional), ancla de los bots (la persona
+con GPS vs. el centroide de la zona demo, reubicación por desplazamiento),
+descubrimiento (5 perfiles con los bots propios, medidas por observador, filtros y
+combinados, 422, ghost, región, cap y tope de página), eventos (ticket, cursor,
+replay, paridad SSE↔polling, dedupe), logs sin PII y migraciones/seeds
+idempotentes + `ST_Covers`.
 
 Los tests del mundo (`bots`, `events`, `discovery`) empujan el vencimiento de las
 presencias del escenario con un `UPDATE` (`extendPresence`) para no depender de los
@@ -478,6 +507,7 @@ guarda antes y las repone al terminar.
 | `logs-no-pii.test.mjs` | ningún call site de log interpola token/ticket/coordenada/identidad |
 | `presence.test.mjs` | `PUT`/`DELETE /presence`: punto → zona, fallback, `demoZoneKey`, `ZONE_UNKNOWN`, cambio de región, TTL, 404 y upsert |
 | `bots.test.mjs` | 2 bots por humano con `profileId` estable, waypoints y métricas, bots propios dentro del stream, ghost, cap de 6, aislamiento mx/co |
+| `bots-anchor.test.mjs` | ancla en la persona (GPS en el norte de Bogotá), `demoZoneKey` ⇒ centroide, reubicación por desplazamiento > 250 m, ruido de GPS que no recrea, borde del polígono sin recorte |
 | `discovery.test.mjs` | 5 perfiles (1 humano + 4 bots), medidas por observador vs ancla, radio, filtros y combinados, 422, ghost, región, cap de 6 y tope de 10 |
 | `events.test.mjs` | ticket de un uso, `Last-Event-ID`, cursor y `limit` 422/410, página vacía, paridad SSE↔polling, `profile.presence`, dedupe |
 | `migrations-seeds.test.mjs` | idempotencia de migraciones y seeds, `ST_Covers` |
@@ -551,8 +581,8 @@ DTOs de la demo. El shape es propio y sólo lo consumen Docker y el runbook.
 | **Una sola proyección de eventos** | SSE y polling llaman a `EventsService.readPage`. La paridad no se mantiene sincronizando dos implementaciones: hay una. El SSE pagina el log cada 250 ms después del replay y manda `: keepalive` cada 15 s. |
 | **`seq` por región, no un reloj** | `event_seq` se incrementa con `UPDATE … RETURNING` (serializa la fila y no reparte el mismo número). `occurredAt` viaja porque el contrato lo exige, pero no ordena: entre requests concurrentes el reloj se invierte. |
 | **Ticker del mundo, un solo proceso** | El movimiento se escribe una vez y todas las lecturas ven lo mismo; si se calculara al leer, dos clientes con el mismo cursor verían posiciones distintas para el mismo `seq`. Con más de una instancia hace falta un job con lock (límite anotado, no resuelto antes de tener el problema). |
-| **Bots derivados, geometría en PostGIS** | El `profileId` del bot es `<owner>-b1/b2` (estable entre logins del mismo slot) y su centro/waypoints se calculan en SQL: TypeScript nunca ve una coordenada. `distanceM`/`bearingDeg` se miden contra el ancla de la zona (`ST_PointOnSurface`), la misma referencia estable del catálogo, así el payload no depende de quién lo lee. |
-| **Discovery mide desde el observador** | `GET /discovery` es una proyección por sesión: `ST_Distance`/`ST_Azimuth` desde la presencia viva (o el ancla de su zona demo, que es el origen del radar) hasta cada perfil, redondeados half-up. Un perfil de zona demo se ubica en el ancla + su vector de catálogo, que es su posición autorada. Es la deuda que S2-B dejó abierta (sus `profile.moved` miden desde el ancla) corregida donde el cliente arma el radar. |
+| **Bots derivados, geometría en PostGIS** | El `profileId` del bot es `<owner>-b1/b2` (estable entre logins del mismo slot) y su centro/waypoints se calculan en SQL: TypeScript nunca ve una coordenada. El ancla es **la persona** (`presence_anchors`: su punto GPS o el centroide de su zona demo) y `distanceM`/`bearingDeg` se miden contra ella, así el payload no depende de quién lo lee. `bots.anchor` guarda el ancla usada y la reubicación por desplazamiento (> 250 m) se decide con `ST_Distance`, también en SQL. |
+| **Discovery mide desde el observador** | `GET /discovery` es una proyección por sesión: `ST_Distance`/`ST_Azimuth` desde la presencia viva (o el ancla de su zona demo, que es el origen del radar) hasta cada perfil, redondeados half-up. Un perfil de zona demo se ubica en el ancla + su vector de catálogo, que es su posición autorada. Desde la migración `004` los bots orbitan a su dueño, así que el dueño ve sus propios bots a la misma distancia que publica su `profile.moved`; para un observador ajeno el frame sigue siendo el observador (ver "Frames de distancia"). |
 | **Una sola definición de "bots visibles"** | `BotsService.visibleBotIds` (propios primero, cap 6, corte por `bot_profile_id`) la usan el stream y discovery. Dos consultas con el mismo nombre se desincronizan; una sola no. |
 | **`distanceM` proyectado a la banda 200–5000** | El schema congelado no tiene dónde poner "a 30 m" y el cliente valida 200–5000. El clamp es monótono (no reordena: el orden se calcula sobre la medida real) y está aislado en la proyección, no en el filtro del radio. |
 | **Ghost = `DELETE /presence`** | Es la superficie que el contrato ya tiene; apagar la presencia oculta al humano y retira sus 2 bots de las lecturas. Un ghost que mantenga la presencia viva pide un delta de contrato (S5). |
@@ -567,7 +597,7 @@ DTOs de la demo. El shape es propio y sólo lo consumen Docker y el runbook.
 | `sessions` | `session_id` | un solo slot vivo por región (índice único parcial); invitado ⇔ slot `NULL` |
 | `stream_tickets` | `ticket_id` | hash del ticket, no el valor (S2) |
 | `presence` | `session_id` | **una fila por sesión** (upsert); `geometry(Point, 4326)` privado + `expires_at` de 12 s; zona ⇔ región por FK compuesto |
-| `bots` | `(region_key, bot_profile_id)` | 2 por humano (`UNIQUE (region_key, owner_profile_id, bot_index)`); `<owner>-b1/b2`; centro/posición privados + `distanceM`/`bearingDeg` publicables |
+| `bots` | `(region_key, bot_profile_id)` | 2 por humano (`UNIQUE (region_key, owner_profile_id, bot_index)`); `<owner>-b1/b2`; `anchor`/centro/posición privados + `distanceM`/`bearingDeg` publicables |
 | `bot_waypoints` | `(region_key, bot_profile_id, waypoint_index)` | 4 waypoints por bot, `geometry(Point, 4326)` privados; cascada con el bot |
 | `event_seq` | `region_key` | contador monotónico por región (el orden de `id`) |
 | `events` | `(region_key, seq)` | log de las dos proyecciones; `payload` jsonb sin coordenadas; retención de 5000 por región |
@@ -577,8 +607,10 @@ El slot se reclama con la base, no con un `SELECT` previo: si dos navegadores pi
 el mismo, el índice único parcial decide y el segundo recibe `409 PROFILE_IN_USE`.
 
 S3-A no agrega tablas ni columnas: `GET /discovery` es una **proyección** sobre
-`profiles`, `sessions`, `presence`, `zones` y `bots`. No hay migración `004` en
-este batch.
+`profiles`, `sessions`, `presence`, `zones` y `bots`. La migración `004` sí es de
+S3-B: agrega `bots.anchor` (el ancla con la que se sembró el loop) y la vista
+`presence_anchors` (el punto de cada perfil, `Point,4326` privado, una fila por
+perfil). Nada de eso se proyecta en la API.
 
 ## Reset
 
@@ -640,11 +672,13 @@ caracteres (`src/config/env.ts` falla en el boot, no en la primera request).
   "bloqueados" como exclusión server-side, pero no hay tabla `blocks` (S5). Hasta
   entonces no hay pares bloqueados que excluir; el `WHERE` está listo para sumar
   la condición sin cambiar la forma de la respuesta.
-- **El stream de eventos mide desde el ancla, discovery desde el observador.** Un
-  log compartido no puede llevar una medida por receptor sin guardar una
-  coordenada o romper el replay. El cliente arma posiciones con discovery; la
-  deuda de frame de `profile.moved` (el contrato dice "relativos a quien recibe")
-  es de S3-B/S4 y pide `events.position` privado + proyección por receptor.
+- **El stream de eventos mide desde el dueño del bot, discovery desde el
+  observador.** Un log compartido no puede llevar una medida por receptor sin
+  guardar una coordenada o romper el replay. El cliente arma posiciones con
+  discovery; la deuda de frame de `profile.moved` para un observador ajeno (el
+  contrato dice "relativos a quien recibe") es de S4 y pide `events.position`
+  privado + proyección por receptor. El dueño sí ve en su radar la misma distancia
+  que publica el evento de sus propios bots.
 - **`maxItems: 10` acota la página de discovery.** Con la región llena (9 humanos
   + 6 bots) se devuelven 10 filas: gana el más cercano. No hay cursor porque el
   contrato dice que una página es el resultado entero; si S4/S5 necesita más,
@@ -668,10 +702,16 @@ caracteres (`src/config/env.ts` falla en el boot, no en la primera request).
   con varias, cada proceso mueve bots y el log recibiría eventos duplicados (el
   avance es idempotente por `leg_started_at`, la emisión no). S6/S7: job aparte o
   `pg_advisory_lock` por tick.
-- **`distanceM`/`bearingDeg` de un bot son contra el ancla de la zona**, no contra
-  la presencia de cada observador. El contrato dice "relativos a quien recibe"; con
+- **`distanceM`/`bearingDeg` de un bot son contra la presencia de su dueño**, no
+  contra la de cada observador. El contrato dice "relativos a quien recibe"; con
   un log único por región, la única forma de que el mismo `seq` valga lo mismo para
-  todos es una referencia fija. El cálculo por observador es S3 (`/discovery`).
+  todos es una referencia fija, y la referencia natural de un bot es la persona
+  que lo arrastra. El cálculo por observador es `/discovery`.
+- **La posición privada de un bot puede caer fuera de su polígono.** Desde que el
+  ancla es la persona, un humano cerca del borde tiene bots que salen de la zona:
+  se aceptó a propósito (recortar el centro al polígono era lo que apilaba los bots
+  en el centroide). `bots.zone_key` sigue siendo la zona del dueño y no se usa para
+  contener la geometría, sólo para el fallback del ancla y para la FK.
 - **El ghost apaga también al humano.** `DELETE /presence` es la única superficie
   de pausa que el contrato tiene; si S5 pide "invisible pero online", primero hay
   que congelar el campo en `PresenceUpdate`.

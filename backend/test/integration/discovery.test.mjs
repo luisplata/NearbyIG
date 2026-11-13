@@ -191,14 +191,30 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
 
   test('radio: filtra por distancia real y no clampa fuera de rango', async () => {
     await renewScene();
-    // 1000 m deja entrar al humano de 945 m y a ningún bot (orbitan a 450 m o
-    // más del ancla, así que nunca caen dentro de 1000 m del observador).
-    const near = await waitForRows(observer.token, 1, { radiusM: 1000 });
-    assert.deepEqual(ids(near), [neighbour.profileId], 'el radio de 1000 m no cortó los bots');
-    assert.equal(near[0].distanceM, 945, 'la distancia proyectada no es la medida');
+    // El vecino está a 945 m del observador: un radio de 900 lo deja afuera y
+    // uno de 1000 lo incluye, así que el filtro es la distancia medida.
+    //
+    // Desde que los bots orbitan a su propio dueño (y no al ancla de la zona),
+    // los bots del vecino pueden caer cerca del observador: el borde del radio
+    // se fija sobre un sujeto con distancia conocida, no sobre "no hay bots".
+    const tight = await rows(observer.token, { radiusM: 900 });
+    assert.ok(!ids(tight).includes(neighbour.profileId), 'radiusM=900 no filtró al vecino de 945 m');
 
-    // 200 m (el mínimo del contrato) no deja entrar a nadie: nadie está a 200 m.
-    assert.deepEqual(await rows(observer.token, { radiusM: 200 }), [], 'el radio mínimo no filtró');
+    const page = await waitFor(
+      async () => {
+        const now = await rows(observer.token, { radiusM: 1000 });
+        const other = now.find((row) => row.profileId === neighbour.profileId);
+        return other === undefined ? null : now;
+      },
+      { label: 'el vecino de 945 m dentro del radio de 1000 m' },
+    );
+    assert.equal(
+      page.find((row) => row.profileId === neighbour.profileId).distanceM,
+      945,
+      'la distancia proyectada no es la medida',
+    );
+    assert.ok(page.every((row) => row.distanceM <= 1000), 'el radio devolvió una fila más lejana');
+
     // El default cubre la región entera.
     assert.equal((await waitForRows(observer.token, 5)).length, 5);
   });
@@ -282,7 +298,16 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
       verified: false,
       radiusM: 1000,
     });
-    assert.deepEqual(ids(combined2), [neighbour.profileId], 'combinado: radio + intención + género');
+    // Con los bots alrededor de su dueño, algunos del vecino pueden entrar en
+    // los 1000 m: lo que se fija es la intersección (toda fila cumple los
+    // filtros y el vecino sigue estando), no un conteo que dependía del ancla.
+    assert.ok(
+      combined2.every(
+        (row) => row.intention === 'friendship' && row.gender === 'male' && row.distanceM <= 1000,
+      ),
+      'combinado: radio + intención + género no es una intersección',
+    );
+    assert.ok(ids(combined2).includes(neighbour.profileId), 'el combinado perdió al vecino');
 
     // Y un filtro que excluye todo sin ser un error.
     const none = await rows(observer.token, { intention: 'networking', verified: true, radiusM: 200 });

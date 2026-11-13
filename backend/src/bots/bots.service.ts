@@ -25,7 +25,27 @@ const OWNER_VISIBLE = `
        AND s.expires_at > now()
   )`;
 
-/** Fila de la conciliación: una presencia viva con zona, de una sesión humana. */
+/**
+ * Cuánto puede alejarse la persona del ancla usada antes de resembrar el loop.
+ *
+ * Es **menor que el radio mínimo del loop** (300 m): mientras el desplazamiento
+ * no supere el umbral, el círculo sigue rodeando a la persona. Un `PUT
+ * /presence` llega en cada latido del navegador (cada pocos segundos, con metros
+ * de ruido del GPS), así que resembrar en cada cambio resetearía
+ * `waypoint_index` y `leg_started_at` en bucle y el radar vería saltos. El
+ * umbral es la histéresis que separa "ruido de GPS" de "me mudé".
+ *
+ * 250 m y no 300: en el peor caso la posición de un waypoint queda a
+ * 900 − 449 − desplazamiento del dueño, y con 300 eso son 151 m, debajo del piso
+ * de 200 m que impone `bots_distance_m_check`. Con 250 el peor caso es 201 m.
+ */
+const ANCHOR_DRIFT_M = 250;
+
+/**
+ * Fila de la conciliación: el dueño humano con presencia viva y zona cuyos bots
+ * faltan, están en otra zona o quedaron lejos de su persona. Todo lo demás se
+ * descarta en PostGIS, así que TypeScript nunca ve el ancla ni la distancia.
+ */
 interface LiveOwnershipRow {
   region_key: string;
   zone_key: string;
@@ -51,15 +71,16 @@ export interface MovedBot {
  * (ese es el ghost de S2 y el punto de enganche del de S5).
  *
  * **Geometría.** El centro del loop y los 4 waypoints se calculan **en PostGIS**,
- * no en TypeScript: acá nunca entra ni sale una coordenada. El bot orbita a
- * ~900–1200 m del ancla de la zona (`ST_PointOnSurface`) con un radio de
- * 300–450 m, así que su distancia al ancla queda siempre en el rango del
- * contrato (200–5000 m) sin recortes silenciosos.
+ * no en TypeScript: acá nunca entra ni sale una coordenada. El ancla es **la
+ * persona**, no la ciudad: si el dueño tiene presencia con GPS, el bot orbita a
+ * ~900–1200 m de su punto con un radio de 300–450 m; si eligió una zona demo
+ * (sin coordenada), el ancla es el centroide de esa zona
+ * (`ST_PointOnSurface`). `presence_anchors` es la única definición de ese punto.
  *
- * **Lo que sale.** `distanceM`/`bearingDeg` contra el ancla de la zona. Es la
- * misma referencia estable con la que están escritos los valores del catálogo,
- * así que el payload de un evento no depende de quién lo lee y SSE y polling
- * entregan el mismo objeto para el mismo `seq`.
+ * **Lo que sale.** `distanceM`/`bearingDeg` contra la presencia del dueño (o el
+ * centroide si no tiene GPS). La referencia sigue siendo fija para el mismo
+ * `seq` — el dueño no cambia mientras el evento existe —, así que el payload no
+ * depende de quién lo lee y SSE y polling entregan el mismo objeto.
  */
 @Injectable()
 export class BotsService {
@@ -74,34 +95,43 @@ export class BotsService {
    * Conciliación de cada tick: garantiza los 2 bots de cada presencia humana viva
    * y borra los de los dueños que ya no están.
    *
-   * Reconciliar (en vez de "crear si falta") resuelve el cambio de zona: si el
-   * humano se muda de zona demo, sus bots viejos no pueden quedarse orbitando la
-   * zona anterior, así que se retiran y se vuelven a sembrar en la nueva.
+   * Reconciliar (en vez de "crear si falta") resuelve tres cambios de estado con
+   * la misma regla: el humano se muda de zona demo, el humano pasa de zona demo
+   * a GPS (o al revés) y el humano se mueve lo suficiente como para que el loop
+   * deje de rodearlo. En los tres casos sus bots viejos no pueden quedarse donde
+   * estaban, así que se retiran y se vuelven a sembrar alrededor del ancla
+   * nueva. El caso "me moví 30 m" no resembra: ver `ANCHOR_DRIFT_M`.
+   *
+   * La decisión entera vive en PostGIS, en una sola consulta: cuántos bots hay,
+   * en qué zona y a qué distancia quedó el ancla guardada de la presencia
+   * actual. El `NOT (...)` la expresa como "no está consistente", que es lo que
+   * el loop de abajo consume.
    */
   async reconcile(): Promise<number> {
     const { rows } = await this.pool.query<LiveOwnershipRow>(
-      `SELECT p.region_key, p.zone_key, s.profile_id
-         FROM presence p
-         JOIN sessions s ON s.session_id = p.session_id
-        WHERE p.expires_at > now()
-          AND p.zone_key IS NOT NULL
-          AND s.revoked_at IS NULL
-          AND s.expires_at > now()
-          AND s.source_type = 'human'
-        ORDER BY p.region_key, s.profile_id`,
+      `SELECT a.region_key, a.zone_key, a.profile_id
+         FROM presence_anchors a
+        WHERE a.source_type = 'human'
+          AND NOT (
+            (SELECT count(*)
+               FROM bots b
+              WHERE b.region_key = a.region_key
+                AND b.owner_profile_id = a.profile_id) = $1
+            AND NOT EXISTS (
+              SELECT 1
+                FROM bots b
+               WHERE b.region_key = a.region_key
+                 AND b.owner_profile_id = a.profile_id
+                 AND (b.zone_key <> a.zone_key
+                      OR ST_Distance(b.anchor::geography, a.anchor::geography) > $2::float8)
+            )
+          )
+        ORDER BY a.region_key, a.profile_id`,
+      [this.config.botsPerHuman, ANCHOR_DRIFT_M],
     );
 
     let created = 0;
     for (const row of rows) {
-      const { rows: existing } = await this.pool.query<{ zone_key: string }>(
-        'SELECT zone_key FROM bots WHERE region_key = $1 AND owner_profile_id = $2',
-        [row.region_key, row.profile_id],
-      );
-      const consistent =
-        existing.length === this.config.botsPerHuman &&
-        existing.every((bot) => bot.zone_key === row.zone_key);
-      if (consistent) continue;
-
       await this.removeOwnerBots(row.region_key, row.profile_id);
       for (let index = 1; index <= this.config.botsPerHuman; index += 1) {
         await this.createBot(row.region_key, row.zone_key, row.profile_id, index);
@@ -121,6 +151,18 @@ export class BotsService {
   /**
    * Avanza un waypoint a los bots que ya cumplieron su tramo y devuelve los que
    * se movieron. El que emite es el ticker: acá no se escribe el log.
+   *
+   * `distanceM`/`bearingDeg` se miden **desde la presencia del dueño** (o el
+   * centroide de su zona si no tiene GPS), que es el mismo ancla con el que se
+   * sembró el loop. Antes se medían contra el centroide: un `profile.moved` de
+   * un bot del norte de Bogotá decía "a 9 km de mí" cuando el bot está a 1 km de
+   * su dueño. La referencia sigue siendo fija para el mismo `seq` (el dueño no
+   * se mueve mientras el evento existe), así que SSE y polling no divergen.
+   *
+   * `least/greatest` proyecta a la banda del contrato (200–5000) igual que
+   * discovery. No es decorativo: un dueño que se movió 250 m (por debajo del
+   * umbral de resembrado) puede dejar un waypoint a 201 m, pero nunca a 151, y
+   * el `CHECK` de la tabla no admite ese valor.
    */
   async advanceDue(): Promise<readonly MovedBot[]> {
     const { rows } = await this.pool.query<{
@@ -133,6 +175,7 @@ export class BotsService {
          SELECT b.region_key,
                 b.bot_profile_id,
                 b.zone_key,
+                b.owner_profile_id,
                 ((b.waypoint_index + 1) % 4)::smallint AS next_index
            FROM bots b
           WHERE b.leg_started_at <= now() - make_interval(secs => $1)
@@ -142,11 +185,15 @@ export class BotsService {
             SET waypoint_index = d.next_index,
                 position       = w.point,
                 leg_started_at = now(),
-                distance_m = round(
-                  ST_Distance(a.point::geography, w.point::geography)
-                )::int,
+                distance_m = least(
+                  5000,
+                  greatest(
+                    200,
+                    round(ST_Distance(a.ref::geography, w.point::geography))::int
+                  )
+                ),
                 bearing_deg = (
-                  (round(degrees(ST_Azimuth(a.point, w.point)))::int % 360) + 360
+                  (round(degrees(ST_Azimuth(a.ref, w.point)))::int % 360) + 360
                 ) % 360,
                 updated_at = now()
            FROM due d
@@ -155,8 +202,15 @@ export class BotsService {
             AND w.bot_profile_id = d.bot_profile_id
             AND w.waypoint_index = d.next_index
            JOIN LATERAL (
-             SELECT ST_PointOnSurface(z.polygon) AS point
+             -- La presencia viva del dueño, con el mismo desempate que la vista
+             -- presence_anchors; el centroide de su zona es el fallback de la
+             -- zona demo y de la carrera en la que la presencia vence dentro del
+             -- tick.
+             SELECT coalesce(a.anchor, ST_PointOnSurface(z.polygon)) AS ref
                FROM zones z
+               LEFT JOIN presence_anchors a
+                      ON a.region_key = d.region_key
+                     AND a.profile_id = d.owner_profile_id
               WHERE z.region_key = d.region_key
                 AND z.zone_key = d.zone_key
            ) a ON true
@@ -257,8 +311,17 @@ export class BotsService {
    *
    * `$3..$5` son derivas deterministas del perfil (`hash(region:profile:index)`):
    * mismo perfil ⇒ mismo centro, mismo radio y misma fase, aunque la API se
-   * reinicie. `$4` es el desplazamiento del centro respecto del ancla y `$5` la
-   * fase inicial del primer waypoint.
+   * reinicie. `$3` es la distancia del centro al ancla, `$4` la fase (también el
+   * rumbo del desplazamiento), `$5` el `profileId` del bot y `$8` el radio del
+   * loop.
+   *
+   * **El ancla es la persona.** `presence_anchors` devuelve su punto privado si
+   * tiene GPS y el centroide de su zona si eligió una zona demo; el `coalesce`
+   * con el centroide cubre además la carrera en la que la presencia vence entre
+   * la conciliación y este `INSERT`. No se recorta el punto al polígono: la
+   * geometría de un bot no tiene por qué caer dentro de la zona, sólo a una
+   * distancia razonable de la persona. Recortar era lo que dejaba a un humano
+   * del borde con sus bots apilados en el centroide.
    */
   private async createBot(
     regionKey: string,
@@ -267,53 +330,52 @@ export class BotsService {
     botIndex: number,
   ): Promise<void> {
     const seed = hashSeed(`${regionKey}:${ownerProfileId}:${botIndex}`);
-    const offsetM = 900 + (seed % 301); // 900–1200 m del ancla
+    const offsetM = 900 + (seed % 301); // 900–1200 m de la persona
     const radiusM = 300 + ((seed >>> 9) % 150); // 300–449 m de radio
     const phaseDeg = (seed >>> 17) % 360;
     const botProfileId = `${ownerProfileId}-b${botIndex}`;
 
     await this.pool.query(
       `WITH zone AS (
-         SELECT polygon, ST_PointOnSurface(polygon) AS anchor
+         SELECT ST_PointOnSurface(polygon) AS centroid
            FROM zones
           WHERE region_key = $1 AND zone_key = $2
+       ), anchor AS (
+         SELECT coalesce(a.anchor, z.centroid) AS point
+           FROM zone z
+           LEFT JOIN presence_anchors a
+                  ON a.region_key = $1
+                 AND a.profile_id = $6
        ), center AS (
-         SELECT CASE
-                  WHEN ST_Covers(
-                         zone.polygon,
-                         ST_Project(zone.anchor::geography, $3::float8, radians($4::float8))::geometry
-                       )
-                    THEN ST_Project(zone.anchor::geography, $3::float8, radians($4::float8))::geometry
-                  ELSE zone.anchor
-                END AS point,
-                zone.anchor AS anchor
-           FROM zone
+         SELECT a.point AS anchor,
+                ST_Project(a.point::geography, $3::float8, radians($4::float8))::geometry AS point
+           FROM anchor a
+       ), start AS (
+         SELECT c.anchor,
+                c.point AS center,
+                ST_Project(c.point::geography, $8::float8, radians($4::float8))::geometry AS point
+           FROM center c
        ), inserted AS (
          INSERT INTO bots (
            region_key, bot_profile_id, owner_profile_id, bot_index, zone_key,
-           center, position, waypoint_index, distance_m, bearing_deg
+           anchor, center, position, waypoint_index, distance_m, bearing_deg
          )
          SELECT $1, $5, $6, $7, $2,
-                c.point,
-                ST_Project(c.point::geography, $8::float8, radians($4::float8))::geometry,
+                s.anchor,
+                s.center,
+                s.point,
                 0,
-                round(
-                  ST_Distance(
-                    c.anchor::geography,
-                    ST_Project(c.point::geography, $8::float8, radians($4::float8))::geometry::geography
+                least(
+                  5000,
+                  greatest(
+                    200,
+                    round(ST_Distance(s.anchor::geography, s.point::geography))::int
                   )
-                )::int,
+                ),
                 (
-                  (round(
-                     degrees(
-                       ST_Azimuth(
-                         c.anchor,
-                         ST_Project(c.point::geography, $8::float8, radians($4::float8))::geometry
-                       )
-                     )
-                   )::int % 360) + 360
+                  (round(degrees(ST_Azimuth(s.anchor, s.point)))::int % 360) + 360
                 ) % 360
-           FROM center c
+           FROM start s
          RETURNING region_key, bot_profile_id, center
        ), waypoints AS (
          INSERT INTO bot_waypoints (region_key, bot_profile_id, waypoint_index, point)

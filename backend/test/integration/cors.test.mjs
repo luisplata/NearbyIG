@@ -105,6 +105,7 @@ describe('cors: allowlist del navegador', () => {
       'http://localhost:8081',
       'http://localhost:4173',
       'http://localhost:8080',
+      'https://luisplata.github.io',
     ]);
     // Los túneles se aceptan sólo en desarrollo/test: en producción la lista es
     // exactamente la declarada.
