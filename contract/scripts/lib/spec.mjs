@@ -77,34 +77,43 @@ export function resolvePointer(document, pointer, ref) {
   return node;
 }
 
-function resolveNode(node, fromFile, trail) {
+function resolveNode(node, fromFile, refTrail, label) {
   if (Array.isArray(node)) {
-    return node.map((item, index) => resolveNode(item, fromFile, `${trail}[${index}]`));
+    return node.map((item, index) => resolveNode(item, fromFile, refTrail, `${label}[${index}]`));
   }
   if (node === null || typeof node !== 'object') return node;
 
   if (typeof node.$ref === 'string') {
     const { file, pointer } = splitRef(node.$ref, fromFile);
     const refKey = `${file}#${pointer}`;
-    if (trail.includes(refKey)) {
-      throw new Error(`$ref circular: ${[...trail, refKey].join(' → ')}`);
+    // El ciclo se detecta sobre la **lista** de refs ya visitados, no sobre el
+    // string de la ruta: `region.yaml#/Region` es prefijo de
+    // `region.yaml#/RegionList`, y comparar substrings daba un falso circular en
+    // cuanto dos componentes compartían prefijo (`Foo` / `FooList`).
+    if (refTrail.includes(refKey)) {
+      throw new Error(`$ref circular: ${[...refTrail, refKey].join(' → ')}`);
     }
 
-    const target = resolveNode(resolvePointer(readYaml(file), pointer, node.$ref), file, [
-      ...trail,
-      refKey,
-    ]);
+    const target = resolveNode(
+      resolvePointer(readYaml(file), pointer, node.$ref),
+      file,
+      [...refTrail, refKey],
+      `${label} → ${node.$ref}`,
+    );
     const siblings = Object.entries(node).filter(([key]) => key !== '$ref');
     if (siblings.length === 0) return target;
     if (target === null || typeof target !== 'object' || Array.isArray(target)) {
       throw new Error(`$ref con hermanos sobre un valor no-objeto (${node.$ref})`);
     }
-    return { ...target, ...resolveNode(Object.fromEntries(siblings), fromFile, trail) };
+    return {
+      ...target,
+      ...resolveNode(Object.fromEntries(siblings), fromFile, refTrail, `${label} ($ref + hermanos)`),
+    };
   }
 
   const out = {};
   for (const [key, value] of Object.entries(node)) {
-    out[key] = resolveNode(value, fromFile, `${trail}.${key}`);
+    out[key] = resolveNode(value, fromFile, refTrail, `${label}.${key}`);
   }
   return out;
 }
@@ -117,7 +126,7 @@ function resolveNode(node, fromFile, trail) {
  */
 export function loadSpec({ file = SPEC_FILE } = {}) {
   const raw = readYaml(file);
-  const spec = resolveNode(raw, resolve(file), []);
+  const spec = resolveNode(raw, resolve(file), [], '#');
   return { file: resolve(file), raw, spec };
 }
 
