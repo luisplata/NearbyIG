@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import {
+  activeSlots,
   assertStackUp,
   deleteSessionsCreatedSince,
+  insertExpiredSession,
   listProfiles,
   openSession,
+  sessionRow,
   snapshotSessionIds,
 } from '../helpers.mjs';
 
@@ -89,6 +92,13 @@ describe('POST /auth/demo-session', () => {
       assert.ok([201, 409].includes(response.status), `slot ${demoSlot}: ${response.status}`);
     }
 
+    // Un invitado es el resultado de NO pedir slot. Pedir uno explícito sigue
+    // siendo un claim y responde 409: el invitado no puede colisionar con un
+    // perfil ni "colarse" en un slot ocupado.
+    const explicit = await openSession({ regionKey: 'co', demoSlot: 1 });
+    assert.equal(explicit.status, 409, JSON.stringify(explicit.body));
+    assert.equal(explicit.body.code, 'PROFILE_IN_USE');
+
     const guest = await openSession({ regionKey: 'co' });
     assert.equal(guest.status, 201, JSON.stringify(guest.body));
     assert.equal(guest.body.sourceType, 'guest');
@@ -103,7 +113,25 @@ describe('POST /auth/demo-session', () => {
       profiles.body.profiles.some((profile) => profile.profileId === guest.body.profileId),
       false,
     );
+    assert.equal((await activeSlots('co')).length, 10, 'el invitado no suma un slot ocupado');
   });
+
+  test('un slot con una sesión vencida se puede reclamar', async () => {
+    // El índice único de slot vivo sólo mira `revoked_at`: una fila vencida
+    // sigue ocupando el slot si nadie la limpia. El claim la revoca antes de
+    // insertar, así que el slot no queda bloqueado para siempre.
+    const expiredId = await insertExpiredSession('mx', 10);
+    const expired = await sessionRow(expiredId);
+    assert.equal(expired.revoked_at, null, 'la fila arranca vencida pero sin revocar');
+
+    const claimed = await openSession({ regionKey: 'mx', demoSlot: 10 });
+    assert.equal(claimed.status, 201, JSON.stringify(claimed.body));
+    assert.equal(claimed.body.demoSlot, 10);
+
+    const cleaned = await sessionRow(expiredId);
+    assert.notEqual(cleaned.revoked_at, null, 'la fila vencida quedó revocada al reclamar');
+  });
+
 
   test('al liberar las sesiones, el slot vuelve a estar disponible', async () => {
     await deleteSessionsCreatedSince(snapshot);

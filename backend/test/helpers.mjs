@@ -78,10 +78,141 @@ export async function openSession(body) {
   return api('/auth/demo-session', { method: 'POST', body: body ?? {} });
 }
 
+export async function logout(token) {
+  return api('/auth/logout', { method: 'POST', token });
+}
+
+export async function createStreamTicket(token) {
+  return api('/auth/stream-ticket', { method: 'POST', token });
+}
+
+export async function resetSelf(token) {
+  return api('/demo/reset/self', { method: 'POST', token });
+}
+
+export async function resetGlobal() {
+  return api('/demo/reset', { method: 'POST' });
+}
+
 export async function listProfiles(token, regionKey) {
   const query = regionKey === undefined ? '' : `?regionKey=${encodeURIComponent(regionKey)}`;
   return api(`/demo/profiles${query}`, { token });
 }
+
+/** Slots ocupados por sesiones vivas de una región, ordenados. */
+export async function activeSlots(regionKey) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT demo_slot
+         FROM sessions
+        WHERE region_key = $1
+          AND revoked_at IS NULL
+          AND expires_at > now()
+          AND demo_slot IS NOT NULL
+        ORDER BY demo_slot`,
+      [regionKey],
+    );
+    return rows.map((row) => row.demo_slot);
+  });
+}
+
+/** Fila cruda de una sesión, para mirar `revoked_at` y el hash de un ticket. */
+export async function sessionRow(sessionId) {
+  return withDb(async (client) => {
+    const { rows } = await client.query('SELECT * FROM sessions WHERE session_id = $1', [sessionId]);
+    return rows[0];
+  });
+}
+
+export async function streamTicketsOf(sessionId) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      'SELECT ticket_hash, issued_at, expires_at, consumed_at FROM stream_tickets WHERE session_id = $1',
+      [sessionId],
+    );
+    return rows;
+  });
+}
+
+/**
+ * Inserta una sesión ya vencida y sin revocar en un slot libre.
+ *
+ * Es el estado que deja el paso del tiempo: el índice único parcial sólo mira
+ * `revoked_at`, así que la fila sigue ocupando el slot. Sirve para probar que
+ * el claim la limpia en vez de responder 409 para siempre.
+ */
+export async function insertExpiredSession(regionKey, demoSlot) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `INSERT INTO sessions (region_key, profile_id, demo_slot, source_type, token_id, issued_at, expires_at)
+       VALUES ($1, $2, $3, 'human', gen_random_uuid(), now() - interval '3 hours', now() - interval '1 hour')
+       RETURNING session_id`,
+      [regionKey, `${regionKey}-expired-${demoSlot}`, demoSlot],
+    );
+    return rows[0].session_id;
+  });
+}
+
+/** Inserta un invitado (no ocupa slot) sin pasar por los 10 slots. */
+export async function insertGuestSession(regionKey) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `INSERT INTO sessions (region_key, profile_id, demo_slot, source_type, token_id, expires_at)
+       VALUES ($1, $2, NULL, 'guest', gen_random_uuid(), now() + interval '2 hours')
+       RETURNING session_id`,
+      [regionKey, `guest-test-${Math.random().toString(16).slice(2, 10)}`],
+    );
+    return rows[0].session_id;
+  });
+}
+
+/** Todas las sesiones, con todas sus columnas: el reset global las borra. */
+export async function snapshotSessions() {
+  return withDb(async (client) => {
+    const { rows } = await client.query('SELECT * FROM sessions ORDER BY session_id');
+    return rows;
+  });
+}
+
+/**
+ * Reinserta las sesiones que había antes de un test destructivo.
+ *
+ * Un reset global borra filas ajenas y el suite corre contra la base real; el
+ * token es un JWT sin estado, así que reponer la fila repone la sesión exacta.
+ */
+export async function restoreSessions(rows) {
+  if (rows.length === 0) return;
+  await withDb(async (client) => {
+    for (const row of rows) {
+      await client.query(
+        `INSERT INTO sessions (session_id, region_key, profile_id, demo_slot, source_type,
+                               token_id, issued_at, expires_at, revoked_at, last_seen_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (session_id) DO NOTHING`,
+        [
+          row.session_id,
+          row.region_key,
+          row.profile_id,
+          row.demo_slot,
+          row.source_type,
+          row.token_id,
+          row.issued_at,
+          row.expires_at,
+          row.revoked_at,
+          row.last_seen_at,
+        ],
+      );
+    }
+  });
+}
+
+export async function countRows(table) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(`SELECT count(*)::int AS count FROM ${table}`);
+    return rows[0].count;
+  });
+}
+
 
 export async function snapshotSessionIds() {
   return withDb(async (client) => {
