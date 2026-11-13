@@ -19,6 +19,28 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new ProblemFilter());
   app.enableShutdownHooks();
 
+  // CORS antes de escuchar: el preflight `OPTIONS` de un `PUT /presence` o un
+  // `GET /discovery` con `Authorization` es una request real, y sin esto el
+  // navegador la bloquea aunque el endpoint responda 200 a `curl`.
+  //
+  // Sin `credentials`: la demo autentica con Bearer en el header, no con cookie,
+  // así que `Access-Control-Allow-Credentials` sería una concesión que nadie usa.
+  // `last-event-id` va en la lista porque el `EventSource` lo manda solo al
+  // reconectar y no es un header "simple" para el preflight.
+  if (config.corsAllowedOrigins.length > 0) {
+    app.enableCors({
+      origin: [...config.corsAllowedOrigins],
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['authorization', 'content-type', 'last-event-id'],
+      maxAge: 600,
+      credentials: false,
+    });
+  } else {
+    logger.warn(
+      'CORS apagado: declarí CORS_ALLOWED_ORIGINS con el origen del cliente (por ejemplo https://usuario.github.io en S6).',
+    );
+  }
+
   const server = app.getHttpAdapter().getInstance();
   server.disable?.('x-powered-by');
   server.set?.('trust proxy', false);

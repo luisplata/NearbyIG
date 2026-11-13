@@ -67,10 +67,39 @@ export interface AppConfig {
   readonly sseHeartbeatMs: number;
   /** Región que se usa cuando `POST /auth/demo-session` no recibe body. */
   readonly defaultRegionKey: string;
+  /**
+   * Orígenes de navegador permitidos por CORS, ya normalizados.
+   *
+   * Una allowlist y no `*`: la demo expone sesiones y pide `Authorization`, así
+   * que "cualquier origen" es una puerta abierta que además impide razonar sobre
+   * quién llama. Lista vacía = CORS apagado (el navegador no puede llamar la API;
+   * `curl` y el backend sí).
+   */
+  readonly corsAllowedOrigins: readonly string[];
 }
 
 export const DEV_JWT_SECRET = 'dev-only-insecure-jwt-secret-change-me';
 export const DEV_DATABASE_URL = 'postgres://nearbyig:nearbyig@localhost:5432/nearbyig';
+
+/**
+ * Orígenes del front local, que es lo que la demo necesita para correr sin
+ * configuración:
+ *
+ *   * `8081` — `expo start` (Expo web dev, el camino principal del plan),
+ *   * `4173` — `npx serve@14 site -l 4173` (el export servido, `demo/README.md`),
+ *   * `8080` — el puerto de un `http.server`/`serve` cualquiera sobre el export.
+ *
+ * El origen de GitHub Pages no está acá a propósito: es de S6, cambia por
+ * despliegue y se agrega por entorno (`CORS_ALLOWED_ORIGINS=https://usuario.github.io`).
+ */
+export const DEV_CORS_ORIGINS: readonly string[] = [
+  'http://localhost:8081',
+  'http://localhost:4173',
+  'http://localhost:8080',
+];
+
+/** `scheme://host[:port]`, sin path ni barra final: es lo que manda el browser. */
+const ORIGIN_PATTERN = /^https?:\/\/[a-z0-9.-]+(?::[0-9]{1,5})?$/i;
 
 const NODE_ENVS: readonly NodeEnv[] = ['development', 'test', 'production'];
 
@@ -80,6 +109,41 @@ function parseNodeEnv(raw: string | undefined): NodeEnv {
     throw new Error(`NODE_ENV inválido: "${value}". Valores: ${NODE_ENVS.join(', ')}`);
   }
   return value as NodeEnv;
+}
+
+/**
+ * `CORS_ALLOWED_ORIGINS` → lista de orígenes.
+ *
+ * En desarrollo y test el default son los tres puertos del front local. En
+ * producción **no hay default**: mientras nadie declare el origen de la demo
+ * pública (S6), el navegador no puede llamar la API y el boot lo avisa. Un
+ * default de conveniencia en producción sería un origen que nadie eligió.
+ *
+ * `*` se rechaza explícitamente: aceptarlo convertiría la allowlist en su
+ * contrario sin cambiar el nombre de la variable. Un origen con path o barra
+ * final también: el browser manda `scheme://host[:port]` y nada más, así que
+ * "casi el mismo string" sólo produce 403 imposibles de diagnosticar.
+ */
+function parseCorsOrigins(raw: string | undefined, isProduction: boolean): readonly string[] {
+  const value = raw?.trim() ?? '';
+  if (value === '') return isProduction ? [] : DEV_CORS_ORIGINS;
+
+  const origins = value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin !== '');
+
+  for (const origin of origins) {
+    if (origin === '*') {
+      throw new Error('CORS_ALLOWED_ORIGINS no admite "*": declaré los orígenes, uno por coma.');
+    }
+    if (!ORIGIN_PATTERN.test(origin)) {
+      throw new Error(
+        `origen inválido en CORS_ALLOWED_ORIGINS: "${origin}". Forma: scheme://host[:port], sin path ni barra final.`,
+      );
+    }
+  }
+  return origins;
 }
 
 function parseInteger(name: string, raw: string | undefined, fallback: number, min: number, max: number): number {
@@ -124,5 +188,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     eventRetention: 5_000,
     sseHeartbeatMs: 15_000,
     defaultRegionKey: (env.DEFAULT_REGION_KEY?.trim() || 'mx').toLowerCase(),
+    corsAllowedOrigins: parseCorsOrigins(env.CORS_ALLOWED_ORIGINS, isProduction),
   };
 }
