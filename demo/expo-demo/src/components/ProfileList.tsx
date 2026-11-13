@@ -21,6 +21,7 @@ export function ProfileList({
   onReport,
   chatFor,
   onOpenChat,
+  onScrollTopChange,
 }: {
   state: DemoState;
   profiles: UiProfile[];
@@ -31,6 +32,11 @@ export function ProfileList({
   /** Match del perfil en la bandeja vigente, o `null`. Sin esto no hay globo. */
   chatFor?: (profile: UiProfile) => { unread: number } | null;
   onOpenChat?: (profile: UiProfile) => void;
+  /**
+   * Avisa si la lista está arriba de todo. El pull-to-refresh sólo se arma con
+   * la lista en el tope: a mitad de scroll, tirar hacia abajo es scrollear.
+   */
+  onScrollTopChange?: (atTop: boolean) => void;
 }) {
   if (profiles.length === 0) {
     return (
@@ -43,7 +49,16 @@ export function ProfileList({
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.content} style={styles.scroll}>
+    <ScrollView
+      contentContainerStyle={styles.content}
+      style={styles.scroll}
+      scrollEventThrottle={16}
+      onScroll={
+        onScrollTopChange === undefined
+          ? undefined
+          : (event) => onScrollTopChange(event.nativeEvent.contentOffset.y <= 0)
+      }
+    >
       {profiles.map((profile) => (
         <ProfileCard
           key={profile.id}

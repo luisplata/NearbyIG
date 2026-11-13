@@ -36,6 +36,15 @@
         margin: 0;
         background: #09090b;
         color: #f4f4f5;
+        /*
+          Pull-to-refresh propio (src/components/PullToRefresh.tsx). Sin esto el
+          navegador se queda con el arrastre hacia abajo en el tope y recarga la
+          página, o rebota el viewport en iOS: el gesto de la app nunca llega.
+        */
+        overscroll-behavior-y: contain;
+      }
+      #root {
+        overscroll-behavior: contain;
       }
       noscript {
         display: block;

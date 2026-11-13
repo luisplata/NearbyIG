@@ -4,7 +4,8 @@
  * Vive acá y no en `demo/shared/copy.json` por la misma razón que el copy live:
  * agregar claves al catálogo mueve el `datasetId` del artefacto congelado. El
  * mapa ilustrado tiene su leyenda en el catálogo (`discovery.mapLegend`); esto
- * es sólo el estado de falla del basemap real, que no existe en ese artefacto.
+ * es el estado de falla del basemap real y el marcador propio del radar, que no
+ * existen en ese artefacto.
  */
 export const mapCopy = {
   retry: 'Reintentar mapa',
@@ -13,6 +14,9 @@ export const mapCopy = {
   failTimeout: 'timeout',
   failStyle: 'estilo',
   failContext: 'contexto WebGL',
+  /** Marcador propio del radar: el centro siempre sos vos. */
+  selfYou: 'vos',
+  selfA11y: 'Tu ubicación, en el centro del radar',
 } as const;
 
 export type MapCopyKey = keyof typeof mapCopy;

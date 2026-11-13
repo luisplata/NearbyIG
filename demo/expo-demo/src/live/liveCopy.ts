@@ -90,6 +90,12 @@ export const liveCopy = {
   refresh: 'Actualizar',
   claimFailed: 'No se pudo usar el slot ({code}).',
   profilesA11y: 'Perfil {name}, slot {slot}, {state}',
+
+  // Pull-to-refresh: el gesto y el botón son el mismo refresh completo. El
+  // primer texto se ve mientras se arrastra pero no alcanza el umbral.
+  pull: 'Tirá para actualizar',
+  pullRelease: 'Soltá para actualizar',
+  pullBusy: 'Actualizando…',
 } as const;
 
 export type LiveCopyKey = keyof typeof liveCopy;

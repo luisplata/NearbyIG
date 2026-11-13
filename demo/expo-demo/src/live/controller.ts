@@ -19,9 +19,11 @@ import {
 } from './chat';
 import type { LiveSettings } from './config';
 import { applyEvents } from './events';
-import type { GeoPoint, GeoResult } from './geolocation';
+import type { GeoPoint, GeoRequestOptions, GeoResult } from './geolocation';
+import { TRACK_OPTIONS } from './geolocation';
 import { newPendingPeers, toPingRows } from './pings';
 import { regionForZone } from './regions';
+import { movedEnough } from './track';
 import {
   emptyLiveState,
   EVENT_TYPES,
@@ -71,6 +73,14 @@ import { zoneForPoint } from './zones';
  * un ghost no debe poder hacer"). Por eso el latido repite `PUT /presence` cada
  * 8 s (4 s de margen) y, en la misma vuelta, refresca la foto: eso es también el
  * mecanismo que repara cualquier hueco del stream.
+ *
+ * **Seguimiento de posición.** Con presencia GPS el punto no puede quedar
+ * congelado en el que se mandó al tocar "Usar mi ubicación": el controlador
+ * relee la posición cada 10 s y, **sólo si se movió 10 m o más**, actualiza
+ * `presence`, hace el `PUT` y refresca discovery. El latido sigue siendo dueño
+ * del TTL; el seguimiento es dueño del punto. Con menos de 10 m no se gasta ni
+ * un request. Ni el seguimiento ni el latido mandan `visibility`: el ghost se
+ * mantiene.
  *
  * **Transporte.** SSE es la actualización fina; el polling (`/events/poll` con
  * `cursor`) es el fallback si el navegador no soporta `EventSource`, si el
@@ -145,9 +155,11 @@ export type LiveControllerPorts = {
   createEventSource?: (url: string) => EventSourceLike | null;
   /**
    * Punto del navegador. Sólo lo llama `requestLocation()` (el gesto del
-   * usuario), nunca `start()`. `undefined` = runtime sin DOM (tests).
+   * usuario) y el seguimiento periódico, nunca `start()`. `undefined` = runtime
+   * sin DOM (tests). Las opciones las elige el controlador: `TRACK_OPTIONS` para
+   * el seguimiento, las del gesto para el toque.
    */
-  requestPoint?: () => Promise<GeoResult>;
+  requestPoint?: (options?: GeoRequestOptions) => Promise<GeoResult>;
   /** Zona persistida de una visita anterior. `null` = todavía no eligió. */
   initialZoneKey?: string | null;
   /**
@@ -188,6 +200,11 @@ export type LiveControllerPorts = {
   heartbeatMs?: number;
   pollMs?: number;
   reseedMs?: number;
+  /**
+   * Cada cuánto se relee el punto propio cuando la presencia es GPS.
+   * Default: 10 s. Por debajo de ese intervalo el GPS sólo aporta ruido.
+   */
+  trackMs?: number;
   /** Cada cuánto se refresca la bandeja. El contrato no tiene push de pings. */
   pingsMs?: number;
   /** Silencio tolerado del stream antes de caer a polling. Default: 25 s. */
@@ -204,6 +221,12 @@ export type LiveController = {
   start(): Promise<boolean>;
   stop(): Promise<void>;
   refresh(): Promise<void>;
+  /**
+   * Refresh completo del modo live: presencia (sin tocar `visibility`),
+   * discovery, matches, pings, notificaciones y catálogo. Es lo que dispara el
+   * pull-to-refresh y el botón del header. Sin sesión no hace nada.
+   */
+  refreshAll(): Promise<void>;
   refreshRows(): Promise<void>;
   /** Vuelve a pedir las dos bandejas (`inbox` + `sent`). */
   refreshPings(): Promise<void>;
@@ -259,7 +282,10 @@ export type LiveController = {
    */
   resetSelf(): Promise<LiveActionResult>;
   setFilters(filters: DiscoveryFilters): void;
-  /** El gesto "Usar mi ubicación": un solo pedido, sin seguimiento. */
+  /**
+   * El gesto "Usar mi ubicación": un pedido y, si el punto es GPS, arranca el
+   * seguimiento periódico (10 s, umbral de 10 m).
+   */
   requestLocation(): Promise<void>;
   /** Elige la zona demo. Recrea la sesión si la zona es de otra región. */
   chooseZone(zoneKey: string): Promise<void>;
@@ -271,6 +297,8 @@ export type LiveController = {
 };
 
 const DEFAULT_HEARTBEAT_MS = 8_000;
+/** 10 s: el radar no necesita más resolución y cada lectura enciende el GPS. */
+const DEFAULT_TRACK_MS = 10_000;
 const DEFAULT_POLL_MS = 3_000;
 const DEFAULT_RESEED_MS = 1_200;
 /** 5 s: la bandeja no es un chat, pero el ping tiene que sentirse vivo. */
@@ -326,6 +354,26 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   let reseedTimer: ReturnType<typeof setTimeout> | null = null;
   let pingsTimer: ReturnType<typeof setInterval> | null = null;
   let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Lectura periódica del punto propio. Vive sólo con presencia GPS: es el reloj
+   * que convierte "un punto al tocar el botón" en "un punto que sigue a la
+   * persona".
+   */
+  let trackTimer: ReturnType<typeof setInterval> | null = null;
+  /** Una lectura en vuelo por vez: el proveedor puede tardar más que el tick. */
+  let trackBusy = false;
+  /**
+   * Generación del seguimiento. Se incrementa al apagarlo: una lectura que
+   * vuelve tarde (cerraste sesión, cambiaste de zona) no puede escribir sobre el
+   * estado nuevo. Sin esto, una lectura lenta del proveedor podía mandar el
+   * punto de la sesión anterior a la siguiente.
+   */
+  let trackRun = 0;
+  /**
+   * Último punto **enviado** (no el último leído): es la referencia del umbral
+   * de 10 m. Se limpia al soltar la presencia GPS.
+   */
+  let sentPoint: GeoPoint | null = null;
 
   const notify = (): void => {
     for (const listener of [...listeners]) {
@@ -490,6 +538,153 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     return 'point' in target ? 'gps' : 'demo';
   };
 
+  /**
+   * Apaga la lectura periódica del punto. Se llama al cerrar sesión, al degradar
+   * y cada vez que la presencia deja de ser GPS: la zona demo no tiene nada que
+   * seguir, y un timer huérfano seguiría pidiendo ubicación en segundo plano.
+   */
+  const stopTracking = (): void => {
+    if (trackTimer !== null) {
+      clearInterval(trackTimer);
+      trackTimer = null;
+    }
+    // Una lectura en vuelo termina sola; su resultado se descarta al ver que la
+    // generación cambió.
+    trackRun += 1;
+    trackBusy = false;
+  };
+
+  /**
+   * Cae a la zona demo sin romper la sesión: es la salida cuando el permiso se
+   * revoca, cuando el navegador deja de entregar la ubicación o cuando la
+   * persona se fue de la zona del catálogo. `cause` es lo que explica el sheet;
+   * nunca se manda `visibility`, así que el ghost se mantiene.
+   */
+  const fallBackToDemo = async (cause: ZonePromptCause): Promise<void> => {
+    stopTracking();
+    sentPoint = null;
+    const zoneKey = zone ?? state.zoneKey;
+    if (api === null || state.session === null || zoneKey === null) {
+      set({ location: 'demo', point: null, zonePrompt: cause });
+      return;
+    }
+    try {
+      await registerPresence({ demoZoneKey: zoneKey }, zoneKey);
+    } catch (error) {
+      failures += 1;
+      if (failures >= 2) {
+        degrade(error);
+        return;
+      }
+    }
+    // `registerPresence` limpia avisos al registrar; el motivo del cambio de
+    // fuente de ubicación se dice después.
+    const patch: Partial<LiveState> = { location: 'demo', point: null, zonePrompt: cause };
+    if (cause === 'outside-zone') {
+      patch.notice = 'outside-zone';
+    }
+    set(patch);
+  };
+
+  /**
+   * Una vuelta del seguimiento.
+   *
+   * **No gasta requests de más.** Primero lee; si se movió menos de 10 m
+   * respecto del último punto **enviado**, termina sin tocar la red. Un
+   * `timeout`/`unavailable` se reintenta en la vuelta siguiente (una lectura
+   * perdida no es una revocación); `denied`/`unsupported`/`insecure` sí apagan
+   * el seguimiento y dejan la sesión en la zona demo.
+   */
+  const trackOnce = async (): Promise<void> => {
+    if (api === null || ports.requestPoint === undefined || trackBusy) {
+      return;
+    }
+    if (state.location !== 'gps' || state.session === null) {
+      stopTracking();
+      return;
+    }
+    trackBusy = true;
+    const run = trackRun;
+    try {
+      const geo = await ports.requestPoint(TRACK_OPTIONS);
+      // La presencia pudo cambiar mientras el proveedor respondía.
+      if (run !== trackRun || state.location !== 'gps' || state.session === null) {
+        return;
+      }
+      if (geo.status === 'denied' || geo.status === 'unsupported' || geo.status === 'insecure') {
+        log(`[geo] track=${geo.status} → zona demo`);
+        diagnose({ geo: geo.status, accuracyM: null });
+        await fallBackToDemo(geo.status);
+        return;
+      }
+      if (geo.status !== 'ok') {
+        log(`[geo] track=${geo.status}`);
+        return;
+      }
+      diagnose({ geo: 'ok', accuracyM: geo.accuracyM });
+      if (!movedEnough(geo.point, sentPoint)) {
+        return;
+      }
+      const zoneKey = zoneForPoint(geo.point);
+      if (zoneKey === null || regionForZone(zoneKey) !== state.session.regionKey) {
+        // Salirse de la zona (o de la región de la sesión) no se arregla con un
+        // PUT de punto: se deja de seguir y se vuelve a la zona demo.
+        log('[geo] track=outside-zone');
+        await fallBackToDemo('outside-zone');
+        return;
+      }
+      const location = await registerPresence({ point: geo.point }, zoneKey);
+      if (location !== 'gps') {
+        // El server pidió fallback: `registerPresence` ya dejó la zona demo.
+        stopTracking();
+        return;
+      }
+      set({ location, point: geo.point });
+      sentPoint = geo.point;
+      // El `PUT` del seguimiento ya renovó la presencia: el próximo latido se
+      // corre un intervalo completo para no repetir el mismo hecho (y la TTL de
+      // 12 s sigue cubierta por los 8 s del latido).
+      armHeartbeat();
+      await refreshDiscovery();
+    } catch (error) {
+      failures += 1;
+      if (failures >= 2) {
+        degrade(error);
+      }
+    } finally {
+      trackBusy = false;
+    }
+  };
+
+  /** Arranca la lectura periódica si corresponde. Idempotente. */
+  const startTracking = (): void => {
+    if (trackTimer !== null || api === null || ports.requestPoint === undefined) {
+      return;
+    }
+    if (state.location !== 'gps' || state.session === null) {
+      return;
+    }
+    trackTimer = setInterval(() => {
+      void trackOnce();
+    }, ports.trackMs ?? DEFAULT_TRACK_MS);
+  };
+
+  /**
+   * Punto único que sincroniza el seguimiento con la presencia registrada: GPS
+   * lo arranca, zona demo lo apaga. Se llama después de cada
+   * `set({ location, point })` que salga de un `registerPresence`, así no hay
+   * dos lugares que decidan si se sigue o no.
+   */
+  const syncTracking = (): void => {
+    if (state.location === 'gps' && state.point !== null) {
+      sentPoint = state.point;
+      startTracking();
+      return;
+    }
+    sentPoint = null;
+    stopTracking();
+  };
+
   const clearTimers = (): void => {
     if (heartbeatTimer !== null) {
       clearInterval(heartbeatTimer);
@@ -507,6 +702,8 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       clearInterval(pingsTimer);
       pingsTimer = null;
     }
+    stopTracking();
+    sentPoint = null;
     stopWatchdog();
   };
 
@@ -694,6 +891,57 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     emitCatalog();
   };
 
+  /**
+   * Re-registra la presencia vigente **sin tocar `visibility`**: renueva la TTL
+   * y la zona en el mismo gesto que la foto, y conserva el último punto enviado
+   * (nunca uno nuevo: leer el GPS es del seguimiento, no del refresh manual).
+   */
+  const refreshPresence = async (): Promise<void> => {
+    if (api === null || presence === null || state.session === null) {
+      return;
+    }
+    const zoneKey =
+      'demoZoneKey' in presence ? presence.demoZoneKey : (zoneForPoint(presence.point) ?? zone);
+    if (zoneKey === null) {
+      return;
+    }
+    const location = await registerPresence(presence, zoneKey);
+    set({ location, point: location === 'gps' && 'point' in presence ? presence.point : null });
+    syncTracking();
+  };
+
+  /**
+   * Refresh completo: presencia, discovery, matches, pings, notificaciones y
+   * catálogo. Es lo que disparan el gesto de tirar hacia abajo y el botón del
+   * header; la presencia va primero porque discovery depende de ella.
+   */
+  const refreshAll = async (): Promise<void> => {
+    if (api === null || state.session === null) {
+      return;
+    }
+    try {
+      await refreshPresence();
+    } catch (error) {
+      failures += 1;
+      if (failures >= 2) {
+        degrade(error);
+        return;
+      }
+    }
+    await Promise.allSettled([
+      refreshPings(),
+      refreshMatches(),
+      refreshNotifications(),
+      refreshRows(),
+    ]);
+    await refreshDiscovery().catch((error: unknown) => {
+      failures += 1;
+      if (failures >= 2) {
+        degrade(error);
+      }
+    });
+  };
+
   const scheduleReseed = (): void => {
     if (reseedTimer !== null) {
       return;
@@ -827,6 +1075,15 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     next.onerror = onStreamError;
   };
 
+  /**
+   * Latido de presencia: mantiene viva la presencia (TTL 12 s) y repara la foto.
+   *
+   * **Una sola fuente de verdad para el punto.** El latido no decide el punto:
+   * reenvía el `presence` vigente, que sólo el gesto y el seguimiento escriben.
+   * Cuando el seguimiento manda un punto nuevo, reinicia la fase de este latido
+   * (`armHeartbeat`) en vez de dejarlo caer encima: no hay dos escrituras del
+   * mismo hecho ni un hueco de TTL.
+   */
   const beat = async (): Promise<void> => {
     if (api === null || presence === null || state.session === null) {
       return;
@@ -843,13 +1100,21 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     }
   };
 
-  const startHeartbeat = (): void => {
+  /** Arma (o rearma) el latido con un intervalo completo por delante. */
+  const armHeartbeat = (): void => {
     if (heartbeatTimer !== null) {
-      return;
+      clearInterval(heartbeatTimer);
     }
     heartbeatTimer = setInterval(() => {
       void beat();
     }, ports.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
+  };
+
+  const startHeartbeat = (): void => {
+    if (heartbeatTimer !== null) {
+      return;
+    }
+    armHeartbeat();
   };
 
   const refreshRows = async (): Promise<void> => {
@@ -1438,6 +1703,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       const initialVisibility = preferredVisibility === 'ghost' ? 'ghost' : undefined;
       const location = await registerPresence(target, zoneKey, initialVisibility);
       set({ location, point: location === 'gps' ? geoPoint : null });
+      syncTracking();
       await refreshDiscovery();
     } catch (error) {
       degrade(error);
@@ -1553,6 +1819,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
         applyZone(zoneKey);
         const location = await registerPresence({ point: geo.point }, zoneKey);
         set({ location, point: location === 'gps' ? geo.point : null });
+        syncTracking();
         await refreshDiscovery();
       } catch (error) {
         failures += 1;
@@ -1578,7 +1845,10 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
         try {
           presence = { demoZoneKey: zoneKey };
           await api.presence(presence);
-          set({ location: 'demo', notice: null, zonePrompt: null, error: null });
+          // La presencia vuelve a ser la zona demo: el punto del GPS ya no
+          // representa la presencia y no debe seguir centrando el mapa.
+          set({ location: 'demo', point: null, notice: null, zonePrompt: null, error: null });
+          syncTracking();
           await refreshDiscovery();
         } catch (error) {
           failures += 1;
@@ -1616,6 +1886,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
         }
       });
     },
+    refreshAll,
     refreshRows,
     refreshPings,
     sendPing: async (targetProfileId) => {

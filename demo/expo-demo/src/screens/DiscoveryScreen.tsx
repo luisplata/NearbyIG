@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
 import { unreadMatchCount } from '../live/chat';
+import { liveText } from '../live/liveCopy';
 import { useLive } from '../live/LiveProvider';
 import { matchForPeer } from '../live/matches';
 import { prefsCopy } from '../live/prefsCopy';
@@ -19,6 +20,7 @@ import { Chip } from '../components/Chip';
 import { EmptyState } from '../components/EmptyState';
 import { IconButton } from '../components/IconButton';
 import { ProfileList } from '../components/ProfileList';
+import { PullToRefresh } from '../components/PullToRefresh';
 import { RadarCaption, RadarMapView } from '../components/RadarMapView';
 import { RadiusControl } from '../components/RadiusControl';
 import type { NavItem } from '../navigation/navItems';
@@ -34,6 +36,8 @@ export function DiscoveryScreen() {
   const { state, dispatch, store } = useDemo();
   const live = useLive();
   const prefs = usePreferences();
+  const [refreshing, setRefreshing] = useState(false);
+  const [listAtTop, setListAtTop] = useState(true);
   const profiles = useMemo(() => visibleProfiles(state), [state]);
   const liveMode = state.source === 'live' && live.enabled && live.state.session !== null;
   /**
@@ -111,17 +115,50 @@ export function DiscoveryScreen() {
 
   const body = discoveryLayout(state.view, profiles.length);
 
+  /**
+   * El gesto y el botón del header comparten este camino: un solo "actualizar".
+   * `live.refreshAll` es estable (useCallback en el provider), así que el
+   * compilado no rearma el gesto en cada render.
+   */
+  const onRefresh = useCallback(async () => {
+    if (refreshing) {
+      return;
+    }
+    setRefreshing(true);
+    try {
+      await live.refreshAll();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [live.refreshAll, refreshing]);
+
+  // Cambiar de vista reinicia el tope: el radar no scrollea y la lista vuelve
+  // a empezar desde arriba.
+  useEffect(() => {
+    setListAtTop(true);
+  }, [body]);
+
   return (
     <View style={styles.root}>
       <View style={styles.headerRow}>
         <Text style={[text.heading, styles.title]}>{fmt('discovery.title')}</Text>
-        <View>
+        <View style={styles.headerActions}>
+          {/* Fallback siempre visible del pull-to-refresh. */}
           <IconButton
-            icon="tune"
-            label={fmt('discovery.filters')}
-            onPress={() => dispatch({ type: 'OPEN_OVERLAY', overlay: 'filters' })}
+            icon="refresh"
+            label={liveText('refresh')}
+            onPress={() => {
+              void onRefresh();
+            }}
           />
-          {filtered ? <View style={styles.filterDot} /> : null}
+          <View>
+            <IconButton
+              icon="tune"
+              label={fmt('discovery.filters')}
+              onPress={() => dispatch({ type: 'OPEN_OVERLAY', overlay: 'filters' })}
+            />
+            {filtered ? <View style={styles.filterDot} /> : null}
+          </View>
         </View>
       </View>
 
@@ -154,37 +191,44 @@ export function DiscoveryScreen() {
       </View>
 
       <View style={styles.body}>
-        {body === 'radarMap' ? (
-          <>
-            <RadarMapView
-              profiles={profiles}
-              radiusM={state.filters.radiusM}
-              center={center}
-              onOpen={onOpen}
+        <PullToRefresh
+          onRefresh={onRefresh}
+          // El radar no scrollea: ahí el gesto siempre está disponible.
+          atTop={body === 'radarMap' ? true : listAtTop}
+        >
+          {body === 'radarMap' ? (
+            <>
+              <RadarMapView
+                profiles={profiles}
+                radiusM={state.filters.radiusM}
+                center={center}
+                onOpen={onOpen}
+              />
+              <RadarCaption />
+            </>
+          ) : body === 'emptyList' ? (
+            <EmptyState
+              message={fmt('empty.filters')}
+              actionLabel={fmt('empty.filtersCta')}
+              onAction={() => dispatch({ type: 'CLEAR_FILTERS' })}
             />
-            <RadarCaption />
-          </>
-        ) : body === 'emptyList' ? (
-          <EmptyState
-            message={fmt('empty.filters')}
-            actionLabel={fmt('empty.filtersCta')}
-            onAction={() => dispatch({ type: 'CLEAR_FILTERS' })}
-          />
-        ) : (
-          <>
-            <Text style={[text.small, styles.listHeading]}>{fmt('discovery.listHeading')}</Text>
-            <ProfileList
-              state={state}
-              profiles={profiles}
-              onOpen={onOpen}
-              onClearFilters={() => dispatch({ type: 'CLEAR_FILTERS' })}
-              onBlock={onBlock}
-              onReport={onReport}
-              chatFor={chatFor}
-              onOpenChat={onOpenChat}
-            />
-          </>
-        )}
+          ) : (
+            <>
+              <Text style={[text.small, styles.listHeading]}>{fmt('discovery.listHeading')}</Text>
+              <ProfileList
+                state={state}
+                profiles={profiles}
+                onOpen={onOpen}
+                onClearFilters={() => dispatch({ type: 'CLEAR_FILTERS' })}
+                onBlock={onBlock}
+                onReport={onReport}
+                chatFor={chatFor}
+                onOpenChat={onOpenChat}
+                onScrollTopChange={setListAtTop}
+              />
+            </>
+          )}
+        </PullToRefresh>
       </View>
 
       <BottomNav
@@ -215,6 +259,10 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   filterDot: {
     position: 'absolute',

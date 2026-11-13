@@ -11,10 +11,17 @@
  * usuario ve un error que no llegó a leer. El gesto es el permiso, no un
  * detalle de UX.
  *
- * **Qué NO hace.** No sigue la ubicación en el tiempo (un solo pedido, sin
- * seguimiento continuo), no guarda el punto (ni storage ni cookie: lo que dure
- * la sesión en memoria), no lo manda a ningún lado más que al `PUT /presence`,
- * y no lo lee de IP ni de ningún servicio.
+ * **Qué NO hace.** No guarda el punto (ni storage ni cookie: lo que dure la
+ * sesión en memoria), no lo manda a ningún lado más que al `PUT /presence`, y no
+ * lo lee de IP ni de ningún servicio.
+ *
+ * **Gestos y seguimiento.** Dos juegos de opciones, no dos módulos: el gesto
+ * pide una lectura fresca (`maximumAge: 0`) porque el usuario acaba de tocar
+ * "Usar mi ubicación" y espera su posición de ahora; el seguimiento periódico
+ * (`TRACK_OPTIONS`) tolera una lectura de hasta 5 s y espera hasta 15 s, porque
+ * corre solo y no puede quedar colgado de un proveedor lento. En ninguno de los
+ * dos se pide alta precisión: la demo muestra distancias a nivel radar y el GPS
+ * fino calienta la radio del teléfono sin cambiar la experiencia.
  *
  * **Contexto seguro.** `getCurrentPosition` sólo existe en HTTPS o `localhost`.
  * En una IP de la LAN por HTTP plano el navegador devuelve `undefined` o falla, así que se
@@ -46,8 +53,15 @@ export type GeolocationLike = {
       coords: { latitude: number; longitude: number; accuracy?: number };
     }) => void,
     error?: (error: { code?: number }) => void,
-    options?: { enableHighAccuracy?: boolean; timeout?: number; maximumAge?: number },
+    options?: GeoRequestOptions,
   ): void;
+};
+
+/** Opciones de `getCurrentPosition`, con los tres campos que importan. */
+export type GeoRequestOptions = {
+  enableHighAccuracy?: boolean;
+  timeout?: number;
+  maximumAge?: number;
 };
 
 export type GeoEnvironment = {
@@ -61,6 +75,29 @@ const PERMISSION_DENIED = 1;
 const TIMEOUT = 3;
 
 const TIMEOUT_MS = 8000;
+
+/**
+ * Opciones del gesto: una sola lectura y **sin caché**. El usuario pidió su
+ * posición ahora; devolver una de hace un minuto sería mentirle.
+ */
+export const POINT_OPTIONS: GeoRequestOptions = {
+  enableHighAccuracy: false,
+  timeout: TIMEOUT_MS,
+  maximumAge: 0,
+};
+
+/**
+ * Opciones del seguimiento (una lectura cada 10 s). `maximumAge: 5000` deja que
+ * el navegador reuse una lectura reciente en vez de encender el proveedor; un
+ * `timeout` de 15 s es más largo que el intervalo de lectura a propósito: si el
+ * proveedor tarda, la vuelta se saltea en vez de encimar dos pedidos.
+ */
+export const TRACK_OPTIONS: GeoRequestOptions = {
+  enableHighAccuracy: false,
+  timeout: 15_000,
+  maximumAge: 5_000,
+};
+
 
 /** El navegador puede mandar 15 decimales: se recortan a 6, como el contrato. */
 export function round6(value: number): number {
@@ -101,7 +138,10 @@ export function pointFromPosition(
  * es un `status` que el controlador sabe explicar (con `ok` se manda el punto;
  * con cualquier otro se pide la zona demo y se muestra el motivo).
  */
-export function requestPoint(environment: GeoEnvironment): Promise<GeoResult> {
+export function requestPoint(
+  environment: GeoEnvironment,
+  options: GeoRequestOptions = POINT_OPTIONS,
+): Promise<GeoResult> {
   const geolocation = environment.geolocation ?? null;
   if (environment.secureContext === false) {
     return Promise.resolve({ status: 'insecure' });
@@ -135,7 +175,7 @@ export function requestPoint(environment: GeoEnvironment): Promise<GeoResult> {
                 : { status: 'unavailable' },
           );
         },
-        { enableHighAccuracy: false, timeout: TIMEOUT_MS, maximumAge: 0 },
+        options,
       );
     } catch {
       settle({ status: 'unavailable' });
@@ -154,6 +194,6 @@ export function browserGeoEnvironment(): GeoEnvironment {
   };
 }
 
-export function requestBrowserPoint(): Promise<GeoResult> {
-  return requestPoint(browserGeoEnvironment());
+export function requestBrowserPoint(options?: GeoRequestOptions): Promise<GeoResult> {
+  return requestPoint(browserGeoEnvironment(), options);
 }

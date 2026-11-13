@@ -4,6 +4,7 @@ import {
   pointFromPosition,
   requestPoint,
   round6,
+  TRACK_OPTIONS,
   type GeoEnvironment,
   type GeoResult,
   type GeolocationLike,
@@ -103,5 +104,29 @@ describe('requestPoint', () => {
       },
     };
     await expect(requestPoint(environment)).resolves.toEqual({ status: 'unavailable' });
+  });
+
+  it('el gesto pide una lectura fresca y el seguimiento tolera caché y tardanza', async () => {
+    const seen: ({ timeout?: number; maximumAge?: number; enableHighAccuracy?: boolean } | undefined)[] =
+      [];
+    const environment: GeoEnvironment = {
+      secureContext: true,
+      geolocation: {
+        getCurrentPosition: (success, _error, options) => {
+          seen.push(options);
+          success(OK);
+        },
+      },
+    };
+
+    await requestPoint(environment);
+    await requestPoint(environment, TRACK_OPTIONS);
+
+    // Gesto: sin caché, timeout corto.
+    expect(seen[0]).toEqual({ enableHighAccuracy: false, timeout: 8000, maximumAge: 0 });
+    // Seguimiento: 5 s de caché y 15 s de espera, más largo que su intervalo.
+    expect(seen[1]).toEqual({ enableHighAccuracy: false, timeout: 15_000, maximumAge: 5_000 });
+    // Nunca alta precisión: el radar no necesita GPS fino y la radio se calienta.
+    expect(seen[1]?.enableHighAccuracy).toBe(false);
   });
 });

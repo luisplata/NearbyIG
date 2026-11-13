@@ -78,6 +78,11 @@ export type LiveBinding = {
   openZoneSheet: () => void;
   dismissZoneSheet: () => void;
   refresh: () => Promise<void>;
+  /**
+   * Refresh completo del modo live (presencia + discovery + matches + pings +
+   * notificaciones). Es el que dispara el pull-to-refresh y el botón del header.
+   */
+  refreshAll: () => Promise<void>;
   refreshRows: () => Promise<void>;
   claim: (slot: number) => Promise<LiveActionResult>;
   takeover: (slot: number) => Promise<LiveActionResult>;
@@ -246,6 +251,10 @@ export function LiveProvider({
     await controller.refresh();
   }, [controller]);
 
+  const refreshAll = useCallback(async () => {
+    await controller.refreshAll();
+  }, [controller]);
+
   const requestLocation = useCallback(async () => {
     await controller.requestLocation();
   }, [controller]);
@@ -387,6 +396,7 @@ export function LiveProvider({
         openZoneSheet,
         dismissZoneSheet,
         refresh,
+        refreshAll,
         refreshRows,
         claim,
         takeover,

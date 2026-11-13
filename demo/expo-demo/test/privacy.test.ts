@@ -15,8 +15,10 @@ import { DEMO_CENTER } from '../src/map/basemap';
  * que acepta coordenadas), así que el invariante cambió de "cero geolocalización"
  * a "una sola puerta, un solo destino":
  *
- * - la ubicación se pide en un único módulo (`live/geolocation.ts`) y nunca se
- *   sigue en el tiempo (`watchPosition`);
+ * - la ubicación se pide en un único módulo (`live/geolocation.ts`) y no hay
+ *   canal continuo de posiciones (`watchPosition`): el seguimiento del modo GPS
+ *   es una lectura puntual cada 10 s y sólo se manda al server si el punto se
+ *   movió 10 m o más;
  * - el punto no se guarda en ningún storage ni en una cookie: el navegador lo
  *   conserva en memoria el tiempo que dura la sesión, y el server lo descarta al
  *   proyectar región y zona;

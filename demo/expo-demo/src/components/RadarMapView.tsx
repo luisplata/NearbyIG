@@ -15,6 +15,7 @@ import { Chip } from './Chip';
 import { MapCanvas } from './MapCanvas';
 import { ProfileDotLayer } from './ProfileDotLayer';
 import { RadarSvg, sweepWedgePath } from './RadarSvg';
+import { SelfMarker } from './SelfMarker';
 
 /**
  * Composición única de descubrimiento: mapa estilizado permanente + basemap real
@@ -117,6 +118,9 @@ export function RadarMapView({
         </Animated.View>
 
         <ProfileDotLayer profiles={profiles} radiusM={radiusM} onOpen={onOpen} />
+
+        {/* El centro es la posición propia: se dibuja arriba de todo, siempre. */}
+        <SelfMarker />
 
         {realTiles ? null : (
           <View style={styles.legend} pointerEvents="none" {...decorative}>
