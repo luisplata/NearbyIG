@@ -1,15 +1,23 @@
 import type {
   LiveEventsPage,
+  LiveMatch,
+  LivePing,
+  LivePingItem,
+  LivePingPeer,
   LiveProfileRow,
   LiveSession,
+  PingBox,
+  PingStatus,
   SourceType,
 } from './types';
+import { isPingStatus } from './types';
 
 /**
  * Cliente de la API del backend de la demo. Sólo las operations que el contrato
  * congela: `POST /auth/demo-session`, `POST /auth/takeover`, `POST /auth/logout`,
  * `POST /auth/stream-ticket`, `PUT /presence`, `GET /demo/profiles`,
- * `GET /discovery`, `GET /events` y `GET /events/poll`. Nada más.
+ * `GET /discovery`, `GET /events`, `GET /events/poll`, `GET /me` y las cuatro de
+ * pings (`POST /pings`, `GET /pings`, accept y reject). Nada más.
  *
  * El token vive **en memoria** en este objeto: no se persiste en ningún storage
  * del navegador ni en una cookie. Es lo que pide el contrato de la demo
@@ -82,6 +90,15 @@ export type LiveApi = {
   discovery(query: DiscoveryQuery): Promise<LiveProfileRow[]>;
   streamTicket(): Promise<string>;
   poll(cursor: string | null): Promise<LiveEventsPage>;
+  /**
+   * `GET /me`: el perfil de la sesión. `null` si la operation todavía no existe
+   * en el backend (404): el controller cae al catálogo sin romper nada.
+   */
+  me(): Promise<LiveProfileRow | null>;
+  createPing(targetProfileId: string): Promise<LivePing>;
+  listPings(box: PingBox): Promise<LivePingItem[]>;
+  acceptPing(pingId: string): Promise<LiveMatch>;
+  rejectPing(pingId: string): Promise<void>;
   /** URL del stream con el ticket en la query (EventSource no manda headers). */
   streamUrl(ticket: string): string;
 };
@@ -185,6 +202,106 @@ export type CreateLiveApiOptions = {
   fetchImpl?: FetchLike;
 };
 
+/**
+ * `Ping` del contrato. Un campo faltante no rompe la bandeja: la fila se
+ * descarta en `toPingRow` (adapter), no acá, para que el error quede en un solo
+ * lugar testeado.
+ */
+function readPing(payload: unknown): LivePing | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const id = readString(record, 'id');
+  const status = record['status'];
+  if (id === '' || !isPingStatus(status)) {
+    return null;
+  }
+  const matchId = record['matchId'];
+  return {
+    id,
+    fromProfileId: readString(record, 'fromProfileId'),
+    toProfileId: readString(record, 'toProfileId'),
+    status: status as PingStatus,
+    createdAt: readString(record, 'createdAt'),
+    expiresAt: readString(record, 'expiresAt'),
+    matchId: typeof matchId === 'string' ? matchId : null,
+  };
+}
+
+function readPingPeer(payload: unknown): LivePingPeer | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const profileId = readString(record, 'profileId');
+  if (profileId === '') {
+    return null;
+  }
+  const sourceType = readString(record, 'sourceType');
+  return {
+    profileId,
+    nickname: readString(record, 'nickname'),
+    initials: readString(record, 'initials'),
+    intention: readString(record, 'intention'),
+    photoId: readString(record, 'photoId'),
+    sourceType: SOURCE_TYPES.includes(sourceType as SourceType)
+      ? (sourceType as SourceType)
+      : 'human',
+  };
+}
+
+function readPingItem(payload: unknown): LivePingItem | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const ping = readPing(record['ping']);
+  const peer = readPingPeer(record['peer']);
+  return ping === null || peer === null ? null : { ping, peer };
+}
+
+function readPingItems(payload: unknown): LivePingItem[] {
+  const record = (payload ?? {}) as Record<string, unknown>;
+  const list = record['pings'];
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  const items: LivePingItem[] = [];
+  for (const item of list) {
+    const parsed = readPingItem(item);
+    if (parsed !== null) {
+      items.push(parsed);
+    }
+  }
+  return items;
+}
+
+function readMatch(payload: unknown): LiveMatch {
+  const record = (payload ?? {}) as Record<string, unknown>;
+  const ids = Array.isArray(record['profileIds']) ? record['profileIds'] : [];
+  return {
+    id: readString(record, 'id'),
+    profileIds: ids.filter((id): id is string => typeof id === 'string'),
+    createdAt: readString(record, 'createdAt'),
+  };
+}
+
+/**
+ * `GET /me` puede devolver el `ProfileSummary` pelado o envuelto en `profile`.
+ * Se aceptan las dos formas y cualquier otra cosa cae al fallback del catálogo.
+ */
+function readMe(payload: unknown): LiveProfileRow | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const nested = record['profile'];
+  if (typeof nested === 'object' && nested !== null) {
+    return readProfileRow(nested);
+  }
+  return readProfileRow(record);
+}
 export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): LiveApi {
   const doFetch: FetchLike =
     fetchImpl ??
@@ -335,6 +452,42 @@ export function createLiveApi({ baseUrl, fetchImpl }: CreateLiveApiOptions): Liv
         nextCursor: typeof nextCursor === 'string' ? nextCursor : null,
         hasMore: payload?.['hasMore'] === true,
       };
+    },
+    me: async () => {
+      try {
+        const response = await request('/me');
+        return readMe(response.payload);
+      } catch (error) {
+        // El backend todavía no tiene `/me`: no es un error de la sesión, es una
+        // operation que falta. El controller resuelve el perfil desde el catálogo.
+        if (error instanceof LiveApiError && error.status === 404) {
+          return null;
+        }
+        throw error;
+      }
+    },
+    createPing: async (targetProfileId) => {
+      const response = await request('/pings', { method: 'POST', body: { targetProfileId } });
+      const ping = readPing(response.payload);
+      if (ping === null) {
+        throw new LiveApiError(
+          response.status,
+          'INVALID_PING',
+          'El ping no vino con la forma esperada.',
+        );
+      }
+      return ping;
+    },
+    listPings: async (box) =>
+      readPingItems((await request(`/pings${queryString({ box })}`)).payload),
+    acceptPing: async (pingId) => {
+      const response = await request(`/pings/${encodeURIComponent(pingId)}/accept`, {
+        method: 'POST',
+      });
+      return readMatch(response.payload);
+    },
+    rejectPing: async (pingId) => {
+      await request(`/pings/${encodeURIComponent(pingId)}/reject`, { method: 'POST' });
     },
     streamUrl: (ticket) => `${baseUrl}/events${queryString({ ticket })}`,
   };

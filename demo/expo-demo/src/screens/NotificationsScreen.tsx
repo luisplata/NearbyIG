@@ -1,8 +1,11 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
+import { useLive } from '../live/LiveProvider';
+import { formatPingTime, pendingPings } from '../live/pings';
+import { pingText } from '../live/pingsCopy';
 import { useDemo } from '../state/DemoProvider';
-import { unreadCount } from '../state/selectors';
+import { bellBadgeCount, unreadCount } from '../state/selectors';
 import type { DemoNotification } from '../state/types';
 import { colors, fontFamily, fontSize, space, text } from '../theme/theme';
 
@@ -11,18 +14,31 @@ import { EmptyState } from '../components/EmptyState';
 import { Icon, type IconName } from '../components/Icon';
 
 /**
- * Centro de notificaciones guionadas: badge de no leídos, marcar leído y marcar
- * todo leído. No hay push real (F-6).
+ * Centro de notificaciones.
+ *
+ * **Dos fuentes.** Las notificaciones guionadas del dataset (badge de no leídos,
+ * marcar leído) y, cuando hay sesión live, los pings pendientes de la bandeja
+ * real. Antes el centro no mostraba nada aunque el backend hubiera recibido un
+ * ping: ahora la fila live es explícita ("Ping de {nombre}") y lleva a la
+ * bandeja, donde sí se puede aceptar o rechazar.
+ *
+ * **Por qué no se marcan leídos.** Un ping live no es una notificación local: se
+ * apaga cuando el server deja de listarlo como `pending` (aceptado, rechazado o
+ * vencido). Marcarlo leído acá sería mentirle al backend.
  */
 export function NotificationsScreen() {
   const { state, dispatch } = useDemo();
+  const live = useLive();
+  const livePings = state.source === 'live' ? pendingPings(live.pings.inbox) : [];
   const unread = unreadCount(state);
+  const badge = bellBadgeCount(state, live.pings.pending);
+  const empty = state.notifications.length === 0 && livePings.length === 0;
 
   return (
     <View style={styles.root}>
       <View style={styles.topRow}>
         <Text style={[text.small, styles.unread]}>
-          {fmt('notif.unread', { count: `${unread}` })}
+          {fmt('notif.unread', { count: `${badge}` })}
         </Text>
         <Button
           label={fmt('notif.markAllRead')}
@@ -32,9 +48,25 @@ export function NotificationsScreen() {
         />
       </View>
 
-      {state.notifications.length === 0 ? (
+      {livePings.length === 0 ? null : (
+        <View style={styles.section}>
+          <Text style={[text.small, styles.sectionTitle]}>{fmt('ping.inboxTitle')}</Text>
+          {livePings.map((row) => (
+            <LivePingRow
+              key={row.id}
+              name={row.peer.nickname}
+              time={formatPingTime(row.createdAt)}
+              onOpen={() => {
+                dispatch({ type: 'OPEN_OVERLAY', overlay: 'pings' });
+              }}
+            />
+          ))}
+        </View>
+      )}
+
+      {empty ? (
         <EmptyState message={fmt('notif.empty')} icon="bellOutline" />
-      ) : (
+      ) : state.notifications.length === 0 ? null : (
         <ScrollView contentContainerStyle={styles.list}>
           {state.notifications.map((notification) => (
             <NotificationRow
@@ -56,6 +88,30 @@ const icons: Record<DemoNotification['kind'], IconName> = {
   match: 'heart',
   reveal: 'eye',
 };
+
+function LivePingRow({
+  name,
+  time,
+  onOpen,
+}: {
+  name: string;
+  time: string;
+  onOpen: () => void;
+}) {
+  const label = pingText('notifLive', { name });
+  return (
+    <View style={styles.row}>
+      <Icon name="ping" size={18} color={colors.accent} />
+      <View style={styles.rowBody}>
+        <Text style={[text.body, styles.unreadLabel, { fontSize: fontSize[1] }]}>{label}</Text>
+        {time === '' ? null : (
+          <Text style={[text.small, { color: colors.muted }]}>{time}</Text>
+        )}
+      </View>
+      <Button label={fmt('ping.accept')} variant="ghost" onPress={onOpen} />
+    </View>
+  );
+}
 
 function NotificationRow({
   notification,
@@ -101,6 +157,14 @@ const styles = StyleSheet.create({
   },
   unread: {
     flex: 1,
+  },
+  section: {
+    gap: 2,
+  },
+  sectionTitle: {
+    color: colors.muted,
+    fontWeight: '600',
+    letterSpacing: 0.4,
   },
   list: {
     gap: space[1],

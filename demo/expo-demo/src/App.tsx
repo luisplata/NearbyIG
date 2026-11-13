@@ -28,7 +28,8 @@ import { ProfileScreen } from './screens/ProfileScreen';
 import { SafetyScreen } from './screens/SafetyScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { DemoStoreProvider, useDemo } from './state/DemoProvider';
-import { profileById, unreadCount } from './state/selectors';
+import { PreferencesProvider } from './state/PreferencesProvider';
+import { bellBadgeCount, profileById } from './state/selectors';
 import { createDemoStore } from './state/store';
 import type { DemoOverlay } from './state/types';
 import { colors, fontFamily, fontSize, space, text } from './theme/theme';
@@ -59,9 +60,11 @@ export default function App() {
 
   return (
     <DemoStoreProvider store={store}>
-      <LiveProvider store={store}>
-        <DemoShell />
-      </LiveProvider>
+      <PreferencesProvider>
+        <LiveProvider store={store}>
+          <DemoShell />
+        </LiveProvider>
+      </PreferencesProvider>
     </DemoStoreProvider>
   );
 }
@@ -80,6 +83,8 @@ function DemoShell() {
   const celebration = profileById(state.matchCelebration, state.catalog);
   const ghost = ghostSwitch(state);
   const zonePrompt = live.state.zonePrompt;
+  /** Campana: notificaciones del guion + pings pendientes de la sesión live. */
+  const bell = bellBadgeCount(state, live.pings.pending);
 
   const closeSheet = (): void => setSimOpen(false);
   const openSheet = (): void => setSimOpen(true);
@@ -128,15 +133,15 @@ function DemoShell() {
               <IconButton
                 icon="bellOutline"
                 label={
-                  unreadCount(state) > 0
-                    ? fmt('a11y.notificationsBadge', { count: `${unreadCount(state)}` })
+                  bell > 0
+                    ? fmt('a11y.notificationsBadge', { count: `${bell}` })
                     : fmt('nav.notifications')
                 }
                 onPress={() => openNotifications()}
               />
               <CountBadge
-                count={unreadCount(state)}
-                label={fmt('a11y.notificationsBadge', { count: `${unreadCount(state)}` })}
+                count={bell}
+                label={fmt('a11y.notificationsBadge', { count: `${bell}` })}
               />
             </View>
           </View>

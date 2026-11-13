@@ -35,6 +35,15 @@ export const API_STORAGE_KEY = 'nearbyig.api';
 /** Clave de la zona demo elegida. Sólo guarda la clave (`cdmx`), nunca el punto. */
 export const ZONE_STORAGE_KEY = 'nearbyig.demoZone';
 
+/**
+ * Clave de las preferencias del usuario: radio, filtros y toggle de bots.
+ *
+ * Guarda **sólo** decisiones de UI (números de radio, enums del catálogo y
+ * booleanos). No hay coordenadas ni identidad de sesión: el punto del GPS sigue
+ * viviendo en memoria y el token no se persiste.
+ */
+export const PREFERENCES_STORAGE_KEY = 'nearbyig.preferences';
+
 export type LiveSettings = {
   /** Base de la API sin barra final. Puede ser relativa (mismo origen). */
   baseUrl: string;
@@ -221,6 +230,44 @@ export function clearStoredZone(): void {
     storage()?.removeItem(ZONE_STORAGE_KEY);
   } catch {
     // Lo mismo: si no hay storage no hay nada que borrar.
+  }
+}
+
+/**
+ * Storage mínimo que necesitan las preferencias. Es estructuralmente `Storage`,
+ * y entra por parámetro para que el test cubra el round-trip sin `window`.
+ */
+export type PreferenceStore = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+/** Preferencias guardadas en crudo. El parseo/validación vive en `preferences`. */
+export function readStoredPreferences(target: PreferenceStore | null = storage()): string | null {
+  try {
+    return target?.getItem(PREFERENCES_STORAGE_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeStoredPreferences(
+  value: string,
+  target: PreferenceStore | null = storage(),
+): void {
+  try {
+    target?.setItem(PREFERENCES_STORAGE_KEY, value);
+  } catch {
+    // Sin storage las preferencias viven lo que dura esta carga: no es un error.
+  }
+}
+
+export function clearStoredPreferences(target: PreferenceStore | null = storage()): void {
+  try {
+    target?.removeItem(PREFERENCES_STORAGE_KEY);
+  } catch {
+    // Igual que arriba: no hay nada que limpiar si no hay storage.
   }
 }
 

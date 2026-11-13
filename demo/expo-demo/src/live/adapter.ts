@@ -2,7 +2,7 @@ import { fixtures } from '../generated/fixtures';
 import type { Gender, Intention } from '../generated/fixtures';
 import type { UiProfile } from '../state/types';
 
-import type { LiveProfileRow } from './types';
+import type { LiveProfileRow, SourceType } from './types';
 
 /**
  * Adapter explícito entre `ProfileSummary` (contrato) y `UiProfile` (lo que
@@ -67,6 +67,59 @@ export function toUiProfiles(rows: readonly LiveProfileRow[]): UiProfile[] {
     }
   }
   return profiles;
+}
+
+/**
+ * Los `profileId` que son bots en una foto de `/discovery`.
+ *
+ * `UiProfile` sigue siendo el espejo de los 13 campos del dataset: la identidad
+ * de origen no se dibuja, pero el toggle de bots necesita saber cuáles recortar.
+ * Se calcula acá, donde ya se conoce la fila cruda, y viaja al lado del catálogo.
+ */
+export function botIdsOf(rows: readonly LiveProfileRow[]): string[] {
+  return rows.filter((row) => row.sourceType === 'bot').map((row) => row.profileId);
+}
+
+/**
+ * Perfil propio para el tab Perfil, ya proyectado para la UI.
+ *
+ * **Por qué no es un `UiProfile`.** El perfil propio no viene de `/discovery`:
+ * no tiene distancia ni rumbo (no tiene sentido medirse a sí mismo) y sí tiene
+ * `instagramHandle` y verificaciones. Mostrar el `self` del dataset cuando hay
+ * sesión live era el defecto reportado: acá se muestra el perfil real de la
+ * sesión y, si `/me` todavía no existe, la fila del catálogo con el mismo
+ * `profileId` (`selfSource: 'catalog'` en el estado).
+ */
+export type SelfView = {
+  profileId: string;
+  nickname: string;
+  initials: string;
+  photoId: string;
+  /** `null` si el backend devolvió una intención fuera del vocabulario. */
+  intention: Intention | null;
+  instagramHandle: string;
+  statusKey: string;
+  verified: boolean;
+  online: boolean;
+  sourceType: SourceType;
+};
+
+export function toSelfView(row: LiveProfileRow | null): SelfView | null {
+  if (row === null || row.profileId === '' || row.nickname === '') {
+    return null;
+  }
+  return {
+    profileId: row.profileId,
+    nickname: row.nickname,
+    initials: row.initials,
+    photoId: row.photoId,
+    intention: isIntention(row.intention) ? row.intention : null,
+    instagramHandle: row.instagramHandle,
+    statusKey: row.statusKey,
+    verified: row.verified,
+    online: row.online,
+    sourceType: row.sourceType,
+  };
 }
 
 function isIntention(value: string): value is Intention {

@@ -1,6 +1,6 @@
 import type { DemoSource, DiscoveryFilters, UiProfile } from '../state/types';
 
-import { toUiProfiles } from './adapter';
+import { toUiProfiles, botIdsOf } from './adapter';
 import {
   createLiveApi,
   LiveApiError,
@@ -12,6 +12,7 @@ import {
 import type { LiveSettings } from './config';
 import { applyEvents } from './events';
 import type { GeoPoint, GeoResult } from './geolocation';
+import { newPendingPeers, toPingRows } from './pings';
 import { regionForZone } from './regions';
 import {
   emptyLiveState,
@@ -22,6 +23,7 @@ import {
   type LiveLocation,
   type LiveNotice,
   type LiveState,
+  type PingStatus,
   type ZonePromptCause,
 } from './types';
 import { zoneForPoint } from './zones';
@@ -84,6 +86,21 @@ export type EventSourceLike = {
 
 export type LiveActionResult = { ok: boolean; code: string | null };
 
+/**
+ * Resultado de una acción de ping. `status` es lo que el server dejó: `pending`
+ * para un humano, `accepted` con `matchId` cuando el destino es un bot (acepta
+ * solo). `code` es el `Problem.code` cuando falla (`PING_DUPLICATE`,
+ * `PING_EXPIRED`, `PING_RESOLVED`, …).
+ */
+export type PingResult = {
+  ok: boolean;
+  code: string | null;
+  status: PingStatus | null;
+  matchId: string | null;
+};
+
+const PING_OK = { ok: true, code: null } as const;
+
 export type LiveControllerPorts = {
   /** `null` = modo live no configurado en este build. */
   settings: LiveSettings | null;
@@ -100,15 +117,27 @@ export type LiveControllerPorts = {
   /** Persiste la zona elegida o resuelta por GPS (`cdmx`/`bogota`, nunca un punto). */
   onZoneChange?: (zoneKey: string) => void;
   /**
+   * Aviso de ping nuevo: se llama una sola vez por ping que **aparece** en la
+   * bandeja (el adapter dedupea). La primera foto no avisa: los pendientes que
+   * ya estaban no son noticia.
+   */
+  onNewPings?: (count: number) => void;
+  /**
    * Log de diagnóstico con prefijo `[geo]`. La app pasa `console.info`; los tests
    * no, así el ruido queda en el navegador y no en la salida de vitest.
    */
   log?: (message: string) => void;
   /** Catálogo para la UI. `null` significa "volvé al dataset del build". */
-  onCatalog?: (profiles: readonly UiProfile[] | null, source: DemoSource) => void;
+  onCatalog?: (
+    profiles: readonly UiProfile[] | null,
+    source: DemoSource,
+    botIds: readonly string[],
+  ) => void;
   heartbeatMs?: number;
   pollMs?: number;
   reseedMs?: number;
+  /** Cada cuánto se refresca la bandeja. El contrato no tiene push de pings. */
+  pingsMs?: number;
 };
 
 export type LiveController = {
@@ -120,6 +149,14 @@ export type LiveController = {
   stop(): Promise<void>;
   refresh(): Promise<void>;
   refreshRows(): Promise<void>;
+  /** Vuelve a pedir las dos bandejas (`inbox` + `sent`). */
+  refreshPings(): Promise<void>;
+  /** `POST /pings`: devuelve el estado que quedó (`pending` o `accepted`). */
+  sendPing(targetProfileId: string): Promise<PingResult>;
+  /** `POST /pings/{id}/accept`: crea el match y refresca la bandeja. */
+  acceptPing(pingId: string): Promise<PingResult>;
+  /** `POST /pings/{id}/reject`: sin match, la fila queda `rejected`. */
+  rejectPing(pingId: string): Promise<PingResult>;
   setFilters(filters: DiscoveryFilters): void;
   /** El gesto "Usar mi ubicación": un solo pedido, sin seguimiento. */
   requestLocation(): Promise<void>;
@@ -135,6 +172,8 @@ export type LiveController = {
 const DEFAULT_HEARTBEAT_MS = 8_000;
 const DEFAULT_POLL_MS = 3_000;
 const DEFAULT_RESEED_MS = 1_200;
+/** 5 s: la bandeja no es un chat, pero el ping tiene que sentirse vivo. */
+const DEFAULT_PINGS_MS = 5_000;
 /** Default de `DiscoveryQuery.radiusM` en el contrato. */
 const DEFAULT_RADIUS_M = 5_000;
 
@@ -167,6 +206,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let reseedTimer: ReturnType<typeof setTimeout> | null = null;
+  let pingsTimer: ReturnType<typeof setInterval> | null = null;
 
   const notify = (): void => {
     for (const listener of [...listeners]) {
@@ -190,11 +230,11 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   };
 
   const emitCatalog = (): void => {
-    ports.onCatalog?.(toUiProfiles(state.discovery), 'live');
+    ports.onCatalog?.(toUiProfiles(state.discovery), 'live', botIdsOf(state.discovery));
   };
 
   const emitDataset = (): void => {
-    ports.onCatalog?.(null, 'dataset');
+    ports.onCatalog?.(null, 'dataset', []);
   };
 
   const log = ports.log ?? ((): void => undefined);
@@ -305,6 +345,10 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       clearTimeout(reseedTimer);
       reseedTimer = null;
     }
+    if (pingsTimer !== null) {
+      clearInterval(pingsTimer);
+      pingsTimer = null;
+    }
   };
 
   const closeStream = (): void => {
@@ -333,7 +377,20 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     cursor = null;
     failures = 0;
     presence = null;
-    set({ status: 'offline', transport: 'none', notice, error: code, location: null, point: null });
+    set({
+      status: 'offline',
+      transport: 'none',
+      notice,
+      error: code,
+      location: null,
+      point: null,
+      pings: [],
+      sentPings: [],
+      pingsAt: null,
+      pingError: null,
+      self: null,
+      selfSource: null,
+    });
     emitDataset();
     if (api !== null && state.session !== null) {
       // Best effort: la sesión ya puede estar revocada.
@@ -359,6 +416,12 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       session: null,
       discovery: [],
       rows: [],
+      pings: [],
+      sentPings: [],
+      pingsAt: null,
+      pingError: null,
+      self: null,
+      selfSource: null,
       lastSeq: 0,
       lastEventAt: null,
       location: null,
@@ -387,6 +450,11 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     }
     if (result.unknownProfile) {
       scheduleReseed();
+    }
+    // Un ping o un match del stream no esperan al próximo tick de la bandeja: se
+    // piden en el acto. El dedupe por peer evita que esto duplique el toast.
+    if (events.some((event) => event.type === 'ping.received' || event.type === 'match.created')) {
+      void refreshPings();
     }
   };
 
@@ -550,6 +618,80 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     }
   };
 
+  /**
+   * Foto de las dos bandejas. Es laxo a propósito: la bandeja es accesoria, y un
+   * 500 en `/pings` no puede tumbar una sesión que está sirviendo descubrimiento.
+   *
+   * **Toast sin duplicados.** Sólo avisa si ya había una foto anterior (`pingsAt`)
+   * y el ping es nuevo (`newPendingPeers` compara por peer). Un refresh que
+   * repite exactamente los mismos pendientes no vuelve a avisar, y la primera
+   * carga no convierte pendientes viejos en noticias.
+   */
+  const refreshPings = async (): Promise<void> => {
+    if (api === null || state.session === null) {
+      return;
+    }
+    try {
+      const [inbox, sent] = await Promise.all([api.listPings('inbox'), api.listPings('sent')]);
+      const hadPhoto = state.pingsAt !== null;
+      const previous = toPingRows(state.pings, 'inbox');
+      set({ pings: inbox, sentPings: sent, pingsAt: Date.now() });
+      if (hadPhoto) {
+        const fresh = newPendingPeers(previous, toPingRows(inbox, 'inbox'));
+        if (fresh.length > 0) {
+          ports.onNewPings?.(fresh.length);
+        }
+      }
+    } catch (error) {
+      // Un 401 acá no significa que la sesión murió: el latido lo decide.
+      log(
+        `[ping] bandeja sin respuesta status=${error instanceof LiveApiError ? error.status : 'network'}`,
+      );
+    }
+  };
+
+  const startPingPoll = (): void => {
+    if (pingsTimer !== null) {
+      return;
+    }
+    pingsTimer = setInterval(() => {
+      void refreshPings();
+    }, ports.pingsMs ?? DEFAULT_PINGS_MS);
+    void refreshPings();
+  };
+
+  /**
+   * Perfil propio de la sesión: `GET /me` y, si esa operation todavía no existe
+   * (404), la fila del catálogo con el mismo `profileId`. El fallback es
+   * explícito (`selfSource: 'catalog'`) para que la UI pueda aclarar de dónde
+   * salió el perfil en vez de mostrar el `self` del dataset como si fuera real.
+   */
+  const loadSelf = async (): Promise<void> => {
+    if (api === null || state.session === null) {
+      return;
+    }
+    const profileId = state.session.profileId;
+    try {
+      const me = await api.me();
+      if (me !== null) {
+        set({ self: me, selfSource: 'me' });
+        return;
+      }
+    } catch (error) {
+      log(`[ping] me sin respuesta status=${error instanceof LiveApiError ? error.status : 'network'}`);
+    }
+    const row =
+      state.rows.find((candidate) => candidate.profileId === profileId) ??
+      state.discovery.find((candidate) => candidate.profileId === profileId);
+    set({ self: row ?? null, selfSource: row === undefined ? null : 'catalog' });
+  };
+
+  const pingFailure = (error: unknown): PingResult => {
+    const code = error instanceof LiveApiError ? error.code : 'NETWORK';
+    set({ pingError: code });
+    return { ok: false, code, status: null, matchId: null };
+  };
+
   const afterSlotChange = async (session: LiveState['session']): Promise<void> => {
     if (api !== null) {
       api.setToken(session?.token ?? null);
@@ -557,11 +699,13 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     cursor = null;
     stopPolling();
     closeStream();
-    set({ session, transport: 'none' });
+    set({ session, transport: 'none', self: null, selfSource: null, pings: [], sentPings: [], pingsAt: null });
     await refreshRows();
     await refreshDiscovery();
+    await loadSelf();
     await connectStream();
     startHeartbeat();
+    startPingPoll();
   };
 
   /**
@@ -615,9 +759,12 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       degrade(error);
       return false;
     }
-    void refreshRows();
     await connectStream();
     startHeartbeat();
+    startPingPoll();
+    // El perfil propio no bloquea el arranque: llega un instante después y la UI
+    // ya está dibujando el catálogo.
+    void refreshRows().then(loadSelf);
     return true;
   };
 
@@ -783,6 +930,52 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       });
     },
     refreshRows,
+    refreshPings,
+    sendPing: async (targetProfileId) => {
+      if (api === null || state.session === null) {
+        return { ok: false, code: 'NO_SESSION', status: null, matchId: null };
+      }
+      try {
+        const ping = await api.createPing(targetProfileId);
+        set({ pingError: null });
+        await refreshPings();
+        return { ok: true, code: null, status: ping.status, matchId: ping.matchId };
+      } catch (error) {
+        return pingFailure(error);
+      }
+    },
+    acceptPing: async (pingId) => {
+      if (api === null || state.session === null) {
+        return { ok: false, code: 'NO_SESSION', status: null, matchId: null };
+      }
+      try {
+        const match = await api.acceptPing(pingId);
+        set({ pingError: null });
+        await refreshPings();
+        return { ok: true, code: null, status: 'accepted', matchId: match.id };
+      } catch (error) {
+        // El estado que diga el server manda: un accept repetido es 409 y la
+        // bandeja se refresca igual para mostrar el estado real.
+        const failure = pingFailure(error);
+        await refreshPings();
+        return failure;
+      }
+    },
+    rejectPing: async (pingId) => {
+      if (api === null || state.session === null) {
+        return { ok: false, code: 'NO_SESSION', status: null, matchId: null };
+      }
+      try {
+        await api.rejectPing(pingId);
+        set({ pingError: null });
+        await refreshPings();
+        return { ...PING_OK, status: 'rejected', matchId: null };
+      } catch (error) {
+        const failure = pingFailure(error);
+        await refreshPings();
+        return failure;
+      }
+    },
     setFilters: (next) => {
       const nextKey = JSON.stringify(queryFor(next));
       const sameFilters = nextKey === queryKey;

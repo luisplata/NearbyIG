@@ -24,8 +24,11 @@ import {
   type EventSourceLike,
   type LiveActionResult,
   type LiveController,
+  type PingResult,
 } from './controller';
 import { requestBrowserPoint } from './geolocation';
+import { pendingCount, toPingRows } from './pings';
+import type { PingRow } from './pings';
 import { emptyLiveState, type LiveState } from './types';
 
 /**
@@ -62,6 +65,12 @@ export type LiveBinding = {
   refreshRows: () => Promise<void>;
   claim: (slot: number) => Promise<LiveActionResult>;
   takeover: (slot: number) => Promise<LiveActionResult>;
+  /** Bandejas ya adaptadas a filas de UI, más nuevo primero. */
+  pings: { inbox: PingRow[]; sent: PingRow[]; pending: number; error: string | null };
+  refreshPings: () => Promise<void>;
+  sendPing: (targetProfileId: string) => Promise<PingResult>;
+  acceptPing: (pingId: string) => Promise<PingResult>;
+  rejectPing: (pingId: string) => Promise<PingResult>;
 };
 
 const LiveContext = createContext<LiveBinding | null>(null);
@@ -116,9 +125,12 @@ export function LiveProvider({
       requestPoint: requestBrowserPoint,
       // El usuario puede copiar estos logs cuando algo no cuadra. Sin coordenadas.
       log: (message) => console.info(message),
-      onCatalog: (profiles, source) => {
-        store.setCatalog(profiles === null ? fixtures.profiles : profiles, source);
+      onCatalog: (profiles, source, botIds) => {
+        store.setCatalog(profiles === null ? fixtures.profiles : profiles, source, botIds);
       },
+      // Un ping nuevo usa el mismo host de toasts del guion: una sola pila de
+      // avisos y el mismo timer de 4 s.
+      onNewPings: () => store.pushToast('notif.ping'),
     }),
   );
 
@@ -190,6 +202,32 @@ export function LiveProvider({
   const claim = useCallback(async (slot: number) => controller.claim(slot), [controller]);
   const takeover = useCallback(async (slot: number) => controller.takeover(slot), [controller]);
 
+  const refreshPings = useCallback(async () => {
+    await controller.refreshPings();
+  }, [controller]);
+  const sendPing = useCallback(
+    async (targetProfileId: string) => controller.sendPing(targetProfileId),
+    [controller],
+  );
+  const acceptPing = useCallback(async (pingId: string) => controller.acceptPing(pingId), [
+    controller,
+  ]);
+  const rejectPing = useCallback(async (pingId: string) => controller.rejectPing(pingId), [
+    controller,
+  ]);
+
+  /**
+   * Bandejas adaptadas. Se memoiza por referencia de `state.pings` /
+   * `state.sentPings`: el controlador las reemplaza enteras en cada foto, así
+   * que no hay re-render por un array nuevo en cada render de React.
+   */
+  const inbox = useMemo(() => toPingRows(live.pings, 'inbox'), [live.pings]);
+  const sent = useMemo(() => toPingRows(live.sentPings, 'sent'), [live.sentPings]);
+  const pings = useMemo(
+    () => ({ inbox, sent, pending: pendingCount(inbox), error: live.pingError }),
+    [inbox, sent, live.pingError],
+  );
+
   return (
     <LiveContext.Provider
       value={{
@@ -206,6 +244,11 @@ export function LiveProvider({
         refreshRows,
         claim,
         takeover,
+        pings,
+        refreshPings,
+        sendPing,
+        acceptPing,
+        rejectPing,
       }}
     >
       {children}

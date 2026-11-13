@@ -2,7 +2,9 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
 import { fixtures } from '../generated/fixtures';
+import { prefsCopy, prefsText } from '../live/prefsCopy';
 import { useDemo } from '../state/DemoProvider';
+import { usePreferences } from '../state/PreferencesProvider';
 import { colors, space, text } from '../theme/theme';
 
 import { Button } from './Button';
@@ -12,11 +14,17 @@ import { RadiusControl } from './RadiusControl';
 import { ToggleRow } from './ToggleRow';
 
 /**
- * Hoja de filtros: radio + intención + género + verificados + en línea. Todo
- * cambio se refleja de inmediato en radar, mapa y lista (F-3).
+ * Hoja de filtros: radio + intención + género + verificados + en línea + bots.
+ * Todo cambio se refleja de inmediato en radar, mapa y lista (F-3).
+ *
+ * El toggle de bots es del cliente: recorta el catálogo en `visibleProfiles`
+ * (`sourceType === 'bot'`), sin cambiar lo que devuelve el server. Sólo aparece
+ * cuando el catálogo activo tiene bots — en el dataset del build no hay, y un
+ * switch que no hace nada es ruido.
  */
 export function FilterSheet() {
   const { state, dispatch } = useDemo();
+  const prefs = usePreferences();
   const selectedIntentions = state.filters.intentions ?? [];
 
   return (
@@ -59,6 +67,15 @@ export function FilterSheet() {
         value={state.filters.onlineOnly}
         onChange={() => dispatch({ type: 'TOGGLE_ONLINE_ONLY' })}
       />
+
+      {prefs.botCount === 0 ? null : (
+        <ToggleRow
+          label={prefsCopy.botsLabel}
+          value={prefs.includeBots}
+          subtitle={prefsText('botsCount', { count: String(prefs.botCount) })}
+          onChange={prefs.setIncludeBots}
+        />
+      )}
 
       <View style={styles.clear}>
         <Button

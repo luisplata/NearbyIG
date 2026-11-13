@@ -65,6 +65,61 @@ export type LiveEventsPage = {
   hasMore: boolean;
 };
 
+/** `PingStatus` del contrato: `pending` es el único del que se puede salir. */
+export type PingStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
+
+const PING_STATUSES: readonly PingStatus[] = ['pending', 'accepted', 'rejected', 'expired'];
+
+/** `Ping`: la fila cruda del recurso. `matchId` es el puente al `Match`. */
+export type LivePing = {
+  id: string;
+  fromProfileId: string;
+  toProfileId: string;
+  status: PingStatus;
+  createdAt: string;
+  expiresAt: string;
+  matchId: string | null;
+};
+
+/**
+ * `PingPeer`: el otro lado del ping, ya proyectado por el server.
+ *
+ * No lleva medidas ni coordenadas a propósito: la bandeja cuenta quién
+ * escribió, no dónde está. Un bot se distingue por `sourceType` + `profileId`,
+ * igual que en `GET /discovery`.
+ */
+export type LivePingPeer = {
+  profileId: string;
+  nickname: string;
+  initials: string;
+  intention: string;
+  photoId: string;
+  sourceType: SourceType;
+};
+
+/** `PingListItem`: la fila de `GET /pings` — el ping y el otro perfil. */
+export type LivePingItem = {
+  ping: LivePing;
+  peer: LivePingPeer;
+};
+
+/** `Match`: uno por par, `profileIds` ordenado por id ascendente. */
+export type LiveMatch = {
+  id: string;
+  profileIds: string[];
+  createdAt: string;
+};
+
+/** Lado de la bandeja. El contrato lo exige explícito: no hay default. */
+export type PingBox = 'inbox' | 'sent';
+
+/** De dónde salió el perfil propio que muestra el tab Perfil. */
+export type LiveSelfSource = 'me' | 'catalog' | null;
+
+export function isPingStatus(value: unknown): value is PingStatus {
+  return typeof value === 'string' && PING_STATUSES.includes(value as PingStatus);
+}
+
 /** Los seis tipos del enum `EventType`. */
 export const EVENT_TYPES = [
   'profile.moved',
@@ -183,6 +238,17 @@ export type LiveState = {
   rows: LiveProfileRow[];
   /** Última foto de `/discovery`. Es la fuente del catálogo de la UI. */
   discovery: LiveProfileRow[];
+  /** Bandeja de entrada (`GET /pings?box=inbox`), más nuevo primero. */
+  pings: LivePingItem[];
+  /** Pings enviados (`box=sent`), con su estado actual. */
+  sentPings: LivePingItem[];
+  /** Cuándo se leyó la bandeja. `null` = todavía no hubo una foto. */
+  pingsAt: number | null;
+  /** `Problem.code` de la última acción de ping fallida. */
+  pingError: string | null;
+  /** Perfil propio de la sesión (`GET /me`, o su fallback del catálogo). */
+  self: LiveProfileRow | null;
+  selfSource: LiveSelfSource;
   lastSeq: number;
   lastEventAt: number | null;
   /** Código del último error del server (`Problem.code`). */
@@ -202,6 +268,12 @@ export function emptyLiveState(): LiveState {
     diagnostics: emptyDiagnostics(),
     rows: [],
     discovery: [],
+    pings: [],
+    sentPings: [],
+    pingsAt: null,
+    pingError: null,
+    self: null,
+    selfSource: null,
     lastSeq: 0,
     lastEventAt: null,
     error: null,

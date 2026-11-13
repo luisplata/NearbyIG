@@ -1,3 +1,5 @@
+import { fixtures } from '../generated/fixtures';
+
 import type { DemoAction } from './actions';
 import { initialState, reduce } from './reducer';
 import type { DemoEffect, DemoSource, DemoState, UiProfile } from './types';
@@ -24,9 +26,31 @@ export type DemoStore = {
    * usuario (el dataset nunca lo fue, se importaba). El modo live lo reemplaza con
    * cada foto de `/discovery`; `RESET` lo conserva. `DemoAction` sigue teniendo
    * las 27 acciones del contrato y el golden de paridad no cambia.
+   *
+   * `botIds` viaja al lado del catálogo porque `UiProfile` es el espejo de los 13
+   * campos del dataset: la identidad de origen no se dibuja pero el filtro de
+   * bots la necesita.
    */
-  setCatalog(catalog: readonly UiProfile[], source: DemoSource): void;
+  setCatalog(catalog: readonly UiProfile[], source: DemoSource, botIds?: readonly string[]): void;
+  /**
+   * Preferencia de UI: incluir los bots en lista, radar y mapa.
+   *
+   * Igual que `setCatalog`, no es una acción del contrato: es una decisión que
+   * el usuario cambia desde un switch y que se persiste fuera del estado.
+   */
+  setIncludeBots(value: boolean): void;
+  /**
+   * Toast de un evento que no nace en el reducer (un ping live). Usa el mismo
+   * timer y el mismo host que los toasts del guion, así no hay dos componentes
+   * de aviso conviviendo. `textKey` tiene que existir en el catálogo.
+   */
+  pushToast(textKey: string): void;
 };
+
+/** Igualdad por contenido: el provider puede pasar un array nuevo en cada render. */
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a === b || (a.length === b.length && a.every((id, index) => id === b[index]));
+}
 
 export function createDemoStore(initial: DemoState = initialState()): DemoStore {
   let state = initial;
@@ -91,14 +115,32 @@ export function createDemoStore(initial: DemoState = initialState()): DemoStore 
       cancelTimers();
     },
     pendingTimers: () => timers.size,
-    setCatalog: (catalog, source) => {
+    setCatalog: (catalog, source, botIds) => {
       if (disposed) {
         return;
       }
-      if (state.catalog === catalog && state.source === source) {
+      const nextBotIds = botIds ?? state.botIds;
+      if (state.catalog === catalog && state.source === source && sameIds(state.botIds, nextBotIds)) {
         return;
       }
-      state = { ...state, catalog, source };
+      state = { ...state, catalog, source, botIds: nextBotIds };
+      notify();
+    },
+    setIncludeBots: (value) => {
+      if (disposed || state.includeBots === value) {
+        return;
+      }
+      state = { ...state, includeBots: value };
+      notify();
+    },
+    pushToast: (textKey) => {
+      if (disposed) {
+        return;
+      }
+      const seq = state.toastSeq + 1;
+      const toast = { id: `t${seq}`, textKey };
+      state = { ...state, toastSeq: seq, toast };
+      schedule({ kind: 'toast', id: toast.id, delayMs: fixtures.timers.toastMs });
       notify();
     },
   };

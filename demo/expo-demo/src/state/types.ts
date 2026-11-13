@@ -127,6 +127,21 @@ export type DemoState = {
   catalog: readonly UiProfile[];
   /** Origen del catálogo. La UI lo usa para el switch y los avisos. */
   source: DemoSource;
+  /**
+   * Preferencia: incluir o no los bots del catálogo live en lista, radar y mapa.
+   *
+   * No es una acción de la máquina de estados (el reducer sigue teniendo las 27
+   * acciones del contrato y el golden de paridad no se mueve): es una
+   * preferencia de UI que el store aplica con `setIncludeBots` y que
+   * `visibleProfiles` lee. Default: incluidos.
+   */
+  includeBots: boolean;
+  /**
+   * `profileId`s que son bots en el catálogo activo. El adapter no los marca
+   * porque `UiProfile` es el espejo de los 13 campos del dataset; la identidad
+   * de origen viaja al lado, igual que `inUse` viaja en la fila cruda.
+   */
+  botIds: readonly string[];
 };
 
 /** Efecto a agendar por el store. El reducer nunca agenda nada. */

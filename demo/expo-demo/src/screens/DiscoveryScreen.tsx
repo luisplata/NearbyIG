@@ -3,14 +3,17 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
 import { useLive } from '../live/LiveProvider';
+import { prefsCopy } from '../live/prefsCopy';
 import { mapCenterFor, regionForZone } from '../live/regions';
 import { useDemo } from '../state/DemoProvider';
+import { usePreferences } from '../state/PreferencesProvider';
 import { formatRadius } from '../state/format';
-import { visibleProfiles } from '../state/selectors';
+import { pingsBadgeCount, visibleProfiles } from '../state/selectors';
 import type { UiProfile } from '../state/types';
 import { colors, fontSize, space, text } from '../theme/theme';
 
 import { BottomNav } from '../components/BottomNav';
+import { Chip } from '../components/Chip';
 import { EmptyState } from '../components/EmptyState';
 import { IconButton } from '../components/IconButton';
 import { ProfileList } from '../components/ProfileList';
@@ -28,6 +31,7 @@ import { discoveryLayout } from './discoveryBody';
 export function DiscoveryScreen() {
   const { state, dispatch } = useDemo();
   const live = useLive();
+  const prefs = usePreferences();
   const profiles = useMemo(() => visibleProfiles(state), [state]);
   /**
    * Geografía del basemap: el punto del GPS manda (vive sólo en memoria), y sin
@@ -81,6 +85,14 @@ export function DiscoveryScreen() {
         {filtered ? (
           <Text style={[text.small, { color: colors.accent }]}>{fmt('discovery.filtersApplied')}</Text>
         ) : null}
+        {/* Control visible del toggle de bots: un toque, sin abrir filtros. */}
+        {prefs.botCount === 0 ? null : (
+          <Chip
+            label={prefs.includeBots ? prefsCopy.botsOn : prefsCopy.botsOff}
+            selected={prefs.includeBots}
+            onPress={prefs.toggleBots}
+          />
+        )}
       </View>
 
       <View style={styles.radius}>
@@ -121,7 +133,11 @@ export function DiscoveryScreen() {
         )}
       </View>
 
-      <BottomNav view={state.view} pingsCount={state.incomingPings.length} onSelect={onNav} />
+      <BottomNav
+        view={state.view}
+        pingsCount={pingsBadgeCount(state, live.pings.pending)}
+        onSelect={onNav}
+      />
     </View>
   );
 }
