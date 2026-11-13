@@ -238,6 +238,110 @@ export async function countRows(table) {
   });
 }
 
+/**
+ * `PUT /presence`. El body se manda tal cual (no se rellena): los casos de
+ * validación tienen que poder provocarse desde el test.
+ */
+export async function updatePresence(token, body) {
+  return api('/presence', { method: 'PUT', token, body });
+}
+
+export async function clearPresence(token) {
+  return api('/presence', { method: 'DELETE', token });
+}
+
+/**
+ * Fila de `presence` de una sesión, **sin** la coordenada.
+ *
+ * El punto se queda en la base: lo que el test necesita saber es si hay punto y
+ * si la fila está viva, no dónde es. El valor exacto lo lee `storedPoint`, que
+ * existe sólo para probar el redondeo a 6 decimales.
+ */
+export async function presenceRow(sessionId) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT region_key, zone_key, point IS NOT NULL AS has_point,
+              expires_at > now() AS live,
+              round(extract(epoch FROM (expires_at - now())))::int AS remaining_s
+         FROM presence
+        WHERE session_id = $1`,
+      [sessionId],
+    );
+    return rows[0];
+  });
+}
+
+/** Coordenada guardada, leída del punto privado y redondeada a 6 decimales. */
+export async function storedPoint(sessionId) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT round(ST_X(point)::numeric, 6)::float8 AS lng,
+              round(ST_Y(point)::numeric, 6)::float8 AS lat
+         FROM presence
+        WHERE session_id = $1`,
+      [sessionId],
+    );
+    const row = rows[0];
+    return row === undefined ? undefined : { lat: row.lat, lng: row.lng };
+  });
+}
+
+/**
+ * Envejece la presencia de una sesión para probar el TTL sin dormir 12 s.
+ *
+ * Mueve `created_at` y `expires_at` juntos para no violar
+ * `presence_expiry_chk` (`expires_at > created_at`): es exactamente el estado
+ * que deja el paso del tiempo, una fila creada hace 30 s que venció hace 18 s.
+ */
+export async function expirePresence(sessionId) {
+  await withDb((client) =>
+    client.query(
+      `UPDATE presence
+          SET created_at = now() - interval '30 seconds',
+              expires_at = now() - interval '18 seconds'
+        WHERE session_id = $1`,
+      [sessionId],
+    ),
+  );
+}
+
+/** Filas de `presence` de una región (para probar que no hay duplicados). */
+export async function presenceRowsIn(regionKey) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT session_id, zone_key, expires_at > now() AS live
+         FROM presence
+        WHERE region_key = $1`,
+      [regionKey],
+    );
+    return rows;
+  });
+}
+
+/**
+ * Apunta la sesión a un `profile_id` que no está en el catálogo.
+ *
+ * Es el estado que deja un seed regenerado debajo de una sesión viva: la fila de
+ * `sessions` sigue (el token sirve) pero el perfil ya no existe. Se muta la fila
+ * en vez de borrar un perfil del catálogo para no romper el resto del suite.
+ */
+export async function pointSessionToMissingProfile(sessionId, profileId) {
+  await withDb((client) =>
+    client.query('UPDATE sessions SET profile_id = $2 WHERE session_id = $1', [sessionId, profileId]),
+  );
+}
+
+/** SRID y tipo de la columna de geometría de `presence`. */
+export async function presenceGeometryColumn() {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT srid, type FROM geometry_columns
+        WHERE f_table_name = 'presence' AND f_geometry_column = 'point'`,
+    );
+    return rows[0];
+  });
+}
+
 
 export async function snapshotSessionIds() {
   return withDb(async (client) => {
