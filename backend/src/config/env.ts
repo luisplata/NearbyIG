@@ -20,6 +20,14 @@ export interface AppConfig {
   readonly sessionTtlSeconds: number;
   /** Slots demo por región: el contrato fija 10. */
   readonly slotCount: number;
+  /**
+   * Vida del ticket de `GET /events`: el contrato fija 30 s.
+   *
+   * No se lee de `process.env` a propósito: un ticket que vive más que lo
+   * declarado es una fuga silenciosa, y el valor no es una decisión de
+   * operación sino del contrato.
+   */
+  readonly streamTicketTtlSeconds: number;
   /** Región que se usa cuando `POST /auth/demo-session` no recibe body. */
   readonly defaultRegionKey: string;
 }
@@ -70,6 +78,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jwtSecret: jwtSecret === '' ? DEV_JWT_SECRET : jwtSecret,
     sessionTtlSeconds: parseInteger('SESSION_TTL_SECONDS', env.SESSION_TTL_SECONDS, 7200, 60, 86_400),
     slotCount: 10,
+    streamTicketTtlSeconds: 30,
     defaultRegionKey: (env.DEFAULT_REGION_KEY?.trim() || 'mx').toLowerCase(),
   };
 }

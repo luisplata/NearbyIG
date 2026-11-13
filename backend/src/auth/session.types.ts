@@ -12,6 +12,15 @@ export interface DemoSession {
   readonly sourceType: SourceType;
 }
 
+/**
+ * Lo que devuelve `POST /auth/stream-ticket` (`StreamTicket`): valor opaco y
+ * vencimiento absoluto. El valor no se persiste (sólo su hash) y no se loguea.
+ */
+export interface StreamTicket {
+  readonly ticket: string;
+  readonly expiresAt: string;
+}
+
 /** Contexto que el guard deja en la request ya autenticada. */
 export interface AuthContext {
   readonly sessionId: string;

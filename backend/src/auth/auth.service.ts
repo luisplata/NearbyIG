@@ -31,7 +31,7 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
- * Apertura de sesión demo.
+ * Ciclo de vida de la sesión demo: apertura (claim de slot) y cierre.
  *
  * El slot es la identidad del perfil (1..10 por región): dos navegadores no
  * pueden quedarse con el mismo. La carrera la resuelve el índice único parcial
@@ -40,6 +40,9 @@ function isUniqueViolation(error: unknown): boolean {
  *
  * Invitados: si los 10 slots están vivos, el siguiente entra con `sourceType:
  * guest` y `demoSlot: null`. Un invitado no ocupa slot y no es descubrible.
+ *
+ * No hay takeover: el contrato no lo modela y pedir un slot ocupado es 409, no
+ * un desalojo implícito.
  */
 @Injectable()
 export class AuthService {
@@ -64,6 +67,20 @@ export class AuthService {
       if (region.rowCount === 0) {
         throw validationFailed(`regionKey "${regionKey}" no existe en el catálogo demo.`);
       }
+
+      // El índice único de slot vivo sólo mira `revoked_at IS NULL`: no puede
+      // evaluar `now()` porque un predicado de índice tiene que ser inmutable.
+      // Una fila vencida pero no revocada sigue ocupando el slot y haría que un
+      // slot libre responda 409 para siempre. Se revoca acá, en la misma
+      // transacción del claim, antes de tocar el slot.
+      await client.query(
+        `UPDATE sessions
+            SET revoked_at = now()
+          WHERE region_key = $1
+            AND revoked_at IS NULL
+            AND expires_at <= now()`,
+        [regionKey],
+      );
 
       const claim = await this.claim(client, regionKey, requestedSlot);
       const tokenId = randomUUID();
@@ -115,6 +132,47 @@ export class AuthService {
       } catch {
         /* ya se hizo COMMIT o la conexión se cayó */
       }
+      client.release();
+    }
+  }
+
+  /**
+   * `POST /auth/logout`: revoca la sesión y quema sus tickets.
+   *
+   * Idempotente por construcción: `revoked_at` se escribe una sola vez
+   * (`WHERE revoked_at IS NULL`) y los tickets se borran con `DELETE`, así que
+   * llamarlo dos veces no rompe ni cambia nada. El guard de esta operation es
+   * `TeardownSessionGuard` (firma, no fila), que es lo que permite que el
+   * segundo logout llegue al handler y responda 204.
+   *
+   * Devuelve si la sesión estaba viva, para el log. El body no lo usa: el
+   * contrato declara 204 sin cuerpo.
+   */
+  async logout(sessionId: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const revoked = await client.query(
+        `UPDATE sessions
+            SET revoked_at = now()
+          WHERE session_id = $1
+            AND revoked_at IS NULL`,
+        [sessionId],
+      );
+      // Un ticket emitido antes del logout no puede abrir un stream después.
+      await client.query('DELETE FROM stream_tickets WHERE session_id = $1', [sessionId]);
+      await client.query('COMMIT');
+      const wasLive = (revoked.rowCount ?? 0) > 0;
+      this.logger.log(`sesión demo cerrada revoked=${wasLive}`);
+      return wasLive;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        /* la conexión se cayó */
+      }
+      throw error;
+    } finally {
       client.release();
     }
   }
