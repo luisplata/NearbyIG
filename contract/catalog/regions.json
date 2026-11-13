@@ -1,0 +1,4 @@
+[
+  { "defaultZoneKey": "cdmx", "nameKey": "region.mx", "regionKey": "mx" },
+  { "defaultZoneKey": "bogota", "nameKey": "region.co", "regionKey": "co" }
+]

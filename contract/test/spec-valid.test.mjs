@@ -22,6 +22,8 @@ const EXPECTED_OPERATIONS = [
   'POST /auth/stream-ticket',
   'GET /events',
   'GET /events/poll',
+  'GET /demo/regions',
+  'GET /demo/zones',
 ];
 
 const SUPPORTED_SPRINTS = [1, 2, 3];

@@ -1,0 +1,69 @@
+# Catálogo (Sprint 2): regiones y zonas.
+#
+# Las dos operations son de lectura y no tienen selector de país: la región de
+# la sesión se deriva del token, no de un query. `regionKey` existe en
+# `GET /demo/zones` porque el endpoint puede servir a una sesión que todavía no
+# abrió su zona (S1 resuelve el default), no porque el cliente elija un país.
+#
+# Geometría: acá no hay ninguna. El polígono vive en `contract/catalog/zones.json`
+# y los responses proyectan `ZoneSummary` (`zoneKey`, `nameKey`, `regionKey`).
+# El test `zones-geometry.test.mjs` recorre el grafo de `$ref` y falla si alguna
+# schema pública alcanza `polygon`, `center`, `geometry` o un par de coordenadas.
+#
+# Errores: 401 heredado de `demoSession`; 422 para un `regionKey` bien formado
+# pero fuera de `mx`/`co` (`REGION_UNAVAILABLE`). Uno malformado o ausente es
+# `VALIDATION_FAILED` con el mismo status: el contrato declara el caso de
+# catálogo (región que no existe), que es el que esta operación resuelve.
+
+demo-regions:
+  get:
+    operationId: listDemoRegions
+    summary: Lista las regiones del catálogo
+    description: |
+      Dos filas: `mx` y `co`. Sin paginación (son dos) y sin geometría. Cada
+      región trae la `zoneKey` por defecto con la que una sesión demo arranca.
+    tags:
+      - catalog
+    responses:
+      '200':
+        description: Las regiones disponibles con su zona por defecto.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/region.yaml#/RegionList'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+    x-implementation-sprint: 2
+
+demo-zones:
+  get:
+    operationId: listDemoZones
+    summary: Lista las zonas de una región
+    description: |
+      Proyecta cada zona a `ZoneSummary`: `zoneKey`, `nameKey` y `regionKey`.
+      El polígono no sale por HTTP en ninguna forma — ni como GeoJSON, ni como
+      pares `[lng, lat]`, ni como `center`. El cliente dibuja con datos que ya
+      están en el bundle de la demo (S3), no con la respuesta.
+    tags:
+      - catalog
+    parameters:
+      - name: regionKey
+        in: query
+        required: true
+        description: |
+          Región cuyas zonas se listan. El catálogo sólo conoce `mx` y `co`;
+          cualquier otra cosa bien formada es `REGION_UNAVAILABLE`.
+        schema:
+          $ref: '../schemas/common.yaml#/RegionKey'
+    responses:
+      '200':
+        description: Zonas de la región, sin geometría.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/region.yaml#/ZoneList'
+      '401':
+        $ref: '../openapi.yaml#/components/responses/Unauthorized'
+      '422':
+        $ref: '../openapi.yaml#/components/responses/RegionUnavailable'
+    x-implementation-sprint: 2

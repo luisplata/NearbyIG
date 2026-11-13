@@ -23,7 +23,7 @@ info:
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: '2661d6cc0a6c'
+  x-contract-id: '9a46aa91e7d3'
 
 servers:
   - url: http://localhost:3000
@@ -40,6 +40,11 @@ tags:
     description: |
       Stream SSE y polling del mismo log de eventos. El orden lo da `seq`, no
       `occurredAt`; el cliente deduplica con `seq <= lastSeen`.
+  - name: catalog
+    description: |
+      Regiones y zonas de la demo. Sólo proyecciones: `ZoneSummary` lleva
+      `zoneKey`, `nameKey` y `regionKey`, nunca geometría. El polígono vive en
+      `contract/catalog/zones.json`, fuera del spec.
 
 paths:
   /auth/demo-session:
@@ -52,6 +57,10 @@ paths:
     $ref: './paths/events.yaml#/events'
   /events/poll:
     $ref: './paths/events.yaml#/events-poll'
+  /demo/regions:
+    $ref: './paths/catalog.yaml#/demo-regions'
+  /demo/zones:
+    $ref: './paths/catalog.yaml#/demo-zones'
 
 components:
   # Respuestas de error compartidas. Todas tienen la misma forma
@@ -116,6 +125,17 @@ components:
           schema:
             $ref: './schemas/errors.yaml#/Problem'
 
+    RegionUnavailable:
+      description: |
+        La región pedida está bien formada pero el catálogo no la sirve: sólo
+        existen `mx` y `co` (`REGION_UNAVAILABLE`). Un `regionKey` ausente o con
+        otra forma es `VALIDATION_FAILED`, mismo 422.
+      x-error-code: REGION_UNAVAILABLE
+      content:
+        application/problem+json:
+          schema:
+            $ref: './schemas/errors.yaml#/Problem'
+
   securitySchemes:
     demoSession:
       type: http
@@ -161,7 +181,15 @@ components:
       $ref: './schemas/common.yaml#/KeyLabel'
     Page:
       $ref: './schemas/common.yaml#/Page'
+    Region:
+      $ref: './schemas/region.yaml#/Region'
     RegionKey:
       $ref: './schemas/common.yaml#/RegionKey'
+    RegionList:
+      $ref: './schemas/region.yaml#/RegionList'
     SourceType:
       $ref: './schemas/common.yaml#/SourceType'
+    ZoneList:
+      $ref: './schemas/region.yaml#/ZoneList'
+    ZoneSummary:
+      $ref: './schemas/region.yaml#/ZoneSummary'

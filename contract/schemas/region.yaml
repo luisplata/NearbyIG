@@ -1,0 +1,97 @@
+# Catálogo público: regiones y zonas tal como salen por HTTP.
+#
+# Nada de este archivo describe geometría. `contract/catalog/zones.json` guarda
+# el polígono en pares posicionales `[lng, lat]` y **no** se referencia desde
+# acá: un `$ref` sólo apunta a otro schema del spec, nunca a un archivo de
+# `catalog/`. Por eso `ZoneSummary` es la única forma en que una zona puede
+# viajar, y son tres campos.
+#
+# `RegionKey` no se declara de nuevo: vive en `common.yaml` desde PR1 (fija la
+# forma ISO 3166-1 alpha-2 en minúscula). Duplicarlo acá sería la primera copia
+# que se desincroniza.
+
+Region:
+  type: object
+  additionalProperties: false
+  required:
+    - regionKey
+    - nameKey
+    - defaultZoneKey
+  description: |
+    Fila del catálogo de regiones. `defaultZoneKey` existe para que la sesión
+    demo tenga una zona concreta sin que el cliente elija: el flujo no tiene
+    selector de país, la región se deriva de la sesión.
+  properties:
+    regionKey:
+      $ref: './common.yaml#/RegionKey'
+    nameKey:
+      type: string
+      minLength: 1
+      description: Clave de copy (`region.mx`), estable entre idiomas.
+      examples:
+        - region.mx
+    defaultZoneKey:
+      type: string
+      pattern: '^[a-z][a-z0-9-]*$'
+      description: |
+        `zoneKey` de la zona por defecto de la región. Tiene que existir en
+        `contract/catalog/zones.json`; el test de geometría lo verifica.
+      examples:
+        - cdmx
+
+RegionList:
+  type: object
+  additionalProperties: false
+  required:
+    - regions
+  description: |
+    Respuesta de `GET /demo/regions`. Objeto con un array adentro, no array
+    pelado: es el mismo idioma que `EventsPage` (un sobre chico y cerrado deja
+    lugar a metadata sin romper el shape).
+  properties:
+    regions:
+      type: array
+      minItems: 1
+      items:
+        $ref: '#/Region'
+
+ZoneSummary:
+  type: object
+  additionalProperties: false
+  required:
+    - zoneKey
+    - nameKey
+    - regionKey
+  description: |
+    Proyección pública de una zona: `zoneKey`, `nameKey` y `regionKey`. Nada
+    más. El polígono, el centro y cualquier coordenada se quedan en el catálogo
+    (`contract/catalog/zones.json`) y son inalcanzables desde este schema: no
+    hay propiedad que los nombre ni `$ref` que los traiga.
+  properties:
+    zoneKey:
+      type: string
+      pattern: '^[a-z][a-z0-9-]*$'
+      description: Clave estable de la zona (`cdmx`, `bogota`).
+      examples:
+        - cdmx
+    nameKey:
+      type: string
+      minLength: 1
+      description: Clave de copy (`zone.cdmx`).
+      examples:
+        - zone.cdmx
+    regionKey:
+      $ref: './common.yaml#/RegionKey'
+
+ZoneList:
+  type: object
+  additionalProperties: false
+  required:
+    - zones
+  description: |
+    Respuesta de `GET /demo/zones`: las zonas de una sola región.
+  properties:
+    zones:
+      type: array
+      items:
+        $ref: '#/ZoneSummary'
