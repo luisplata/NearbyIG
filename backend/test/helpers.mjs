@@ -251,6 +251,172 @@ export async function clearPresence(token) {
 }
 
 /**
+ * `GET /events/poll`. El cursor y el limit se mandan tal cual (vacíos incluidos):
+ * los casos de validación tienen que poder provocarse desde el test.
+ */
+export async function pollEvents(token, { cursor, limit } = {}) {
+  const params = new URLSearchParams();
+  if (cursor !== undefined) params.set('cursor', cursor);
+  if (limit !== undefined) params.set('limit', String(limit));
+  const query = params.toString();
+  return api(`/events/poll${query === '' ? '' : `?${query}`}`, { token });
+}
+
+/** `id` del envelope → `seq`. Sólo para comparar, igual que hace el cliente. */
+export function seqOfId(id) {
+  const match = /^[a-z]{2}:([0-9]{12})$/.exec(id ?? '');
+  if (match === null) throw new Error(`id de evento inesperado: ${JSON.stringify(id)}`);
+  return Number(match[1]);
+}
+
+/** Mayor `seq` del log de una región: el borde para congelar una comparación. */
+export async function maxEventSeq(regionKey) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      'SELECT coalesce(max(seq), 0)::text AS seq FROM events WHERE region_key = $1',
+      [regionKey],
+    );
+    return Number(rows[0].seq);
+  });
+}
+
+/** Filas del log de una región, sin geometría (el payload es el del contrato). */
+export async function eventRowsIn(regionKey) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT seq::text AS seq, event_type, payload
+         FROM events
+        WHERE region_key = $1
+        ORDER BY seq`,
+      [regionKey],
+    );
+    return rows.map((row) => ({ seq: Number(row.seq), type: row.event_type, payload: row.payload }));
+  });
+}
+
+/**
+ * Filas de `bots` de una región, **sin** centro ni posición: el test mira
+ * identidad, zona y métricas, nunca la geometría privada.
+ */
+export async function botRows(regionKey) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      `SELECT bot_profile_id, owner_profile_id, bot_index, zone_key,
+              waypoint_index, distance_m, bearing_deg
+         FROM bots
+        WHERE region_key = $1
+        ORDER BY bot_profile_id`,
+      [regionKey],
+    );
+    return rows;
+  });
+}
+
+/**
+ * Vence el tramo de todos los bots de una región: en el próximo tick el mundo
+ * avanza un waypoint sin esperar los 5 s reales. Es el equivalente de
+ * `expirePresence` para el ticker.
+ */
+export async function expireBotLegs(regionKey) {
+  await withDb((client) =>
+    client.query(
+      `UPDATE bots SET leg_started_at = now() - interval '1 hour' WHERE region_key = $1`,
+      [regionKey],
+    ),
+  );
+}
+
+/** Espera activa de una condición async, con timeout: el ticker es asíncrono. */
+export async function waitFor(check, { timeoutMs = 10_000, intervalMs = 200, label = 'condición' } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = await check();
+    if (last) return last;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`timeout esperando ${label} (${timeoutMs} ms)`);
+}
+
+/**
+ * Abre `GET /events` con un ticket y junta frames hasta `untilSeq` (o `maxMs`).
+ *
+ * Devuelve status, headers y frames `{ id, type, data }` sin el preámbulo. Si el
+ * status no es 200, devuelve el `Problem` en `body` — el stream y el error tienen
+ * que poder distinguirse desde el test.
+ */
+export async function openEventStream(ticket, options = {}) {
+  const { lastEventId, untilSeq, maxMs = 8_000 } = options;
+  const controller = new AbortController();
+  const url = new URL(`${API_BASE_URL}/events`);
+  url.searchParams.set('ticket', ticket);
+  const headers = {};
+  if (lastEventId !== undefined) headers['last-event-id'] = lastEventId;
+  const timer = setTimeout(() => controller.abort(), maxMs);
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetch(url, { headers, signal: controller.signal });
+    if (response.status !== 200) {
+      const text = await response.text();
+      return {
+        status: response.status,
+        headers: response.headers,
+        body: text === '' ? null : JSON.parse(text),
+        frames: [],
+        elapsedMs: Date.now() - startedAt,
+      };
+    }
+
+    const frames = [];
+    let buffer = '';
+    let head = '';
+    try {
+      for await (const chunk of response.body) {
+        buffer += Buffer.from(chunk).toString('utf8');
+        if (head === '') head = buffer.slice(0, 64);
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary >= 0) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const frame = parseSseFrame(block);
+          if (frame !== null) frames.push(frame);
+          boundary = buffer.indexOf('\n\n');
+        }
+        if (untilSeq !== undefined && frames.some((frame) => seqOfId(frame.id) >= untilSeq)) break;
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    }
+
+    return {
+      status: response.status,
+      headers: response.headers,
+      head,
+      frames,
+      elapsedMs: Date.now() - startedAt,
+    };
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+/** Un bloque `id/event/data` del stream; `null` para keepalive y comentarios. */
+function parseSseFrame(block) {
+  if (block.startsWith(':')) return null;
+  const field = (name) => {
+    const line = block.split('\n').find((candidate) => candidate.startsWith(`${name}: `));
+    return line === undefined ? undefined : line.slice(name.length + 2);
+  };
+  const id = field('id');
+  const type = field('event');
+  const data = field('data');
+  if (id === undefined || type === undefined || data === undefined) return null;
+  return { id, type, data: JSON.parse(data) };
+}
+
+/**
  * Fila de `presence` de una sesión, **sin** la coordenada.
  *
  * El punto se queda en la base: lo que el test necesita saber es si hay punto y
@@ -305,8 +471,27 @@ export async function expirePresence(sessionId) {
   );
 }
 
-/** Filas de `presence` de una región (para probar que no hay duplicados). */
-export async function presenceRowsIn(regionKey) {
+/**
+ * Empuja el vencimiento de las presencias del escenario.
+ *
+ * El TTL de 12 s es del contrato y se prueba en `presence.test.mjs`; acá sirve
+ * para que un test del mundo (bots, eventos) no dependa de la duración de la
+ * suite. No cambia la semántica de lectura: `expires_at > now()` sigue siendo la
+ * única autoridad y el reloj se mueve igual, sólo que más tarde.
+ */
+export async function extendPresence(sessionIds, seconds = 120) {
+  if (sessionIds.length === 0) return;
+  await withDb((client) =>
+    client.query(
+      `UPDATE presence
+          SET expires_at = now() + make_interval(secs => $2::int)
+        WHERE session_id = ANY($1::uuid[])`,
+      [sessionIds, seconds],
+    ),
+  );
+}
+
+/** Filas de `presence` de una región (para probar que no hay duplicados). */export async function presenceRowsIn(regionKey) {
   return withDb(async (client) => {
     const { rows } = await client.query(
       `SELECT session_id, zone_key, expires_at > now() AS live
