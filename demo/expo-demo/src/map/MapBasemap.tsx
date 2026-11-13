@@ -3,7 +3,7 @@ import type { ComponentRef } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 
-import { centerLngLat, MAP_TIMEOUT_MS, zoomForRadius } from './basemap';
+import { centerLngLat, MAP_TIMEOUT_MS, zoomForRadius, type LngLat } from './basemap';
 import { reduceMapStatus, type MapEvent, type MapPhase } from './mapStatus';
 import { mapStyle } from './style';
 
@@ -26,6 +26,11 @@ type Props = {
   /** Lado del cuadrado en px; 0 mientras el layout no está medido. */
   side: number;
   radiusM: number;
+  /**
+   * Centro del basemap: la zona de la región activa. Cambiarlo mueve el mapa con
+   * un `jumpTo` (sin remontar MapLibre ni perder los tiles ya cargados).
+   */
+  center: LngLat;
   /** Se avisa al padre para alternar leyenda ilustrada / atribución. */
   onPhaseChange?: (phase: MapPhase) => void;
 };
@@ -41,15 +46,16 @@ function supportsWebGL(): boolean {
   }
 }
 
-export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
+export function MapBasemap({ side, radiusM, center, onPhaseChange }: Props) {
   const hostRef = useRef<ComponentRef<typeof View>>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const phaseRef = useRef<MapPhase>('idle');
   const startedRef = useRef(false);
   // Valores vigentes para el handler de `load`: el efecto de montaje corre una
-  // sola vez, así que el closure vería el radio/lado iniciales si llega tarde.
-  const latestRef = useRef({ radiusM, side });
-  latestRef.current = { radiusM, side };
+  // sola vez, así que el closure vería el radio/lado/centro iniciales si llega
+  // tarde (o si el usuario cambió de región mientras cargaban los tiles).
+  const latestRef = useRef({ radiusM, side, center });
+  latestRef.current = { radiusM, side, center };
   const [phase, setPhase] = useState<MapPhase>('idle');
   const armed = side > 0;
 
@@ -117,8 +123,8 @@ export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
         const map = new Map({
           container: inner,
           style: mapStyle(),
-          center: centerLngLat(),
-          zoom: zoomForRadius(radiusM, side),
+          center: centerLngLat(center),
+          zoom: zoomForRadius(radiusM, side, center),
           interactive: false,
           attributionControl: false,
           maplibreLogo: false,
@@ -140,10 +146,14 @@ export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
           if (disposed) return;
           if (timer !== undefined) clearTimeout(timer);
           map.resize();
-          // El radio o el lado pudieron cambiar durante la carga: re-aplicamos el
-          // zoom vigente para que el mapa no quede a la escala vieja.
+          // El radio, el lado o la región pudieron cambiar durante la carga:
+          // re-aplicamos centro y zoom vigentes para que el mapa no quede en la
+          // escala ni en la ciudad viejas.
           const current = latestRef.current;
-          map.jumpTo({ center: centerLngLat(), zoom: zoomForRadius(current.radiusM, current.side) });
+          map.jumpTo({
+            center: centerLngLat(current.center),
+            zoom: zoomForRadius(current.radiusM, current.side, current.center),
+          });
           dispatch('READY');
         });
 
@@ -165,12 +175,14 @@ export function MapBasemap({ side, radiusM, onPhaseChange }: Props) {
     mapRef.current?.resize();
   }, [armed, side]);
 
-  // Cambio de radio: `jumpTo` sin animación (reduced-motion friendly).
+  // Cambio de radio, de lado o de región: `jumpTo` sin animación
+  // (reduced-motion friendly). El centro entra acá: seguir la región no remonta
+  // MapLibre ni vuelve a pedir el estilo.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || phaseRef.current !== 'ready') return;
-    map.jumpTo({ center: centerLngLat(), zoom: zoomForRadius(radiusM, side) });
-  }, [radiusM, side]);
+    map.jumpTo({ center: centerLngLat(center), zoom: zoomForRadius(radiusM, side, center) });
+  }, [radiusM, side, center.lon, center.lat]);
 
   useEffect(() => {
     onPhaseChange?.(phase);

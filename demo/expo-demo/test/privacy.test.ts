@@ -53,7 +53,7 @@ describe('privacidad del basemap', () => {
   });
 
   it('el centro de demo se declara una sola vez', () => {
-    const withCenter = FILES.filter((file) => file.text.includes('DEMO_CENTER ='));
+    const withCenter = FILES.filter((file) => file.text.includes('export const DEMO_CENTER'));
     expect(withCenter.map((file) => file.path)).toEqual(['map/basemap.ts']);
     expect(DEMO_CENTER.lat).toBeLessThan(0);
   });

@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { fmt } from '../generated/copy';
+import { useLive } from '../live/LiveProvider';
+import { centerForRegion } from '../live/regions';
 import { useDemo } from '../state/DemoProvider';
 import { formatRadius } from '../state/format';
 import { visibleProfiles } from '../state/selectors';
@@ -25,7 +27,15 @@ import { discoveryLayout } from './discoveryBody';
  */
 export function DiscoveryScreen() {
   const { state, dispatch } = useDemo();
+  const live = useLive();
   const profiles = useMemo(() => visibleProfiles(state), [state]);
+  /**
+   * Geografía del basemap: la región de la sesión live manda. Sin sesión (o en
+   * el dataset del build) `centerForRegion` devuelve el centro de la demo, así
+   * que el mapa nunca se queda en una ciudad que no es la de las distancias.
+   */
+  const regionKey = live.state.session?.regionKey ?? live.settings?.region ?? null;
+  const center = useMemo(() => centerForRegion(regionKey), [regionKey]);
   const filtered =
     state.filters.intentions !== null ||
     state.filters.gender !== null ||
@@ -83,7 +93,12 @@ export function DiscoveryScreen() {
       <View style={styles.body}>
         {body === 'radarMap' ? (
           <>
-            <RadarMapView profiles={profiles} radiusM={state.filters.radiusM} onOpen={onOpen} />
+            <RadarMapView
+              profiles={profiles}
+              radiusM={state.filters.radiusM}
+              center={center}
+              onOpen={onOpen}
+            />
             <RadarCaption />
           </>
         ) : body === 'emptyList' ? (
