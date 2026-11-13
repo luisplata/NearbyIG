@@ -8,6 +8,6 @@ import { TeardownSessionGuard } from './teardown-session.guard';
 @Module({
   controllers: [AuthController],
   providers: [AuthService, DemoSessionGuard, TeardownSessionGuard, StreamTicketsService],
-  exports: [AuthService, DemoSessionGuard, TeardownSessionGuard],
+  exports: [AuthService, DemoSessionGuard, TeardownSessionGuard, StreamTicketsService],
 })
 export class AuthModule {}

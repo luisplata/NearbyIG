@@ -36,6 +36,35 @@ export interface AppConfig {
    * así que no es una perilla de operación sino parte del contrato.
    */
   readonly presenceTtlSeconds: number;
+  /**
+   * Bots que arrastra cada humano de la demo: el plan fija 2.
+   *
+   * Fijo en código por la misma razón que el TTL: no es una perilla de
+   * operación, es la densidad que el plan promete (`§4`).
+   */
+  readonly botsPerHuman: number;
+  /** Cap de bots por observador: el plan fija 6 (`§12`, "densidad excesiva"). */
+  readonly observerBotCap: number;
+  /** Segundos que un bot tarda en pisar el siguiente waypoint. */
+  readonly botLegSeconds: number;
+  /** Cadencia del ticker de movimiento (ms). */
+  readonly worldTickMs: number;
+  /**
+   * Eventos retenidos por región: debajo de eso, el cursor está `CURSOR_EXPIRED`.
+   *
+   * Con la densidad tope de la demo (10 humanos × 2 bots, un waypoint cada 5 s)
+   * son ~4 eventos/s: 5000 da ~20 minutos de ventana para que un cliente que se
+   * cayó pueda reanudar sin perder el hilo. Más retención es más tabla; menos,
+   * más `410` en la cara del cliente.
+   */
+  readonly eventRetention: number;
+  /**
+   * Keepalive del SSE: el contrato fija 15 s (`paths/events.yaml`).
+   *
+   * Un proxy que corta una conexión ociosa a los 30-60 s es la norma; 15 s deja
+   * dos latidos dentro de esa ventana.
+   */
+  readonly sseHeartbeatMs: number;
   /** Región que se usa cuando `POST /auth/demo-session` no recibe body. */
   readonly defaultRegionKey: string;
 }
@@ -88,6 +117,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     slotCount: 10,
     streamTicketTtlSeconds: 30,
     presenceTtlSeconds: 12,
+    botsPerHuman: 2,
+    observerBotCap: 6,
+    botLegSeconds: 5,
+    worldTickMs: 2_000,
+    eventRetention: 5_000,
+    sseHeartbeatMs: 15_000,
     defaultRegionKey: (env.DEFAULT_REGION_KEY?.trim() || 'mx').toLowerCase(),
   };
 }

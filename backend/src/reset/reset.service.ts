@@ -15,13 +15,14 @@ import type { AuthContext, SourceType } from '../auth/session.types';
  * que su shape es propio y nadie lo consume como cliente.
  *
  * Qué borra y qué no:
- *   * Borra `sessions` (invitados incluidos) y `stream_tickets`: es el estado
- *     que ocupa slots y que sobrevive a un refresh.
- *   * **No** borra `regions`, `zones`, `profiles` ni `demo_meta`: ese es el
- *     catálogo, lo escribe el seed y es lo que hace que no haya que migrar ni
- *     re-seedear. Los 10 slots quedan libres sólo porque no hay sesiones vivas.
- *   * No hay presencia, pings ni matches todavía (S2+). Cuando existan, se
- *     suman acá: éste es el único punto de limpieza de datos de demo.
+ *   * Borra `sessions` (invitados incluidos), `stream_tickets`, `bots`, `events`
+ *     y `event_seq`: es el estado que ocupa slots, que sobrevive a un refresh y
+ *     que hace que el stream de una corrida no se mezcle con el de la anterior.
+ *   * **No** borra `regions`, `zones`, `profiles`, `presence` ni `demo_meta`: el
+ *     catálogo lo escribe el seed y la presencia cae en cascada con la sesión.
+ *     Los 10 slots quedan libres sólo porque no hay sesiones vivas.
+ *   * Pings, matches y chat todavía no existen (S4+). Cuando existan, se suman
+ *     acá: éste es el único punto de limpieza de datos de demo.
  */
 export interface ResetSelfResult {
   readonly scope: 'self';
@@ -67,9 +68,17 @@ export class ResetService {
       const sessions = await client.query<SessionIdentity>(
         `DELETE FROM sessions
           WHERE session_id = $1
-        RETURNING region_key, demo_slot, source_type`,
+        RETURNING region_key, profile_id, demo_slot, source_type`,
         [session.sessionId],
       );
+      // Los bots son del perfil, no de la sesión: al irse la sesión se van los
+      // suyos. Sin esto quedarían huérfanos hasta el próximo tick del mundo.
+      if (sessions.rows[0] !== undefined) {
+        await client.query('DELETE FROM bots WHERE region_key = $1 AND owner_profile_id = $2', [
+          sessions.rows[0].region_key,
+          sessions.rows[0].profile_id,
+        ]);
+      }
       await client.query('COMMIT');
 
       const row = sessions.rows[0];
@@ -109,6 +118,12 @@ export class ResetService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      // El log de eventos y los bots son estado de demo: un reset global tiene
+      // que dejar la demo como recién migrada, con el stream vacío y el `seq` de
+      // cada región volviendo a 1. La presencia cae en cascada con las sesiones.
+      await client.query('DELETE FROM bots');
+      await client.query('DELETE FROM events');
+      await client.query('DELETE FROM event_seq');
       const tickets = await client.query('DELETE FROM stream_tickets');
       const sessions = await client.query<{ source_type: string }>(
         'DELETE FROM sessions RETURNING source_type',
@@ -148,6 +163,7 @@ export class ResetService {
 
 interface SessionIdentity {
   region_key: string;
+  profile_id: string;
   demo_slot: number | null;
   source_type: string;
 }

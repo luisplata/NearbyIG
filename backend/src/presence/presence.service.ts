@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Pool } from 'pg';
 import type { AuthContext } from '../auth/session.types';
+import { BotsService } from '../bots/bots.service';
 import { AppProblemError } from '../common/problem';
 import {
   asOptionalRecord,
@@ -12,6 +13,7 @@ import {
 import { APP_CONFIG } from '../config/config.module';
 import type { AppConfig } from '../config/env';
 import { PG_POOL } from '../db/database.module';
+import { EventsService } from '../events/events.service';
 import type { PresenceState, PresenceUpdate } from './presence.types';
 
 const ZONE_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
@@ -88,6 +90,7 @@ function parsePresenceUpdate(body: unknown): PresenceUpdate {
 interface PresenceRow {
   region_key: string;
   zone_key: string | null;
+  prior_live: boolean;
 }
 
 /**
@@ -109,6 +112,8 @@ export class PresenceService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly bots: BotsService,
+    private readonly events: EventsService,
   ) {}
 
   /**
@@ -137,22 +142,44 @@ export class PresenceService {
     // `ST_MakePoint` es strict: con `lng`/`lat` NULL devuelve NULL, así que el
     // mismo INSERT sirve para los dos caminos y la columna queda NULL cuando la
     // sesión eligió una zona demo (no hubo coordenada que guardar).
+    //
+    // `prior` y `upserted` van en la misma sentencia para saber, sin una segunda
+    // consulta ni una carrera, si la presencia **ya estaba viva**: sólo una
+    // transición a online emite `profile.presence`. Mover el punto de una
+    // presencia viva no es un cambio de estado.
     const { rows } = await this.pool.query<PresenceRow>(
-      `INSERT INTO presence (session_id, region_key, zone_key, point, expires_at)
-       VALUES ($1, $2, $3,
-               ST_SetSRID(ST_MakePoint($4, $5), 4326),
-               now() + make_interval(secs => $6::int))
-       ON CONFLICT (session_id) DO UPDATE
-          SET region_key = EXCLUDED.region_key,
-              zone_key   = EXCLUDED.zone_key,
-              point      = EXCLUDED.point,
-              expires_at = EXCLUDED.expires_at
-       RETURNING region_key, zone_key`,
+      `WITH prior AS (
+         SELECT (expires_at > now()) AS live
+           FROM presence
+          WHERE session_id = $1
+       ), upserted AS (
+         INSERT INTO presence (session_id, region_key, zone_key, point, expires_at)
+         VALUES ($1, $2, $3,
+                 ST_SetSRID(ST_MakePoint($4, $5), 4326),
+                 now() + make_interval(secs => $6::int))
+         ON CONFLICT (session_id) DO UPDATE
+            SET region_key = EXCLUDED.region_key,
+                zone_key   = EXCLUDED.zone_key,
+                point      = EXCLUDED.point,
+                expires_at = EXCLUDED.expires_at
+         RETURNING region_key, zone_key
+       )
+       SELECT u.region_key, u.zone_key,
+              coalesce((SELECT live FROM prior), false) AS prior_live
+         FROM upserted u`,
       [session.sessionId, session.regionKey, zoneKey, lng, lat, this.config.presenceTtlSeconds],
     );
 
     const row = rows[0];
     if (row === undefined) throw new Error('INSERT de presencia sin RETURNING');
+
+    // Transición a online: el evento de presencia es del humano, no de la zona.
+    if (!row.prior_live) {
+      await this.events.append(row.region_key, 'profile.presence', {
+        profileId: session.profileId,
+        online: true,
+      });
+    }
 
     // Sin coordenadas en el log: sólo la proyección (región, zona, fallback).
     this.logger.log(
@@ -180,10 +207,11 @@ export class PresenceService {
    * `expires_at > now()`) y el siguiente `PUT` la reusa por upsert.
    */
   async clear(session: AuthContext): Promise<void> {
-    const { rowCount } = await this.pool.query(
+    const { rows, rowCount } = await this.pool.query<{ region_key: string }>(
       `DELETE FROM presence
         WHERE session_id = $1
-          AND ${LIVE_PRESENCE}`,
+          AND ${LIVE_PRESENCE}
+        RETURNING region_key`,
       [session.sessionId],
     );
 
@@ -193,6 +221,16 @@ export class PresenceService {
         `La sesión no tiene presencia viva en ${session.regionKey}: nunca se registró, ya se apagó o venció.`,
       );
     }
+
+    // Ghost/pausa: sin presencia, los 2 bots propios dejan de existir para los
+    // demás. La lectura ya los filtra por la presencia viva del dueño (efecto
+    // inmediato); borrar las filas acá evita además que el radar de S3 los
+    // encuentre en la ventana hasta el próximo tick del mundo.
+    await this.bots.removeOwnerBots(session.regionKey, session.profileId);
+    await this.events.append(rows[0]?.region_key ?? session.regionKey, 'profile.presence', {
+      profileId: session.profileId,
+      online: false,
+    });
 
     this.logger.log(`presencia apagada region=${session.regionKey}`);
   }
