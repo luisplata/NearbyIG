@@ -13,9 +13,15 @@
     "sync:check": "node scripts/sync-demo-assets.mjs --check",
     "assemble": "node scripts/assemble-site.mjs",
     "test:scripts": "node --test \"scripts/lib/*.test.mjs\"",
-    "check": "node scripts/validate-fixtures.mjs && node scripts/sync-demo-assets.mjs && git diff --exit-code"
+    "check": "node scripts/validate-fixtures.mjs && node scripts/sync-demo-assets.mjs && git diff --exit-code",
+    "contract:validate": "node contract/scripts/validate-spec.mjs",
+    "contract:test": "node --test \"contract/test/*.test.mjs\"",
+    "contract:docs": "node scripts/build-contract-docs.mjs",
+    "contract:check": "npm run contract:validate && npm run contract:test && git diff --exit-code"
   },
   "devDependencies": {
-    "@resvg/resvg-js": "2.6.2"
+    "@redocly/cli": "2.78.0",
+    "@resvg/resvg-js": "2.6.2",
+    "yaml": "2.9.1"
   }
 }

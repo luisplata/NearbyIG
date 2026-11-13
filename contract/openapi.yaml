@@ -1,0 +1,72 @@
+# Raíz del contrato. Todo lo demás se cuelga de acá con `$ref` relativos:
+#   paths/*.yaml    → path items (el archivo es un mapa nombre → path item)
+#   schemas/*.yaml  → componentes reutilizables
+#
+# El documento NO se escribe para un servidor concreto: Sprint 1 consume este
+# contrato y debe cumplirlo. Ver contract/README.md.
+
+openapi: 3.1.0
+
+info:
+  title: NearbyIG API
+  version: 0.1.0
+  summary: Contrato congelado de la demo (S1–S3).
+  description: |
+    Contrato de la demo NearbyIG escrito a mano antes del server. La superficie
+    está congelada en S1–S3; pings, matches, chat, block, report y `/health`
+    quedan fuera hasta que exista un diseño que los congele (S4/S5).
+
+    Cada operation declara `x-implementation-sprint` con el sprint que la
+    implementa. Ninguna operation se implementa en Sprint 0: acá sólo se
+    declara la forma.
+
+    `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
+    con este mismo campo reemplazado por `pending`, para que el hash no dependa
+    de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
+  x-contract-id: '2054137eeec3'
+
+servers:
+  - url: http://localhost:3000
+    description: Server local del Sprint 1 (todavía no existe).
+
+# Todas las operations piden sesión demo salvo que declaren `security: []`.
+security:
+  - demoSession: []
+
+tags:
+  - name: auth
+    description: Sesión demo, logout y ticket efímero para `GET /events`.
+
+paths:
+  /auth/demo-session:
+    $ref: './paths/auth.yaml#/demo-session'
+  /auth/logout:
+    $ref: './paths/auth.yaml#/logout'
+  /auth/stream-ticket:
+    $ref: './paths/auth.yaml#/stream-ticket'
+
+components:
+  securitySchemes:
+    demoSession:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT corto emitido por `POST /auth/demo-session`. Viaja sólo en el header
+        `Authorization`. No hay OAuth, cookies ni API keys de terceros.
+
+  schemas:
+    DemoSession:
+      $ref: './schemas/auth.yaml#/DemoSession'
+    DemoSessionRequest:
+      $ref: './schemas/auth.yaml#/DemoSessionRequest'
+    StreamTicket:
+      $ref: './schemas/auth.yaml#/StreamTicket'
+    KeyLabel:
+      $ref: './schemas/common.yaml#/KeyLabel'
+    Page:
+      $ref: './schemas/common.yaml#/Page'
+    RegionKey:
+      $ref: './schemas/common.yaml#/RegionKey'
+    SourceType:
+      $ref: './schemas/common.yaml#/SourceType'

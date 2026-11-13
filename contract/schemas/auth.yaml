@@ -1,0 +1,102 @@
+# Auth demo: la sesión que abre la demo y el ticket efímero del stream.
+#
+# No hay OAuth ni Firebase. `demoSession` es un JWT corto; el ticket de stream es
+# de 30 s y un solo uso, y sólo existe para que `GET /events` (S2) pueda
+# autenticarse cuando `EventSource` no puede mandar headers.
+
+DemoSessionRequest:
+  type: object
+  additionalProperties: false
+  description: |
+    Pedido de sesión demo. Sin body el server elige la región por defecto y el
+    primer slot libre. Un slot ya reclamado responde 409 `PROFILE_IN_USE`
+    (declarado en PR2, con el catálogo de errores).
+  properties:
+    regionKey:
+      $ref: 'common.yaml#/RegionKey'
+    demoSlot:
+      type: integer
+      minimum: 1
+      maximum: 10
+      description: Slot pedido explícitamente (1..10). Omitirlo deja que el server elija.
+
+DemoSession:
+  type: object
+  additionalProperties: false
+  required:
+    - token
+    - expiresAt
+    - regionKey
+    - profileId
+    - demoSlot
+    - sourceType
+  description: |
+    Sesión demo abierta. `demoSlot` es la identidad del slot (1..10) y la clave
+    natural para que los seeds sean idempotentes en S1.
+
+    Invariante: `demoSlot == null` si y sólo si `sourceType == guest`. Un invitado
+    no ocupa slot; un humano o un bot siempre ocupa uno.
+  properties:
+    token:
+      type: string
+      minLength: 1
+      description: JWT corto. Viaja sólo en el header `Authorization`.
+    expiresAt:
+      type: string
+      format: date-time
+      description: Vencimiento del JWT, RFC 3339 en UTC.
+    regionKey:
+      $ref: 'common.yaml#/RegionKey'
+    profileId:
+      type: string
+      minLength: 1
+      description: Identidad del perfil dentro de la región; `(regionKey, profileId)` es la identidad global.
+    demoSlot:
+      type:
+        - integer
+        - 'null'
+      minimum: 1
+      maximum: 10
+      description: Slot demo ocupado (1..10), o `null` para invitados.
+    sourceType:
+      $ref: 'common.yaml#/SourceType'
+  allOf:
+    - if:
+        required:
+          - sourceType
+        properties:
+          sourceType:
+            const: guest
+      then:
+        properties:
+          demoSlot:
+            type: 'null'
+    - if:
+        required:
+          - demoSlot
+        properties:
+          demoSlot:
+            type: 'null'
+      then:
+        properties:
+          sourceType:
+            const: guest
+
+StreamTicket:
+  type: object
+  additionalProperties: false
+  required:
+    - ticket
+    - expiresAt
+  description: |
+    Ticket de un solo uso para abrir `GET /events` (S2) en la query `ticket`.
+    Vive 30 s, no se loguea y no viaja en el payload de ningún evento.
+  properties:
+    ticket:
+      type: string
+      minLength: 1
+      description: Valor opaco. Se consume al abrir el stream; reusarlo es 401 `TICKET_REUSED`.
+    expiresAt:
+      type: string
+      format: date-time
+      description: Vencimiento absoluto, RFC 3339 en UTC.
