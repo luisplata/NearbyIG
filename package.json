@@ -13,7 +13,8 @@
     "sync:check": "node scripts/sync-demo-assets.mjs --check",
     "assemble": "node scripts/assemble-site.mjs",
     "test:scripts": "node --test \"scripts/lib/*.test.mjs\"",
-    "check": "node scripts/validate-fixtures.mjs && node scripts/sync-demo-assets.mjs && git diff --exit-code"
+    "check": "node scripts/validate-fixtures.mjs && node scripts/sync-demo-assets.mjs && git diff --exit-code",
+    "contract:validate": "node contract/scripts/validate-spec.mjs"
   },
   "devDependencies": {
     "@redocly/cli": "2.78.0",

@@ -1,0 +1,67 @@
+# Piezas compartidas del vocabulario. Nada acá describe una respuesta concreta:
+# son tipos que otros schemas componen con `$ref`.
+#
+# Regla del contrato: todo DTO de respuesta cierra con `additionalProperties: false`.
+# Un campo que no está declarado no viaja.
+
+RegionKey:
+  type: string
+  pattern: '^[a-z]{2}$'
+  examples:
+    - mx
+  description: |
+    ISO 3166-1 alpha-2 en minúscula (`mx`, `co`). Este schema fija la forma; el
+    catálogo de regiones (`contract/catalog/regions.json`) es la fuente de
+    verdad y vive fuera del spec, así que agregar una región no renombra nada acá.
+
+SourceType:
+  type: string
+  enum:
+    - human
+    - bot
+    - guest
+  description: |
+    Origen del perfil o de la sesión. `guest` es la sesión de relleno que se abre
+    cuando los 10 slots de una región están tomados: no tiene `demoSlot`.
+
+KeyLabel:
+  type: object
+  additionalProperties: false
+  required:
+    - key
+    - label
+  description: |
+    Fila de copy ya resuelta por el server: `key` estable para tests y `label` en
+    el idioma de la sesión. El cliente nunca resuelve claves de i18n por su cuenta.
+  properties:
+    key:
+      type: string
+      minLength: 1
+      description: Clave del dataset (`copy.*`), estable entre regiones.
+    label:
+      type: string
+      minLength: 1
+      description: Texto listo para mostrar.
+
+Page:
+  type: object
+  additionalProperties: false
+  required:
+    - nextCursor
+    - hasMore
+  description: |
+    Metadatos de paginación por cursor. No envuelve el array a propósito: la
+    proyección concreta (`EventsPage` en S2) declara sus tres campos planos,
+    porque `allOf` + `additionalProperties: false` bloquea los campos hermanos
+    y convierte la composición en una trampa.
+  properties:
+    nextCursor:
+      type:
+        - string
+        - 'null'
+      description: |
+        Cursor de la próxima página (`null` cuando no hay más). En eventos es el
+        `id` del último envelope entregado; una página vacía no lo mueve.
+    hasMore:
+      type: boolean
+      description: Si quedan páginas después de esta.

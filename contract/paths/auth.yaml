@@ -1,0 +1,69 @@
+# Auth demo (Sprint 1).
+#
+# Cada entrada de este archivo es un path item, con el nombre de la operation
+# como clave (sin `/`). `openapi.yaml` lo monta en su path público:
+#   demo-session → /auth/demo-session
+# Así el path real vive en un solo lugar y el `$ref` se lee sin punteros
+# escapados (`~1`).
+#
+# Sin errores declarados todavía: el catálogo `ErrorCode` + `Problem` entra en
+# PR2 y con él los 401 de logout/stream-ticket y el 409/422 de demo-session.
+
+demo-session:
+  post:
+    operationId: createDemoSession
+    summary: Abre una sesión demo
+    description: |
+      Abre una sesión demo en una región y ocupa un slot. Es la única operation
+      pública del contrato: no hay sesión previa que presentar.
+    tags:
+      - auth
+    security: []
+    requestBody:
+      required: false
+      description: Sin body, el server elige región por defecto y primer slot libre.
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/auth.yaml#/DemoSessionRequest'
+    responses:
+      '201':
+        description: Sesión demo abierta. El token viaja en el body, nunca en la URL.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/auth.yaml#/DemoSession'
+    x-implementation-sprint: 1
+
+logout:
+  post:
+    operationId: logoutSession
+    summary: Cierra la sesión demo
+    description: |
+      Libera el slot demo ocupado. Idempotente: cerrar una sesión ya cerrada no
+      rompe nada. Hereda la seguridad global (`demoSession`).
+    tags:
+      - auth
+    responses:
+      '204':
+        description: Sesión cerrada. Sin body.
+    x-implementation-sprint: 1
+
+stream-ticket:
+  post:
+    operationId: createStreamTicket
+    summary: Emite un ticket de un solo uso para el stream
+    description: |
+      Emite `{ ticket, expiresAt }` con 30 s de vida y un solo uso. Existe porque
+      `EventSource` no puede mandar headers: el ticket viaja en la query `ticket`
+      de `GET /events` (S2) y en ningún otro lado. Hereda la seguridad global.
+    tags:
+      - auth
+    responses:
+      '201':
+        description: Ticket emitido. No se persiste en logs.
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/auth.yaml#/StreamTicket'
+    x-implementation-sprint: 1

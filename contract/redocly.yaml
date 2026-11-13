@@ -1,0 +1,23 @@
+# Ruleset del contrato. Lo corre `contract/scripts/validate-spec.mjs`
+# (invocado por `npm run contract:validate`), nunca un editor ni un dev server.
+
+extends:
+  - recommended
+
+rules:
+  # Los responses 4xx/5xx no existen todavía: el catálogo `ErrorCode` + `Problem`
+  # entra en PR2 y con él se reactiva esta regla. Dejarla en `warn` ahora sólo
+  # agregaría ruido de deuda ya planificada.
+  operation-4xx-response: off
+
+  # `components.schemas` declara piezas compartidas (KeyLabel, Page, RegionKey)
+  # antes que sus consumidores: S2 y S3 las usan. No es código muerto, es el
+  # orden de la cadena. La regla se puede reactivar cuando la superficie cierre.
+  no-unused-components: off
+
+  # El repo es privado y el contrato no se distribuye: no hay licencia que declarar.
+  info-license: off
+
+  # El único server es http://localhost:3000 a propósito (spec: el server de S1 es
+  # local). La regla existe para specs publicados, no para este.
+  no-server-example.com: off
