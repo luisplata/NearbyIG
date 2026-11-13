@@ -130,6 +130,45 @@ Tests del tooling Node (denylist del artefacto, allowlist acotada del loader de 
 npm run test:scripts
 ```
 
+### Modo live (backend local)
+
+**Resultado:** la misma demo con el descubrimiento del backend, sin cambiar el
+artefacto publicado. Por defecto arranca en **mock** (el dataset del build, cero
+llamadas de red); el modo live es opt-in y pide dos cosas: el backend arriba y
+`EXPO_PUBLIC_API_URL` en el entorno del build. Sin esa variable, el switch **Live**
+queda deshabilitado y nada más cambia.
+
+```bash
+# 1. backend (otra terminal)
+cd backend && docker compose -f compose.yml -f compose.dev.yml up --build -d
+
+# 2. build web con el modo live habilitado
+cd demo/expo-demo
+EXPO_PUBLIC_API_URL=http://localhost:3000 EXPO_BASE_URL="" npx expo export --platform web --output-dir dist
+npm run serve:dist          # http://localhost:8081
+
+# 3. abrir http://localhost:8081 y tocar "Live" en la barra de abajo del header
+```
+
+| Pieza | Qué usa | Detalle |
+|---|---|---|
+| Región | `EXPO_PUBLIC_DEMO_REGION` | Default `mx`. No hay selector de país |
+| Sesión | `POST /auth/demo-session` | Token **en memoria**; refresh = sesión nueva |
+| Presencia | `PUT /presence` cada 8 s | El TTL del backend es 12 s: sin latido no hay descubrimiento |
+| Descubrimiento | `GET /discovery` | Radio y filtros server-side; medidas `distanceM`/`bearingDeg` |
+| Actualización | `GET /events` (SSE, ticket) | Fallback a `GET /events/poll?cursor=` con dedupe por `seq` |
+| Selector de perfil | `GET /demo/profiles` | Muestra `inUse`; claim libre y takeover **confirmado** |
+| Falla | — | Si la API no responde, vuelve al mock con un aviso visible |
+
+El modo live **no se publica**: `/expo/` sigue siendo el artefacto sin red. El puerto
+8081 está en la allowlist de CORS del backend (junto con 4173 y 8080).
+
+Smoke real del flujo con el **mismo** cliente, sin navegador:
+
+```bash
+EXPO_PUBLIC_API_URL=http://localhost:3000 LIVE_SMOKE=1 npm --prefix demo/expo-demo run smoke:live
+```
+
 > **Git Bash / MSYS**: `EXPO_BASE_URL=/expo` y `--base-href "/flutter/"` se reescriben a
 > rutas de Windows. Prefijá el comando con `MSYS_NO_PATHCONV=1` (o usá PowerShell/cmd).
 > El export imprime `Using (experimental) base path: ...`; verificá que diga `/expo` y no
