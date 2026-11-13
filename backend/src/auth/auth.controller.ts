@@ -10,6 +10,7 @@ import type { AuthContext, DemoSession, StreamTicket } from './session.types';
  * Superficie de auth de Sprint 1, tal como la declara `contract/paths/auth.yaml`:
  *
  *   POST /auth/demo-session   pública, 201 `DemoSession` (claim de slot)
+ *   POST /auth/takeover       `demoSession`, 200 `DemoSession` (desalojo explícito)
  *   POST /auth/logout         `demoSession`, 204, idempotente
  *   POST /auth/stream-ticket  `demoSession`, 201 `StreamTicket` (30 s, un uso)
  *
@@ -30,6 +31,21 @@ export class AuthController {
   @Header('cache-control', 'no-store')
   createDemoSession(@Body() body: unknown): Promise<DemoSession> {
     return this.auth.createDemoSession(body);
+  }
+
+  /**
+   * `POST /auth/takeover` (contrato v0.2): 200 y `DemoSession` nueva.
+   *
+   * `DemoSessionGuard` y no `TeardownSessionGuard`: el takeover **crea** una
+   * sesión viva, así que la sesión que llama tiene que existir de verdad. Un
+   * token revocado no puede desalojar a nadie.
+   */
+  @Post('takeover')
+  @HttpCode(200)
+  @Header('cache-control', 'no-store')
+  @UseGuards(DemoSessionGuard)
+  takeover(@Body() body: unknown, @CurrentSession() session: AuthContext): Promise<DemoSession> {
+    return this.auth.takeover(session, body);
   }
 
   /**

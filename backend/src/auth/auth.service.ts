@@ -13,7 +13,7 @@ import {
   validationFailed,
 } from '../common/validation';
 import { issueSessionToken } from './jwt';
-import type { DemoSession, SourceType } from './session.types';
+import type { AuthContext, DemoSession, SourceType } from './session.types';
 
 interface SlotRow {
   demo_slot: number;
@@ -26,12 +26,19 @@ interface Claim {
   readonly sourceType: SourceType;
 }
 
+/** Lo que devuelve el INSERT de una sesión, antes de firmar el JWT. */
+interface IssuedSession {
+  readonly sessionId: string;
+  readonly tokenId: string;
+  readonly expiresAt: Date;
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === '23505';
 }
 
 /**
- * Ciclo de vida de la sesión demo: apertura (claim de slot) y cierre.
+ * Ciclo de vida de la sesión demo: apertura (claim de slot), takeover y cierre.
  *
  * El slot es la identidad del perfil (1..10 por región): dos navegadores no
  * pueden quedarse con el mismo. La carrera la resuelve el índice único parcial
@@ -41,8 +48,9 @@ function isUniqueViolation(error: unknown): boolean {
  * Invitados: si los 10 slots están vivos, el siguiente entra con `sourceType:
  * guest` y `demoSlot: null`. Un invitado no ocupa slot y no es descubrible.
  *
- * No hay takeover: el contrato no lo modela y pedir un slot ocupado es 409, no
- * un desalojo implícito.
+ * Takeover (contrato v0.2): `POST /auth/takeover` es la única forma de desalojar
+ * y exige nombrar el slot. El claim sigo sin desalojar nada: pedir un slot
+ * ocupado con `demo-session` sigue siendo 409. Ver `takeover()`.
  */
 @Injectable()
 export class AuthService {
@@ -83,46 +91,148 @@ export class AuthService {
       );
 
       const claim = await this.claim(client, regionKey, requestedSlot);
-      const tokenId = randomUUID();
-      const expiresAt = new Date(Date.now() + this.config.sessionTtlSeconds * 1_000);
-      const inserted = await client.query<{ session_id: string }>(
-        `INSERT INTO sessions (region_key, profile_id, demo_slot, source_type, token_id, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING session_id`,
-        [regionKey, claim.profileId, claim.demoSlot, claim.sourceType, tokenId, expiresAt],
-      );
-      const sessionId = inserted.rows[0]?.session_id;
-      if (sessionId === undefined) throw new Error('INSERT de sesión sin RETURNING');
+      const issued = await this.insertSession(client, regionKey, claim);
       await client.query('COMMIT');
 
-      const token = issueSessionToken(
-        {
-          sessionId,
-          regionKey,
-          profileId: claim.profileId,
-          demoSlot: claim.demoSlot,
-          sourceType: claim.sourceType,
-          tokenId,
-          ttlSeconds: this.config.sessionTtlSeconds,
-        },
-        this.config.jwtSecret,
-      );
       this.logger.log(
         `sesión demo abierta region=${regionKey} slot=${claim.demoSlot ?? 'guest'} source=${claim.sourceType}`,
       );
-      return {
-        token,
-        expiresAt: expiresAt.toISOString(),
-        regionKey,
-        profileId: claim.profileId,
-        demoSlot: claim.demoSlot,
-        sourceType: claim.sourceType,
-      };
+      return this.buildSession(regionKey, claim, issued);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new AppProblemError(
           'PROFILE_IN_USE',
           'El slot demo pedido ya está ocupado por otra sesión viva. Probá con otro slot o cerrá la otra sesión.',
+        );
+      }
+      throw error;
+    } finally {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        /* ya se hizo COMMIT o la conexión se cayó */
+      }
+      client.release();
+    }
+  }
+
+  /**
+   * `POST /auth/takeover` (contrato v0.2): la sesión que llama pasa a ocupar el
+   * slot pedido, desalojando a quien lo tenga.
+   *
+   * Semántica, tal como la congela `paths/auth.yaml#/takeover`:
+   *   * slot ocupado por **otra** sesión → 200. El ocupante queda revocado en
+   *     esta misma transacción (no en el `exp`) y sus tickets de stream se
+   *     borran: su token deja de servir para leer, pedir tickets o reentrar.
+   *   * slot **libre** → 200. La postcondición ("ocupás el slot") se cumple
+   *     igual y `inUse` es una foto que puede envejecer entre el selector y el
+   *     click; un 409 acá sería un error inventado.
+   *   * slot que ya ocupa la **propia** sesión → 409 `PROFILE_IN_USE`. No hay
+   *     nada que desalojar y reemitir el token apagaría la credencial en uso.
+   *   * `regionKey` de otra región → 403 `REGION_MISMATCH`, sin tocar nada.
+   *
+   * La sesión que llama también se cierra al hacer takeover: un navegador tiene
+   * una sola sesión viva, así que moverse del slot 3 al 7 libera el 3 en vez de
+   * dejar dos sesiones del mismo navegador ocupando slots distintos.
+   */
+  async takeover(session: AuthContext, body: unknown): Promise<DemoSession> {
+    const record = asOptionalRecord(body);
+    rejectUnknownKeys(record, ['regionKey', 'demoSlot']);
+    const regionKey = parseRegionKey(record['regionKey'], { required: true });
+    const demoSlot = optionalInteger(record, 'demoSlot', 1, 10);
+    if (regionKey === undefined) throw validationFailed('regionKey es obligatorio.');
+    if (demoSlot === undefined) {
+      throw validationFailed('demoSlot es obligatorio en un takeover: el slot no se adivina.');
+    }
+    if (regionKey !== session.regionKey) {
+      throw new AppProblemError(
+        'REGION_MISMATCH',
+        `La sesión está en la región ${session.regionKey} y pidió takeover de un slot de ${regionKey}.`,
+      );
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Serializa los takeovers del mismo slot. Sin esto, dos pedidos
+      // concurrentes sobre un slot libre chocan recién en el índice único y el
+      // segundo recibiría un 409 que el contrato no promete para ese caso.
+      // Es un lock por (región, slot): slots distintos no se esperan entre sí.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [
+        `takeover:${regionKey}:${demoSlot}`,
+      ]);
+
+      // Mismo barrido que el claim: una fila vencida no puede quedar como
+      // ocupante ni bloquear el slot por el índice parcial.
+      await client.query(
+        `UPDATE sessions
+            SET revoked_at = now()
+          WHERE region_key = $1
+            AND revoked_at IS NULL
+            AND expires_at <= now()`,
+        [regionKey],
+      );
+
+      const profile = await client.query<{ profile_id: string }>(
+        `SELECT profile_id
+           FROM profiles
+          WHERE region_key = $1 AND demo_slot = $2 AND source_type = 'human'`,
+        [regionKey, demoSlot],
+      );
+      const profileRow = profile.rows[0];
+      if (profileRow === undefined) {
+        throw validationFailed(`El slot ${demoSlot} no tiene perfil en la región ${regionKey}.`);
+      }
+
+      const occupant = await client.query<{ session_id: string }>(
+        `SELECT session_id
+           FROM sessions
+          WHERE region_key = $1
+            AND demo_slot = $2
+            AND revoked_at IS NULL
+            AND expires_at > now()
+          FOR UPDATE`,
+        [regionKey, demoSlot],
+      );
+      const occupiedBy = occupant.rows[0]?.session_id;
+
+      if (occupiedBy === session.sessionId) {
+        throw new AppProblemError(
+          'PROFILE_IN_USE',
+          `La sesión ya ocupa el slot ${demoSlot} de la región ${regionKey}: no hay nada que desalojar.`,
+        );
+      }
+
+      const displaced = [session.sessionId, ...(occupiedBy === undefined ? [] : [occupiedBy])];
+      await client.query(
+        `UPDATE sessions
+            SET revoked_at = now()
+          WHERE revoked_at IS NULL
+            AND session_id = ANY($1::uuid[])`,
+        [displaced],
+      );
+      // Un ticket emitido antes del takeover no puede abrir un stream después.
+      const burned = await client.query(
+        'DELETE FROM stream_tickets WHERE session_id = ANY($1::uuid[])',
+        [displaced],
+      );
+
+      const claim: Claim = { profileId: profileRow.profile_id, demoSlot, sourceType: 'human' };
+      const issued = await this.insertSession(client, regionKey, claim);
+      await client.query('COMMIT');
+
+      this.logger.log(
+        `takeover region=${regionKey} slot=${demoSlot} displaced=${occupiedBy === undefined ? 0 : 1} tickets=${burned.rowCount ?? 0}`,
+      );
+      return this.buildSession(regionKey, claim, issued);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        // No debería pasar con el advisory lock, pero si pasa el contrato no
+        // miente: el slot lo tiene otra sesión y el cliente puede reintentar.
+        throw new AppProblemError(
+          'PROFILE_IN_USE',
+          `El slot ${demoSlot} de la región ${regionKey} lo tomó otra sesión en paralelo. Reintentá el takeover.`,
         );
       }
       throw error;
@@ -175,6 +285,45 @@ export class AuthService {
     } finally {
       client.release();
     }
+  }
+
+  /** Inserta la fila de sesión y devuelve lo necesario para firmar el JWT. */
+  private async insertSession(client: PoolClient, regionKey: string, claim: Claim): Promise<IssuedSession> {
+    const tokenId = randomUUID();
+    const expiresAt = new Date(Date.now() + this.config.sessionTtlSeconds * 1_000);
+    const inserted = await client.query<{ session_id: string }>(
+      `INSERT INTO sessions (region_key, profile_id, demo_slot, source_type, token_id, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING session_id`,
+      [regionKey, claim.profileId, claim.demoSlot, claim.sourceType, tokenId, expiresAt],
+    );
+    const sessionId = inserted.rows[0]?.session_id;
+    if (sessionId === undefined) throw new Error('INSERT de sesión sin RETURNING');
+    return { sessionId, tokenId, expiresAt };
+  }
+
+  /** `DemoSession` del contrato: firma el JWT y arma el body del 200/201. */
+  private buildSession(regionKey: string, claim: Claim, issued: IssuedSession): DemoSession {
+    const token = issueSessionToken(
+      {
+        sessionId: issued.sessionId,
+        regionKey,
+        profileId: claim.profileId,
+        demoSlot: claim.demoSlot,
+        sourceType: claim.sourceType,
+        tokenId: issued.tokenId,
+        ttlSeconds: this.config.sessionTtlSeconds,
+      },
+      this.config.jwtSecret,
+    );
+    return {
+      token,
+      expiresAt: issued.expiresAt.toISOString(),
+      regionKey,
+      profileId: claim.profileId,
+      demoSlot: claim.demoSlot,
+      sourceType: claim.sourceType,
+    };
   }
 
   private async claim(client: PoolClient, regionKey: string, requestedSlot: number | undefined): Promise<Claim> {

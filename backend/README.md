@@ -1,18 +1,19 @@
 # Backend — NearbyIG demo
 
-API NestJS + PostGIS de la demo. **Sprint 1, batch S1-B**: identidad completa y reset.
-El contrato de `contract/` está congelado: acá se implementa, no se renegocia.
+API NestJS + PostGIS de la demo. **Sprint 1, batch S1-C**: ocupación visible y
+takeover (contrato v0.2). El contrato de `contract/` manda: acá se implementa, no
+se renegocia.
 
 | Pieza | Estado |
 |---|---|
 | `GET /health`, `GET /health/ready` | listo (fuera del contrato, ver abajo) |
-| `GET /demo/profiles` | listo, según `contract/paths/profiles.yaml` |
+| `GET /demo/profiles` | listo, según `contract/paths/profiles.yaml`: incluye `inUse` |
 | `POST /auth/demo-session` | listo: claim de slot, invitado si no hay slots, 409 `PROFILE_IN_USE` |
+| `POST /auth/takeover` | listo (contrato v0.2): desalojo explícito, 200 `DemoSession` |
 | `POST /auth/logout` | listo, según el contrato: 204, idempotente, revoca en el acto |
 | `POST /auth/stream-ticket` | listo: ticket de 30 s, un uso; el consumidor es S2 |
 | `POST /demo/reset`, `/demo/reset/self` | listo (fuera del contrato, §11 del plan) |
 | Migraciones + seeds idempotentes | listo |
-| Takeover | **no implementado**: el contrato no lo modela (ver abajo) |
 
 ## Empezar desde cero
 
@@ -66,6 +67,42 @@ curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' -d '{
 # logout                        → 204 (y el token deja de servir en el acto)
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/auth/logout -H "Authorization: Bearer $TA"
 ```
+
+### "En uso" y takeover (contrato v0.2)
+
+`GET /demo/profiles` trae `inUse` por fila, así el selector pinta el estado sin
+intentar reclamar. Desalojar exige `POST /auth/takeover` con el slot nombrado; el
+ocupante anterior pierde la sesión **en la misma transacción** (su token da 401 y
+sus tickets de stream se borran).
+
+```bash
+API=http://localhost:3000
+
+# A ocupa el slot 3 de mx; B ocupa otro
+A=$(curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":3}')
+B=$(curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":4}')
+TA=$(printf '%s' "$A" | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+TB=$(printf '%s' "$B" | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+
+# el slot 3 sale inUse
+curl -s "$API/demo/profiles?regionKey=mx" -H "Authorization: Bearer $TB" \
+  | node -pe 'JSON.parse(require("fs").readFileSync(0)).profiles.filter(p=>p.inUse).map(p=>p.demoSlot).join(",")'
+# → 3,4
+
+# B desaloja el slot 3                    → 200 DemoSession (token nuevo de B)
+TB2=$(curl -s -X POST $API/auth/takeover -H "Authorization: Bearer $TB" \
+  -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":3}' \
+  | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+# A (desalojado) y el token viejo de B  → 401 UNAUTHENTICATED
+curl -s -o /dev/null -w '%{http_code}\n' "$API/demo/profiles?regionKey=mx" -H "Authorization: Bearer $TA"
+curl -s -o /dev/null -w '%{http_code}\n' "$API/demo/profiles?regionKey=mx" -H "Authorization: Bearer $TB"
+# takeover sobre el propio slot          → 409 PROFILE_IN_USE (conserva el token)
+curl -s -X POST $API/auth/takeover -H "Authorization: Bearer $TB2" \
+  -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":3}'
+```
+
+Los cuatro desenlaces están fijados en `contract/paths/auth.yaml#/takeover`: slot
+ajeno → 200, slot libre → 200, slot propio → 409, otra región → 403.
 
 Sin Docker (sólo si tenés Postgres 16 + PostGIS en el host):
 
@@ -276,10 +313,12 @@ caracteres (`src/config/env.ts` falla en el boot, no en la primera request).
 - **`POST /demo/reset` es anónimo.** Es el comando de operación de §11 y corre
   desde una terminal limpia, pero en una demo pública cualquiera puede vaciarla.
   Se endurece en S5/S7 (rate limit y/o secreto de operación); hoy el stack es local.
-- **El contrato no expone ocupación.** `ProfileSummary` no tiene `inUse`, así que
-  `/demo/profiles` devuelve siempre las 10 filas y el cliente descubre "en uso"
-  por el `409 PROFILE_IN_USE`. Mostrar el estado sin intentar el claim necesita un
-  cambio de contrato.
+- **El contrato ya expone ocupación (v0.2).** `ProfileSummary.inUse` sale de un
+  `EXISTS` contra `sessions` con la misma condición que hace fallar un claim
+  (`revoked_at IS NULL AND expires_at > now()`). Una fila vencida sin revocar no
+  cuenta como viva porque el claim la limpia antes de reclamar el slot. Si algún
+  día `inUse` no coincide con `409 PROFILE_IN_USE`, la que miente es la consulta,
+  no el índice.
 - **`migrate` da `ECONNREFUSED` con `db` healthy.** La imagen de Postgres levanta un
   servidor temporal por socket durante la inicialización. El healthcheck usa
   `-h 127.0.0.1` para esperar TCP y el runner reintenta al conectar.
