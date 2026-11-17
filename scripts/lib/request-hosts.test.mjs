@@ -173,3 +173,10 @@ test('hostFromApiUrl acepta http(s) con puerto y path, y rechaza el resto', () =
   assert.equal(hostFromApiUrl('ftp://example.com'), null);
   assert.equal(hostFromApiUrl('no es una url'), null);
 });
+
+test('el host de la API cuenta como presente aunque no esté dentro de fetch(', () => {
+  const text = 'const base="https://api.example.com";const u=base+"/discovery";';
+  const result = scanRequestHosts(text, ['api.example.com']);
+  assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.occurrences, ['api.example.com']);
+});

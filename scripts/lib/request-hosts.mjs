@@ -86,7 +86,8 @@ export function scanRequestHosts(text, extraAllowed = []) {
   const occurrences = [];
   if (typeof text !== 'string' || text.length === 0) return { findings, occurrences };
 
-  const allowed = new Set([...ALLOWED_REQUEST_HOSTS, ...extraAllowed]);
+  const baseAllowed = new Set(ALLOWED_REQUEST_HOSTS);
+  const extraSet = new Set(extraAllowed.filter((host) => !baseAllowed.has(host)));
 
   for (const match of text.matchAll(URL_RE)) {
     const host = match[1].toLowerCase();
@@ -94,8 +95,16 @@ export function scanRequestHosts(text, extraAllowed = []) {
     const context = text.slice(Math.max(0, index - CONTEXT_WINDOW), index);
     const request = isRequestPosition(context);
 
-    if (allowed.has(host)) {
+    if (baseAllowed.has(host)) {
       if (request) occurrences.push(host);
+      continue;
+    }
+
+    // El host de la API es configuración horneada: vive como literal y el
+    // `fetch` lo arma por concatenación, así que no aparece en posición
+    // pedible. Basta con que esté en el artefacto.
+    if (extraSet.has(host)) {
+      occurrences.push(host);
       continue;
     }
 
