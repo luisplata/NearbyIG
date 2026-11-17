@@ -30,7 +30,16 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { auditText, deniedReason, isTextFile } from './lib/denylist.mjs';
-import { ALLOWED_REQUEST_HOSTS, compareHostSets } from './lib/request-hosts.mjs';
+import { ALLOWED_REQUEST_HOSTS, compareHostSets, hostFromApiUrl } from './lib/request-hosts.mjs';
+
+/**
+ * Host de la API que el build hornea (`PAGES_API_URL`, la misma variable del
+ * workflow). Sin ella el artefacto no habla con ningún backend y la allowlist
+ * queda sólo con el basemap. Se agrega **exactamente** ese host: la garantía de
+ * "un solo host pedible" pasa a "basemap + el backend declarado".
+ */
+const API_HOST = hostFromApiUrl(process.env.PAGES_API_URL);
+const ALLOWED_HOSTS = API_HOST === null ? [...ALLOWED_REQUEST_HOSTS] : [...ALLOWED_REQUEST_HOSTS, API_HOST];
 import { datasetIdOf } from './lib/canonical.mjs';
 import { canonicalContractId, loadSpec } from '../contract/scripts/lib/spec.mjs';
 
@@ -198,7 +207,7 @@ function audit(dir) {
     // doc no referencie **ningún** subrecurso y que la carpeta tenga un único
     // archivo, así que no hay dónde esconder un pedido externo.
     const insideContractDocs = relative(dir, absolute).split(sep).join('/').startsWith('contract/');
-    const result = auditText(text, { path: rel, hosts: !insideContractDocs });
+    const result = auditText(text, { path: rel, hosts: !insideContractDocs, extraHosts: ALLOWED_HOSTS });
     for (const finding of result.findings) {
       findings.push(`${rel}: ${finding.kind} prohibido "${finding.label}" (${finding.match})`);
     }
@@ -418,7 +427,7 @@ function report(dir) {
   checkExpoDocument(dir);
 
   const observed = [...hosts.keys()].sort();
-  const detail = ALLOWED_REQUEST_HOSTS.map((host) => `${host} (${hosts.get(host) ?? 0})`).join(', ');
+  const detail = ALLOWED_HOSTS.map((host) => `${host} (${hosts.get(host) ?? 0})`).join(', ');
   console.log(`\n  artefacto ${displayPath(dir)}: ${files} archivo(s), ${humanSize(bytes)}`);
   console.log(`  dataset   ${expectedDatasetId}`);
   console.log(`  host pedible: ${observed.length === 0 ? 'ninguno' : observed.join(', ')}`);
@@ -426,7 +435,7 @@ function report(dir) {
 
   // La allowlist es el conjunto exacto: ni falta el host del basemap ni sobra otro.
   if (strict && pending.length === 0) {
-    const { missing: absent, extra } = compareHostSets(observed);
+    const { missing: absent, extra } = compareHostSets(observed, ALLOWED_HOSTS);
     if (absent.length > 0) {
       problem(`--strict exige que el artefacto pida el host permitido: falta ${absent.join(', ')}`);
     }

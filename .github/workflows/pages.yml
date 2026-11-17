@@ -184,6 +184,8 @@ jobs:
       - name: Assemble and audit site
         env:
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          # El audit acepta exactamente el host de la API que el build horneó.
+          PAGES_API_URL: ${{ vars.NEARBYIG_API_URL }}
         run: node scripts/assemble-site.mjs --strict site
 
       - name: Upload Pages artifact

@@ -6,6 +6,7 @@ import {
   BENIGN_TEXT_HOSTS,
   REQUEST_POSITION,
   compareHostSets,
+  hostFromApiUrl,
   scanRequestHosts,
 } from './request-hosts.mjs';
 
@@ -147,4 +148,28 @@ test('--strict exige el host presente y único', () => {
     extra: ['demotiles.maplibre.org'],
   });
   assert.deepEqual(compareHostSets([]), compareHostSets([], ALLOWED_REQUEST_HOSTS));
+});
+
+test('el host declarado de la API se acepta sólo si se configura', () => {
+  const text = 'fetch("https://api.example.com/discovery")';
+  assert.deepEqual(labels(text), ['api.example.com']);
+  assert.deepEqual(scanRequestHosts(text, ['api.example.com']).findings, []);
+  assert.deepEqual(scanRequestHosts(text, ['api.example.com']).occurrences, ['api.example.com']);
+});
+
+test('configurar un host no habilita cualquier otro', () => {
+  const text = 'fetch("https://evil.example/x")';
+  assert.deepEqual(scanRequestHosts(text, ['api.example.com']).findings.map((f) => f.label), [
+    'evil.example',
+  ]);
+});
+
+test('hostFromApiUrl acepta http(s) con puerto y path, y rechaza el resto', () => {
+  assert.equal(hostFromApiUrl('https://abc.trycloudflare.com'), 'abc.trycloudflare.com');
+  assert.equal(hostFromApiUrl('http://localhost:3000/api'), 'localhost');
+  assert.equal(hostFromApiUrl('  https://API.Example.com/  '), 'api.example.com');
+  assert.equal(hostFromApiUrl(''), null);
+  assert.equal(hostFromApiUrl(undefined), null);
+  assert.equal(hostFromApiUrl('ftp://example.com'), null);
+  assert.equal(hostFromApiUrl('no es una url'), null);
 });

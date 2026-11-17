@@ -189,7 +189,7 @@ export function isTextFile(fileName) {
  * la prohibición incondicional gana y el finding queda con su etiqueta propia.
  * `occurrences` son las apariciones del host permitido en posición pedible.
  */
-export function auditText(text, { hosts = true, secrets = true, path = '' } = {}) {
+export function auditText(text, { hosts = true, secrets = true, path = '', extraHosts = [] } = {}) {
   const findings = [];
   let occurrences = [];
   if (hosts) {
@@ -198,7 +198,7 @@ export function auditText(text, { hosts = true, secrets = true, path = '' } = {}
       const match = rule.pattern.exec(hostText);
       if (match) findings.push({ kind: 'host', label: rule.label, match: match[0].slice(0, 120) });
     }
-    const positional = scanRequestHosts(hostText);
+    const positional = scanRequestHosts(hostText, extraHosts);
     for (const finding of positional.findings) {
       if (FORBIDDEN_HOSTS.some((rule) => rule.pattern.test(finding.label))) continue;
       findings.push(finding);

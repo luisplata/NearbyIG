@@ -81,10 +81,12 @@ function isRequestPosition(context) {
  * @param {string} text
  * @returns {{ findings: Array<{kind: string, label: string, match: string}>, occurrences: string[] }}
  */
-export function scanRequestHosts(text) {
+export function scanRequestHosts(text, extraAllowed = []) {
   const findings = [];
   const occurrences = [];
   if (typeof text !== 'string' || text.length === 0) return { findings, occurrences };
+
+  const allowed = new Set([...ALLOWED_REQUEST_HOSTS, ...extraAllowed]);
 
   for (const match of text.matchAll(URL_RE)) {
     const host = match[1].toLowerCase();
@@ -92,7 +94,7 @@ export function scanRequestHosts(text) {
     const context = text.slice(Math.max(0, index - CONTEXT_WINDOW), index);
     const request = isRequestPosition(context);
 
-    if (ALLOWED_REQUEST_HOSTS.includes(host)) {
+    if (allowed.has(host)) {
       if (request) occurrences.push(host);
       continue;
     }
@@ -115,4 +117,22 @@ export function compareHostSets(observed, allowed = ALLOWED_REQUEST_HOSTS) {
     missing: allowed.filter((host) => !seen.has(host)),
     extra: [...seen].filter((host) => !allowed.includes(host)).sort(),
   };
+}
+
+/**
+ * Host pedible a partir de una URL de API (`PAGES_API_URL`). Devuelve `null`
+ * cuando no hay URL o no es `http(s)`: el artefacto publicado sigue sin backend.
+ * No agrega el host a la allowlist base: el llamador decide si lo suma.
+ */
+export function hostFromApiUrl(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return url.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }
