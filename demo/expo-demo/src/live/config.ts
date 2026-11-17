@@ -15,6 +15,15 @@
  * se sigue con la fuente siguiente: nunca se arma un `fetch` con algo que no sea
  * una URL.
  *
+ * **Auto-reparación.** El storage gana sobre el build, y un túnel de demo se
+ * apaga: la visita siguiente arranca contra un host que ya no resuelve y el
+ * `fetch` falla antes de que exista una respuesta. Sin una salida, el usuario
+ * queda varado en "sin conexión" para siempre (el único escape sería saberse
+ * `?api=off`). Por eso, si la primera llamada falla **por red** y la base en uso
+ * vino de `storage`, el override se descarta **una sola vez** y se reintenta
+ * contra la del build. Un segundo fallo ya es una API caída y sigue el camino de
+ * siempre (`offline` + aviso). La regla vive en `shouldHealApiOverride`.
+ *
  * **CORS.** El origen que el backend tiene que permitir es el de la **página**
  * (de dónde sale el JS), no el de la API: el navegador compara el `Origin` de la
  * página contra lo que la API declare. Un túnel de la app se resuelve en la
@@ -124,6 +133,41 @@ export function resolveApiBase(
   }
   const fromEnv = normalizeBaseUrl(envUrl);
   return fromEnv === null ? null : { raw: fromEnv, origin: 'env' };
+}
+
+export type ApiHealInput = {
+  /** Origen de la base que el controlador está usando. */
+  origin: ApiBaseOrigin | null;
+  /** Base en uso (la que falló). */
+  currentBase: string | null;
+  /** Base del build, ya normalizada; `null` si el build no tiene una absoluta. */
+  buildBase: string | null;
+  /** `true` si este controlador ya descartó el override una vez. */
+  alreadyHealed: boolean;
+};
+
+/**
+ * Decisión pura de auto-reparación: ¿hay que descartar el override guardado y
+ * reintentar contra la base del build?
+ *
+ * Sólo cuando se cumplen las cuatro: la base en uso salió de `storage` (un
+ * `?api=` explícito es una decisión del usuario y el build ya es el fallback),
+ * el build tiene una base `http(s)` absoluta a la que volver, las dos bases son
+ * distintas (si son iguales no hay nada que reparar) y todavía no se reparó (un
+ * solo reintento: nunca un loop contra una API caída).
+ */
+export function shouldHealApiOverride({
+  origin,
+  currentBase,
+  buildBase,
+  alreadyHealed,
+}: ApiHealInput): boolean {
+  if (alreadyHealed || origin !== 'storage' || !isHttpBaseUrl(buildBase)) {
+    return false;
+  }
+  const current = normalizeBaseUrl(currentBase ?? undefined);
+  const build = normalizeBaseUrl(buildBase ?? undefined);
+  return current !== null && build !== null && current !== build;
 }
 
 /**
@@ -379,10 +423,4 @@ export function readRuntimeApiBase(envUrl: string | undefined): ApiBaseResolutio
     writeStoredApi(resolved.raw);
   }
   return resolved;
-}
-
-/** Settings del arranque: build + overrides de runtime ya resueltos. */
-export function readRuntimeLiveSettings(envUrl: string | undefined): LiveSettings | null {
-  const resolved = readRuntimeApiBase(envUrl);
-  return readLiveSettings(resolved?.raw);
 }
