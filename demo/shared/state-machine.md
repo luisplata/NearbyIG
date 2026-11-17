@@ -203,12 +203,12 @@ mapa. Un basemap caído no cambia la proyección ni el guion.
 - La navegación es estado en memoria (`view` + `overlay`). No hay router ni rutas
   profundas; la URL nunca cambia.
 
-## 8. Paridad ejecutable (golden)
+## 8. Regresión ejecutable (golden)
 
 `golden/steps.json` es una secuencia canónica de acciones con `TIMER_FIRED` explícitos.
-Ambos test suites la reproducen con el mismo reducer y, después de cada paso, comparan
-`digest = sha256(projection(state)).hex[0..12]` contra `golden/expected.json`
-(producido por el dumper de Dart, única fuente).
+La reproduce el reducer Expo y, después de cada paso, compara
+`digest = sha256(projection(state)).hex[0..12]` contra `golden/expected.json`, que
+escribe `npm --prefix demo/expo-demo run golden:update` (única fuente).
 
 `projection(state)` es una lista **ordenada** de líneas `clave=valor`:
 

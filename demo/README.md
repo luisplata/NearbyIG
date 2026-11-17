@@ -94,17 +94,17 @@ vivos al terminar la revisión.
 12. **Bundle**: `expo export` emite el chunk `maplibre-gl-*.js` aparte; el entry no evalúa
     MapLibre hasta entrar a Radar.
 
-## Golden de paridad
+## Golden de regresión
 
-`demo/shared/golden/expected.json` tiene un único productor: el dumper de Dart.
-Se corre desde `demo/flutter-demo`, después del sync, y la demo Expo compara sus
-digests contra ese archivo.
+`demo/shared/golden/expected.json` tiene un único productor: el reducer Expo.
+Se regenera con `npm --prefix demo/expo-demo run golden:update`, después del sync,
+y la demo compara sus digests contra ese archivo.
 
 ```bash
 node scripts/sync-demo-assets.mjs
-(cd demo/flutter-demo && dart run tool/dump_golden.dart)   # regenera shared/golden/expected.json
-node scripts/sync-demo-assets.mjs                          # copia el expected.json a test/golden/
-(cd demo/flutter-demo && flutter test test/reducer_golden_test.dart)
+npm --prefix demo/expo-demo run golden:update   # regenera shared/golden/expected.json
+node scripts/sync-demo-assets.mjs               # copia el expected.json a test/golden/
+npm --prefix demo/expo-demo run test
 ```
 
 ## Apps
@@ -120,7 +120,7 @@ node scripts/sync-demo-assets.mjs                          # copia el expected.j
 # Expo web
 npm --prefix demo/expo-demo ci
 npm --prefix demo/expo-demo run typecheck
-npm --prefix demo/expo-demo run test          # golden de paridad (Vitest) + selectores + formato
+npm --prefix demo/expo-demo run test          # golden de regresión (Vitest) + selectores + formato
 (cd demo/expo-demo && EXPO_BASE_URL="" npx expo export --platform web --output-dir dist --clear)
 ```
 

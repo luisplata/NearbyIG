@@ -52,7 +52,7 @@ Reglas duras del dataset (validadas por script):
   intenciones y géneros dentro del catálogo; timers exactos.
 - Exactamente **3 intenciones** en `filters.intentions`; cada una la usan al menos dos
   perfiles. El orden del array es el orden del catálogo y el que serializa la proyección
-  golden: cambiarlo mueve los digests de paridad.
+  golden: cambiarlo mueve los digests del golden.
 - `self` y cada perfil tienen un catálogo cerrado de claves. Un campo `interests`,
   `hobbies`, `tags` o cualquier otro desconocido es un error: los gustos son copy libre
   dentro de `status.*` y `bio.*`, no datos.
@@ -238,8 +238,10 @@ la misma secuencia de acciones. La secuencia canónica está en
 | dataset | `lib/generated/dataset.dart` | `src/generated/dataset.ts` |
 
 Más `landing/generated/dataset.js`, `landing/generated/tokens.css`, las copias de
-`assets/brand`, `assets/fonts` y `test/golden/`. Todos los generados son byte-estables
-(LF, claves ordenadas, sin timestamps) y se verifican así:
+`assets/brand`, `assets/fonts` y `test/golden/`. El golden
+(`shared/golden/expected.json`) lo escribe `npm --prefix demo/expo-demo run golden:update`
+desde el reducer Expo; el sync lo copia a `test/golden/`. Todos los generados son
+byte-estables (LF, claves ordenadas, sin timestamps) y se verifican así:
 
 ```bash
 node scripts/validate-fixtures.mjs
@@ -363,11 +365,12 @@ Si el sitio se deshabilita, el job `build` falla en `configure-pages`, a propós
 Pasos, verificación y rollback:
 [`../docs/pages-handoff.md`](../docs/pages-handoff.md).
 
-## 14. Evidencia de verificación (paridad 15 puntos)
+## 14. Evidencia de verificación (15 puntos)
 
-Los puntos se verifican con la golden compartida (mismos digests en Dart y TS), los
-tests de cada app y la auditoría del artefacto. La columna “Visual” marca lo que exige
-un navegador real y queda pendiente hasta la revisión con DevTools + lector de pantalla.
+Los puntos se verifican con el golden de regresión del reducer Expo (digests congelados
+en `shared/golden/expected.json`), los tests de cada app y la auditoría del artefacto.
+La columna “Visual” marca lo que exige un navegador real y queda pendiente hasta la
+revisión con DevTools + lector de pantalla.
 
 | # | Automatizado | Visual |
 |---|---|---|
