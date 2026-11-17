@@ -225,7 +225,6 @@ export class EventsService {
 
     return {
       humans: humans.rows.map((row) => row.profile_id),
-      bots: [],
     };
   }
 
@@ -280,13 +279,12 @@ export class EventsService {
                -- tarjeta pegada en pantalla para siempre.
                (event_type = 'profile.presence'
                 AND (payload->>'online' = 'false' OR payload->>'profileId' = ANY($3::text[])))
-            OR (event_type = 'profile.moved'    AND payload->>'profileId' = ANY($4::text[]))
-            OR (event_type IN ('message.created', 'typing.started')
-                AND payload->>'matchId' = ANY($6::text[]))
+            OR (event_type = 'message.created'
+                AND payload->>'matchId' = ANY($4::text[]))
           )
         ORDER BY seq
         LIMIT $5`,
-      [regionKey, cursor?.seq ?? 0, subjects.humans, subjects.bots, limit + 1, [...matchIds]],
+      [regionKey, cursor?.seq ?? 0, subjects.humans, [...matchIds], limit + 1],
     );
 
     return rows.slice(0, limit).map((row) => ({

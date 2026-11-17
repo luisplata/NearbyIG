@@ -103,7 +103,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * devuelve **ese** mensaje, sin emitir un segundo evento.
  *
  * **El bot.** Si el otro lado es un bot, el server agenda su respuesta a los
- * ~2 s y emite `typing.started` en el acto. El timer vive en este proceso y hay
+ * ~2 s. El timer vive en este proceso y hay
  * **uno por match** (`pendingBotReplies`): tres mensajes seguidos producen una
  * respuesta, no tres, y el cliente no simula nada. Un reinicio de la API pierde
  * la respuesta pendiente; la demo es efímera y el mensaje del humano ya está
@@ -288,7 +288,7 @@ export class ChatService implements OnModuleDestroy {
    * un pedido mal formado no gaste una consulta.
    *
    * Si el otro lado es un bot, la respuesta del bot se agenda acá: una sola vez
-   * por match, con `typing.started` emitido en el acto (`emitTyping`).
+   * por match.
    */
   async send(session: AuthContext, rawMatchId: unknown, body: unknown): Promise<Message> {
     const matchId = parseMatchId(rawMatchId);
@@ -353,7 +353,6 @@ export class ChatService implements OnModuleDestroy {
     }
 
     if (access.isBot) {
-      await this.emitTyping(session.regionKey, matchId, access.peerProfileId);
       this.scheduleBotReply(session.regionKey, matchId, access.peerProfileId);
     }
 
@@ -469,20 +468,7 @@ export class ChatService implements OnModuleDestroy {
     }
   }
 
-  /**
-   * Emite `typing.started`. Un fallo del log **no** hace fallar el envío: el
-   * mensaje ya está persistido y `GET .../messages` sigue siendo la fuente de
-   * verdad; el aviso es una notificación, no el dato.
-   */
-  private async emitTyping(regionKey: string, matchId: string, profileId: string): Promise<void> {
-    try {
-      await this.events.append(regionKey, 'typing.started', { matchId, profileId });
-    } catch (error) {
-      this.warnEmit('typing.started', regionKey, error);
-    }
-  }
-
-  /** Emite `message.created`; misma regla: el aviso no puede tumbar el mensaje. */
+  /** Emite `message.created`; el aviso no puede tumbar el mensaje. */
   private async emitCreated(regionKey: string, row: MessageRow): Promise<void> {
     try {
       await this.events.append(regionKey, 'message.created', {
