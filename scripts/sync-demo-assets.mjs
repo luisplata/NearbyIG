@@ -5,8 +5,8 @@
  * 1. lee fixtures/copy/design-tokens/photos
  * 2. calcula el datasetId del contenido
  * 3. verifica los hashes de PROVENANCE (marca y fuentes)
- * 4. rasteriza icon.svg a 192/512 PNG (resvg)
- * 5. copia marca, fuentes y golden a cada app existente
+ * 4. rasteriza icon.svg a 192/512/1024 PNG y el foreground adaptativo (resvg)
+ * 5. copia marca, fuentes, golden y los PNG nativos a cada app existente
  * 6. escribe los generados (5 por app + dataset de la landing)
  *
  * Es idempotente: misma entrada → mismos bytes (LF, claves ordenadas, sin timestamps).
@@ -59,10 +59,23 @@ const FONT_ASSETS = [
   { source: join(SHARED, 'assets/fonts/OFL.txt'), target: 'assets/fonts/OFL.txt' },
 ];
 
+/**
+ * Sólo la app nativa los consume: el icono de 1024 (iOS y splash) y el
+ * foreground del icono adaptativo de Android. Flutter y la landing siguen con
+ * 192/512: ningún bundle web los importa, así que el artefacto no engorda.
+ */
+const NATIVE_BRAND_ASSETS = [
+  { source: join(SHARED, 'assets/brand/icon-1024.png'), target: 'assets/brand/icon-1024.png' },
+  {
+    source: join(SHARED, 'assets/brand/adaptive-foreground.png'),
+    target: 'assets/brand/adaptive-foreground.png',
+  },
+];
+
 /** La landing necesita el icono (favicon) y las fuentes para no pedir nada externo. */
 const TARGET_ASSETS = {
   flutter: [...BRAND_ASSETS, ...FONT_ASSETS],
-  expo: [...BRAND_ASSETS, ...FONT_ASSETS],
+  expo: [...BRAND_ASSETS, ...FONT_ASSETS, ...NATIVE_BRAND_ASSETS],
   landing: [...BRAND_ASSETS, ...FONT_ASSETS],
 };
 
@@ -163,6 +176,8 @@ async function rasterizeBrand() {
   const sizes = [
     { width: 192, file: join(SHARED, 'assets/brand/icon-192.png') },
     { width: 512, file: join(SHARED, 'assets/brand/icon-512.png') },
+    // 1024 es el mínimo que acepta el App Store y lo que pide el icono nativo.
+    { width: 1024, file: join(SHARED, 'assets/brand/icon-1024.png') },
   ];
 
   if (noRaster) {
@@ -198,6 +213,55 @@ async function rasterizeBrand() {
   });
 }
 
+/**
+ * Foreground del icono adaptativo de Android: el glifo al 75 % de un canvas
+ * transparente de 1024 px. Fuera de esa zona segura el recorte del launcher
+ * (círculo, squircle, gota) se come el arte. Se anida el SVG de marca en vez de
+ * duplicar el dibujo: un solo original, dos derivados.
+ */
+async function rasterizeAdaptive() {
+  const svgPath = join(SHARED, 'assets/brand/icon.svg');
+  const file = join(SHARED, 'assets/brand/adaptive-foreground.png');
+  const size = 1024;
+  const inset = size / 8;
+
+  if (noRaster) {
+    if (!existsSync(file)) {
+      fatal(`--no-raster requiere ${displayPath(file)}; corré el sync sin --no-raster una vez`);
+    }
+    return { file, buffer: readFileSync(file) };
+  }
+
+  let Resvg;
+  try {
+    ({ Resvg } = await import('@resvg/resvg-js'));
+  } catch (error) {
+    if (!existsSync(file)) {
+      fatal(
+        `no se pudo cargar @resvg/resvg-js (${error.message}) y falta ${displayPath(file)}.\n` +
+          '       Corré `npm install` (o el sync con --no-raster si el PNG ya existe).',
+      );
+    }
+    warn(`no se pudo cargar @resvg/resvg-js (${error.message}); se usa el foreground existente`);
+    return { file, buffer: readFileSync(file) };
+  }
+
+  const source = readFileSync(svgPath, 'utf8');
+  const viewBox = /viewBox="([^"]+)"/.exec(source)?.[1] ?? '0 0 512 512';
+  // El tag raíz se reescribe entero: el width/height="100%" del original no
+  // aplica adentro de otro canvas y el viewBox tiene que seguir siendo el suyo.
+  const nested = source.replace(
+    /^<svg[^>]*>/,
+    `<svg x="${inset}" y="${inset}" width="${size - inset * 2}" height="${size - inset * 2}" viewBox="${viewBox}">`,
+  );
+  const canvas = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${nested}</svg>`;
+
+  const png = new Resvg(Buffer.from(canvas), { fitTo: { mode: 'width', value: size } })
+    .render()
+    .asPng();
+  return { file, buffer: Buffer.from(png) };
+}
+
 async function main() {
   log(`NearbyIG demo sync${checkOnly ? ' (check)' : ''}`);
 
@@ -224,6 +288,9 @@ async function main() {
   for (const size of rendered) {
     writePlanned(size.file, size.buffer);
   }
+
+  const adaptive = await rasterizeAdaptive();
+  writePlanned(adaptive.file, adaptive.buffer);
 
   const selectedTargets =
     targetArg === 'all' ? Object.keys(TARGETS) : [targetArg];

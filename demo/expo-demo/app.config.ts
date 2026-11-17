@@ -14,8 +14,40 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: 'portrait',
   userInterfaceStyle: 'dark',
   backgroundColor: '#09090B',
-  icon: './assets/brand/icon-512.png',
-  platforms: ['web'],
+  // iOS exige 1024×1024 en el App Store; el mismo arte alimenta el icono
+  // adaptativo de Android y el splash. Lo genera `npm run sync`.
+  icon: './assets/brand/icon-1024.png',
+  /**
+   * `web` sigue siendo lo único que se publica (Pages), pero la aceptación del
+   * piloto es instalar el APK en un teléfono: sin android/ios acá `prebuild` no
+   * tiene identidad que escribir y el binario no puede existir.
+   */
+  platforms: ['web', 'android', 'ios'],
+  android: {
+    // Package y versionCode se fijan ANTES del .aab firmado: Play no deja
+    // cambiarlos después y el cambio del release los da por hechos.
+    package: 'com.nearbyig.app',
+    versionCode: 1,
+    /**
+     * El foreground va al 75 % del canvas porque fuera de eso el recorte del
+     * launcher (círculo, squircle) se come el glifo. El fondo se declara acá y
+     * no dentro del PNG: así el sistema lo pinta detrás y el arte queda opaco.
+     */
+    adaptiveIcon: {
+      foregroundImage: './assets/brand/adaptive-foreground.png',
+      backgroundColor: '#09090B',
+    },
+    // Alguna lib transitiva declara overlay; la demo no dibuja sobre otras apps
+    // y Play lo lee como capacidad engañosa. Se remueve del manifest final.
+    blockedPermissions: ['android.permission.SYSTEM_ALERT_WINDOW'],
+  },
+  ios: {
+    bundleIdentifier: 'com.nearbyig.app',
+    // buildNumber es string por contrato (CFBundleVersion), no número.
+    buildNumber: '1',
+    // La demo es un mock de teléfono: en iPad el layout de 390 px no tiene sentido.
+    supportsTablet: false,
+  },
   web: {
     bundler: 'metro',
     output: 'single',
@@ -26,5 +58,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     description: 'Demo no funcional de Nearby Social Club: datos ficticios, sin backend ni cuentas.',
   },
   experiments: { baseUrl },
-  plugins: ['expo-font'],
+  plugins: [
+    'expo-font',
+    /**
+     * El splash nativo se declara por plugin y no por una clave raíz `splash`:
+     * esa clave no existe en el schema de SDK 58 (rompe `tsc --noEmit`) y el
+     * plugin es el único camino que `prebuild` aplica. Reusa el icono para no
+     * inventar arte nuevo; 220 px es el tamaño legible de un logo cuadrado.
+     */
+    [
+      'expo-splash-screen',
+      {
+        image: './assets/brand/icon-1024.png',
+        imageWidth: 220,
+        resizeMode: 'contain',
+        backgroundColor: '#09090B',
+      },
+    ],
+  ],
 });
