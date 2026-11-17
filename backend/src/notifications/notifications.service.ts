@@ -116,27 +116,12 @@ export class NotificationsService {
               t.unread_total
          FROM mine m
          CROSS JOIN totals t
-         -- Misma proyección que la bandeja de pings y el chat: humano del
-         -- catálogo o bot con la fila de su dueño. Si el otro lado ya no está,
-         -- la fila no se dibuja pero sigue contando para unreadCount.
-         JOIN LATERAL (
-           SELECT cand.*
-             FROM (
-               SELECT p.profile_id, p.nickname, p.initials, p.intention, p.photo_id, p.source_type
-                 FROM profiles p
-                WHERE p.region_key = $1
-                  AND p.profile_id = m.actor_profile_id
-               UNION ALL
-               SELECT m.actor_profile_id AS profile_id, o.nickname, o.initials, o.intention,
-                      o.photo_id, 'bot'::text
-                 FROM profiles o
-                WHERE o.region_key = $1
-                  AND m.actor_profile_id ~ '-b[12]$'
-                  AND o.profile_id = regexp_replace(m.actor_profile_id, '-b[12]$', '')
-             ) cand
-            ORDER BY (cand.profile_id = m.actor_profile_id) DESC
-            LIMIT 1
-         ) peer ON true
+         -- Misma proyección que la bandeja de pings y el chat: la fila del
+         -- catálogo del actor. Si el otro lado ya no está, la fila no se dibuja
+         -- pero sigue contando para unreadCount.
+         JOIN profiles peer
+           ON peer.region_key = $1
+          AND peer.profile_id = m.actor_profile_id
         ORDER BY m.created_at DESC, m.notification_id DESC`,
       [session.regionKey, session.profileId],
     );

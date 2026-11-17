@@ -8,7 +8,7 @@ import type { Match, Ping, PingList } from './pings.types';
 /**
  * `contract/paths/pings.yaml` — el flujo de conexión de S4.
  *
- *   POST /pings                  → 201 Ping (accepted si el destino es un bot)
+ *   POST /pings                  → 201 Ping, pendiente de aceptación humana
  *   GET  /pings?box=inbox|sent   → 200 PingList, más nuevo primero
  *   POST /pings/:pingId/accept   → 200 Match
  *   POST /pings/:pingId/reject   → 204, sin body

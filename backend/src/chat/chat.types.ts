@@ -69,25 +69,3 @@ export const MATCH_LIST_LIMIT = 100;
 export const MESSAGE_MAX_LENGTH = 2000;
 /** `MessageCreate.clientMessageId`: el mismo `maxLength` que el schema. */
 export const CLIENT_MESSAGE_ID_MAX_LENGTH = 100;
-
-/**
- * Cuánto tarda el bot en contestar. ~2 s es lo que hace que la demo se sienta
- * viva sin que el cliente tenga que simular nada: la espera es del server y el
- * mensaje llega por el stream como cualquier otro.
- */
-export const BOT_REPLY_DELAY_MS = 2_000;
-
-/**
- * Los textos del bot. Son fijos y **rotan**: dos respuestas consecutivas del
- * mismo bot nunca repiten el mismo texto, que es la regla que pide la demo.
- *
- * No es un LLM ni una plantilla con variables: el bot de la demo dice estas
- * líneas y nada más. Un texto generado costaría plata y haría que dos corridas
- * de la demo no se puedan comparar.
- */
-export const BOT_REPLIES = [
-  '¡Hola! ¿Cómo va? Me alegra que hayamos conectado.',
-  'Jaja, tal cual. ¿Qué estás haciendo por acá?',
-  'Me copa la idea. ¿Nos tomamos algo uno de estos días?',
-  'Sí, re. Después te cuento cómo me fue con eso.',
-] as const;

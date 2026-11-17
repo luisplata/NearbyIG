@@ -56,16 +56,12 @@ interface CreatedMatchRow extends MatchRow {
   created: boolean;
 }
 
-/** `target` ya validado: quién es, si es un bot y quién es su dueño. */
+/** `target` ya validado: el perfil al que apunta un ping. */
 interface PingTarget {
   readonly profileId: string;
-  readonly isBot: boolean;
-  /** El humano canónico: el propio `profileId`, o el dueño si es un bot. */
-  readonly ownerProfileId: string;
-  /** Zona del bot al resolver: `null` para un humano. */
-  readonly botZoneKey: string | null;
 }
 
+/** `pingId` y `matchId` del path: un id malformado es 422, no 404. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
@@ -77,28 +73,6 @@ const BOX_COLUMNS: Readonly<Record<PingBox, { readonly filter: string; readonly 
   inbox: { filter: 'pg.to_profile_id', peer: 'pg.from_profile_id' },
   sent: { filter: 'pg.from_profile_id', peer: 'pg.to_profile_id' },
 };
-
-/** Predicado de "el dueño del bot está vivo y visible": mismo criterio que discovery. */
-const OWNER_VISIBLE = `
-  EXISTS (
-    SELECT 1
-      FROM presence pr
-      JOIN sessions s ON s.session_id = pr.session_id
-     WHERE pr.region_key = b.region_key
-       AND s.profile_id = b.owner_profile_id
-       AND pr.expires_at > now()
-       AND pr.visibility = 'visible'
-       AND s.revoked_at IS NULL
-       AND s.expires_at > now()
-  )`;
-
-/** Un `profileId` de bot: `<owner>-b1` / `<owner>-b2`. */
-const BOT_PROFILE_ID = /-b[12]$/;
-
-/** El humano detrás de un `profileId`: el mismo si no es bot, el dueño si lo es. */
-function canonicalProfileId(profileId: string): string {
-  return profileId.replace(BOT_PROFILE_ID, '');
-}
 
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === '23505';
@@ -173,9 +147,9 @@ function toMatch(row: MatchRow): Match {
  * dos `POST /pings` simultáneos no pueden dejar dos pendientes del mismo par y
  * el perdedor recibe `409 PING_DUPLICATE`.
  *
- * **El bot acepta solo.** Si el destinatario es un bot (`<owner>-b1`), el ping se
- * inserta y se acepta en la misma transacción: la demo se siente viva sin un job
- * que despierte bots a los 2 s y el cliente no tiene un caso especial.
+ * **Nadie acepta por su cuenta.** Un ping queda `pending` hasta que el
+ * destinatario llama a `accept` o `reject`: no hay job ni rama que lo resuelva
+ * solo. El match nace de una acción humana, no de un temporizador.
  *
  * **Lo que nunca sale.** Ni coordenadas ni `distanceM`/`bearingDeg`: un ping no
  * es un resultado de descubrimiento. Los logs no llevan `profileId` ni nickname;
@@ -219,13 +193,12 @@ export class PingsService {
       if (target === undefined) {
         throw new AppProblemError(
           'PROFILE_NOT_FOUND',
-          'El destinatario no existe en esta región: un ping no cruza regiones y un bot sin dueño vivo no está.',
+          'El destinatario no existe en esta región: un ping no cruza regiones.',
         );
       }
 
-      // Bloqueo (v0.5): en cualquier dirección, el ping no sale. Se canoniza al
-      // dueño porque `blocks` nunca guarda un bot.
-      await this.assertNotBlocked(client, session.regionKey, session.profileId, target.ownerProfileId);
+      // Bloqueo (v0.5): en cualquier dirección, el ping no sale.
+      await this.assertNotBlocked(client, session.regionKey, session.profileId, target.profileId);
 
       await this.assertWithinRateLimit(client, session);
 
@@ -262,42 +235,15 @@ export class PingsService {
         throw new AppProblemError('INTERNAL', 'El ping no se pudo crear.');
       }
 
-      if (!target.isBot) {
-        // La notificación del ping es parte de la misma transacción que el ping:
-        // o quedan los dos, o no queda ninguno. `notify` ignora destinatarios
-        // bot (no leen avisos) y al propio actor.
-        await this.notify(client, session.regionKey, target.profileId, session.profileId, 'ping.received', {
-          pingId: ping.ping_id,
-        });
-        await client.query('COMMIT');
-        committed = true;
-        this.logger.log(`ping creado region=${session.regionKey} destino=humano`);
-        return toPing(ping);
-      }
-
-      // El bot acepta solo: mismo camino que el accept humano, sin esperar.
-      const match = await this.createMatch(
-        client,
-        session.regionKey,
-        [session.profileId, targetProfileId],
-        target.botZoneKey,
-      );
-      const accepted = await client.query<PingRow>(
-        `UPDATE pings
-            SET status = 'accepted', resolved_at = now(), match_id = $2
-          WHERE ping_id = $1
-          RETURNING ping_id, from_profile_id, to_profile_id, status, created_at, expires_at, match_id`,
-        [ping.ping_id, match.match_id],
-      );
-      // El destinatario es un bot: `notify` no inserta nada. Se llama igual para
-      // que la regla "quién genera aviso" viva en un solo lugar.
-      await this.notify(client, session.regionKey, targetProfileId, session.profileId, 'match.created', {
-        matchId: match.match_id,
+      // La notificación del ping es parte de la misma transacción que el ping:
+      // o quedan los dos, o no queda ninguno. `notify` ignora al propio actor.
+      await this.notify(client, session.regionKey, target.profileId, session.profileId, 'ping.received', {
+        pingId: ping.ping_id,
       });
       await client.query('COMMIT');
       committed = true;
-      this.logger.log(`ping creado region=${session.regionKey} destino=bot match=si`);
-      return toPing(accepted.rows[0] ?? { ...ping, status: 'accepted', match_id: match.match_id });
+      this.logger.log(`ping creado region=${session.regionKey}`);
+      return toPing(ping);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new AppProblemError(
@@ -325,10 +271,8 @@ export class PingsService {
    * todavía se puede aceptar. No hay cron ni job de barrido.
    *
    * Un ping cuyo peer no se puede resolver no se lista: la bandeja es una
-   * proyección de perfiles, no un log. El único caso real es un ping a un bot
-   * cuyo dueño ya no existe; el respaldo por `<owner>-b<n>` del lateral cubre el
-   * caso normal (la fila del bot se va cuando el dueño pierde presencia, pero su
-   * perfil de catálogo sigue).
+   * proyección de perfiles, no un log. El caso real es un ping a un perfil que
+   * ya no está en el catálogo.
    */
   async list(session: AuthContext, rawBox: unknown): Promise<PingList> {
     const box = parseBox(rawBox);
@@ -354,28 +298,9 @@ export class PingsService {
               peer.photo_id      AS peer_photo_id,
               peer.source_type   AS peer_source_type
          FROM pings pg
-         JOIN LATERAL (
-           SELECT cand.*
-             FROM (
-               -- El peer tal cual está en el catálogo (humano).
-               SELECT p.profile_id, p.nickname, p.initials, p.intention, p.photo_id, p.source_type
-                 FROM profiles p
-                WHERE p.region_key = pg.region_key
-                  AND p.profile_id = ${columns.peer}
-               UNION ALL
-               -- Un bot no tiene fila de catálogo: hereda la de su dueño y se
-               -- distingue por sourceType. El respaldo por nombre cubre el bot
-               -- que el ticker ya retiró (<owner>-b1), así un ping viejo a un
-               -- bot no desaparece de la bandeja.
-               SELECT ${columns.peer} AS profile_id, o.nickname, o.initials, o.intention, o.photo_id, 'bot'::text
-                 FROM profiles o
-                WHERE o.region_key = pg.region_key
-                  AND ${columns.peer} ~ '-b[12]$'
-                  AND o.profile_id = regexp_replace(${columns.peer}, '-b[12]$', '')
-             ) cand
-            ORDER BY (cand.profile_id = ${columns.peer}) DESC
-            LIMIT 1
-         ) peer ON true
+         JOIN profiles peer
+           ON peer.region_key = pg.region_key
+          AND peer.profile_id = ${columns.peer}
         WHERE pg.region_key = $1
           AND ${columns.filter} = $2
         ORDER BY pg.created_at DESC, pg.ping_id DESC
@@ -475,21 +400,13 @@ export class PingsService {
       }
 
       // Bloquear es más fuerte que "aceptar tarde": si el par está bloqueado, la
-      // conversación no se abre. Se canoniza el emisor por si el ping salió de
-      // un bot (hoy no pasa: `pings_from_fk` apunta a `profiles`).
-      await this.assertNotBlocked(
-        client,
-        session.regionKey,
-        session.profileId,
-        canonicalProfileId(ping.from_profile_id),
-      );
+      // conversación no se abre.
+      await this.assertNotBlocked(client, session.regionKey, session.profileId, ping.from_profile_id);
 
-      const match = await this.createMatch(
-        client,
-        session.regionKey,
-        [ping.from_profile_id, ping.to_profile_id],
-        await this.botZoneOf(client, session.regionKey, ping.to_profile_id),
-      );
+      const match = await this.createMatch(client, session.regionKey, [
+        ping.from_profile_id,
+        ping.to_profile_id,
+      ]);
       await client.query(
         `UPDATE pings SET status = 'accepted', resolved_at = now(), match_id = $2 WHERE ping_id = $1`,
         [pingId, match.match_id],
@@ -519,42 +436,27 @@ export class PingsService {
   }
 
   /**
-   * El destinatario existe en esta región y sigue vivo.
+   * El destinatario existe en esta región.
    *
    * Un humano del catálogo existe mientras el catálogo lo tenga: su bandeja vive
    * en la base y no depende de que su presencia (12 s) esté viva en este
-   * instante. Un bot, en cambio, es una proyección de su dueño: sin presencia
-   * viva **y visible** no está, igual que en `GET /discovery`. Un bot de un dueño
-   * en ghost no se puede pinguear: el ghost también lo esconde de los desconocidos.
+   * instante.
    */
   private async resolveTarget(
     client: PoolClient,
     regionKey: string,
     profileId: string,
   ): Promise<PingTarget | undefined> {
-    const { rows } = await client.query<{ kind: 'human' | 'bot'; zone_key: string | null }>(
-      `SELECT 'human'::text AS kind, NULL::text AS zone_key
+    const { rowCount } = await client.query(
+      `SELECT 1
          FROM profiles p
         WHERE p.region_key = $1
           AND p.profile_id = $2
-          AND p.source_type = 'human'
-       UNION ALL
-       SELECT 'bot'::text AS kind, b.zone_key
-         FROM bots b
-        WHERE b.region_key = $1
-          AND b.bot_profile_id = $2
-          AND ${OWNER_VISIBLE}
-       LIMIT 1`,
+          AND p.source_type = 'human'`,
       [regionKey, profileId],
     );
-    const row = rows[0];
-    if (row === undefined) return undefined;
-    return {
-      profileId,
-      isBot: row.kind === 'bot',
-      ownerProfileId: canonicalProfileId(profileId),
-      botZoneKey: row.kind === 'bot' ? row.zone_key : null,
-    };
+    if ((rowCount ?? 0) === 0) return undefined;
+    return { profileId };
   }
 
   /** `403 CHAT_BLOCKED` si el par está bloqueado en cualquier dirección. */
@@ -583,25 +485,10 @@ export class PingsService {
     }
   }
 
-  /** Zona vigente de un bot, o `null` si el perfil no es un bot. */
-  private async botZoneOf(
-    client: PoolClient,
-    regionKey: string,
-    profileId: string,
-  ): Promise<string | null> {
-    if (!BOT_PROFILE_ID.test(profileId)) return null;
-    const { rows } = await client.query<{ zone_key: string }>(
-      'SELECT zone_key FROM bots WHERE region_key = $1 AND bot_profile_id = $2',
-      [regionKey, profileId],
-    );
-    return rows[0]?.zone_key ?? null;
-  }
-
   /**
    * Escribe una notificación para `recipientProfileId`, si corresponde.
    *
-   * Se ignora cuando el destinatario es un bot (`<owner>-b[12]`: no lee avisos)
-   * o cuando es el propio actor (avisarte de tu propia acción no es una
+   * Se ignora cuando es el propio actor (avisarte de tu propia acción no es una
    * notificación). El helper vive acá y no en `NotificationsService` porque el
    * insert tiene que ir en la **misma transacción** que el hecho: un ping sin su
    * aviso es una campana que miente.
@@ -614,7 +501,6 @@ export class PingsService {
     kind: 'ping.received' | 'match.created' | 'message.created',
     refs: { pingId?: string; matchId?: string; messageId?: string },
   ): Promise<void> {
-    if (BOT_PROFILE_ID.test(recipientProfileId)) return;
     if (recipientProfileId === actorProfileId) return;
     await client.query(
       `INSERT INTO notifications
@@ -660,25 +546,20 @@ export class PingsService {
    * devuelve nada y obligaría a un segundo `SELECT`. `xmax = 0` distingue "esta
    * llamada la creó" de "ya existía": sin eso, un segundo ping aceptado del mismo
    * par volvería a notificar un match que ya estaba en la bandeja.
-   *
-   * `botZoneKey` (v0.5) es la zona en la que nació la conversación cuando una de
-   * las partes es un bot. Un match humano↔humano la deja en `NULL`: la región de
-   * una persona no cambia y no hay nada que cerrar.
    */
   private async createMatch(
     client: PoolClient,
     regionKey: string,
     profileIds: readonly [string, string],
-    botZoneKey: string | null,
   ): Promise<CreatedMatchRow> {
     const [profileA, profileB] = [...profileIds].sort();
     const { rows } = await client.query<CreatedMatchRow>(
-      `INSERT INTO matches (region_key, profile_a_id, profile_b_id, bot_zone_key)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO matches (region_key, profile_a_id, profile_b_id)
+       VALUES ($1, $2, $3)
        ON CONFLICT (region_key, profile_a_id, profile_b_id)
        DO UPDATE SET match_id = matches.match_id
        RETURNING match_id, profile_a_id, profile_b_id, created_at, (xmax = 0) AS created`,
-      [regionKey, profileA, profileB, botZoneKey],
+      [regionKey, profileA, profileB],
     );
     const row = rows[0];
     if (row === undefined) {

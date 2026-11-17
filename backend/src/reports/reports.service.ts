@@ -7,9 +7,6 @@ import { isRecord, parseProfileId, rejectUnknownKeys, validationFailed } from '.
 import { PG_POOL } from '../db/database.module';
 import type { ReportReason, ReportReceipt } from './reports.types';
 
-/** Un `profileId` de bot: `<owner>-b1` / `<owner>-b2`. */
-const BOT_PROFILE_ID = /-b[12]$/;
-
 /**
  * Tope de reportes por minuto. Un reporte no tiene consecuencia automática, así
  * que su riesgo no es la moderación: es llenar la tabla. 10 por minuto deja
@@ -18,10 +15,6 @@ const BOT_PROFILE_ID = /-b[12]$/;
 const REPORT_RATE_PER_MINUTE = 10;
 
 const REASONS: readonly ReportReason[] = ['spam', 'harassment', 'inappropriate', 'impersonation', 'other'];
-
-function canonicalProfileId(profileId: string): string {
-  return profileId.replace(BOT_PROFILE_ID, '');
-}
 
 /** `ReportCreate` validado a mano: dos campos obligatorios y ninguno de más. */
 function parseReport(body: unknown): { profileId: string; reason: ReportReason } {
@@ -56,9 +49,6 @@ interface ReportRow {
  * eso lo decide el usuario con `POST /blocks`, que es otra acción. Tampoco
  * altera el descubrimiento de quien reporta.
  *
- * **Un bot se canoniza a su dueño**, como en el bloqueo: el bot no existe sin la
- * persona.
- *
  * **Sin PII en el acuse.** `ReportReceipt` lleva id y fecha; el motivo y el
  * perfil reportado se guardan en la tabla y no vuelven por HTTP.
  */
@@ -86,7 +76,7 @@ export class ReportsService {
       { capacity: REPORT_RATE_PER_MINUTE, refillPerSecond: REPORT_RATE_PER_MINUTE / 60 },
       `Superaste el tope de ${REPORT_RATE_PER_MINUTE} reportes por minuto.`,
     );
-    const target = canonicalProfileId(input.profileId);
+    const target = input.profileId;
     if (target === session.profileId) {
       throw validationFailed('No podés reportarte a vos mismo.');
     }

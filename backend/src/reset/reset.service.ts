@@ -18,7 +18,7 @@ import type { AuthContext, SourceType } from '../auth/session.types';
  * que su shape es propio y nadie lo consume como cliente.
  *
  * Qué borra y qué no:
- *   * Borra `sessions` (invitados incluidos), `stream_tickets`, `bots`, `events`,
+ *   * Borra `sessions` (invitados incluidos), `stream_tickets`, `events`,
  *     `event_seq`, `messages`, `match_reads`, `pings`, `matches` y —desde S5—
  *     `notifications`, `blocks` y `reports`: es el estado que ocupa slots, que
  *     sobrevive a un refresh, que hace que el stream de una corrida no se mezcle
@@ -91,15 +91,6 @@ export class ResetService {
         RETURNING region_key, profile_id, demo_slot, source_type`,
         [session.sessionId],
       );
-      // Los bots son del perfil, no de la sesión: al irse la sesión se van los
-      // suyos. Sin esto quedarían huérfanos hasta el próximo tick del mundo.
-      if (sessions.rows[0] !== undefined) {
-        await client.query('DELETE FROM bots WHERE region_key = $1 AND owner_profile_id = $2', [
-          sessions.rows[0].region_key,
-          sessions.rows[0].profile_id,
-        ]);
-      }
-
       // Privacidad (v0.5): se borra lo **propio**, no lo ajeno. Un bloqueo que
       // otra persona puso sobre mí es estado de esa persona: mi reset no puede
       // liberar a alguien más de su decisión ("reset por usuario no afecta a
@@ -220,7 +211,7 @@ export class ResetService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      // El log de eventos y los bots son estado de demo: un reset global tiene
+      // El log de eventos es estado de demo: un reset global tiene
       // que dejar la demo como recién migrada, con el stream vacío y el `seq` de
       // cada región volviendo a 1. La presencia cae en cascada con las sesiones.
       // Pings antes que matches: `pings.match_id` apunta a `matches`, así que
@@ -238,7 +229,6 @@ export class ResetService {
       const matches = await client.query('DELETE FROM matches');
       const blocks = await client.query('DELETE FROM blocks');
       const reports = await client.query('DELETE FROM reports');
-      await client.query('DELETE FROM bots');
       await client.query('DELETE FROM events');
       await client.query('DELETE FROM event_seq');
       const tickets = await client.query('DELETE FROM stream_tickets');
