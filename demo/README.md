@@ -144,7 +144,7 @@ npm run serve:dist          # http://localhost:8081
 
 | Pieza | Qué usa | Detalle |
 |---|---|---|
-| Base de la API | `?api=` > `localStorage` > `EXPO_PUBLIC_API_URL` | Un túnel cambia de URL sin rebuild |
+| Base de la API | `?api=` > `localStorage` > `EXPO_PUBLIC_API_URL` | Un túnel cambia de URL sin rebuild. Si el override guardado ya no resuelve, se descarta una vez y se reintenta contra la del build |
 | Zona demo | `?zone=` > `localStorage['nearbyig.demoZone']` | Define la región: `cdmx → mx`, `bogota → co`. `?zone=off` la borra (no hay default) |
 | Sesión | `POST /auth/demo-session` | Token **en memoria**; refresh = sesión nueva. Si la zona es de otra región, se cierra y se abre allá |
 | Presencia | `PUT /presence` cada 8 s | Punto del GPS o `demoZoneKey`; el TTL es 12 s |

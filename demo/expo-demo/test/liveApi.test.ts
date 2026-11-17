@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createLiveApi, LiveApiError, type FetchLike } from '../src/live/api';
+import { createLiveApi, isNetworkFailure, LiveApiError, type FetchLike } from '../src/live/api';
 
 type Call = { url: string; method: string; headers: Record<string, string>; body?: string };
 
@@ -351,5 +351,38 @@ describe('cliente de chat', () => {
       code: 'CHAT_BLOCKED',
       status: 403,
     });
+  });
+});
+
+/**
+ * El guard que habilita la auto-reparación del override: distinguir "el host no
+ * existe / no hay red" de "el server respondió con un error". Sin esta distinción
+ * un 500 descartaría una base que el usuario eligió a propósito.
+ */
+describe('fallo de red vs respuesta del server', () => {
+  it('reconoce el rechazo de `fetch` tal como lo escribe cada runtime', () => {
+    const messages = [
+      'Failed to fetch',
+      'Network request failed',
+      'Load failed',
+      'NetworkError when attempting to fetch resource.',
+      'fetch failed',
+    ];
+    for (const message of messages) {
+      expect(isNetworkFailure(new TypeError(message)), message).toBe(true);
+    }
+  });
+
+  it('una respuesta HTTP con error no es un fallo de red', () => {
+    expect(isNetworkFailure(new LiveApiError(500, 'INTERNAL', 'boom'))).toBe(false);
+    expect(isNetworkFailure(new LiveApiError(404, 'NOT_FOUND', 'Failed to fetch'))).toBe(false);
+  });
+
+  it('un error cualquiera del código no se confunde con la red', () => {
+    expect(isNetworkFailure(new Error('boom'))).toBe(false);
+    expect(isNetworkFailure(new TypeError('x is not a function'))).toBe(false);
+    expect(isNetworkFailure('Failed to fetch')).toBe(false);
+    expect(isNetworkFailure(null)).toBe(false);
+    expect(isNetworkFailure(undefined)).toBe(false);
   });
 });

@@ -15,7 +15,11 @@ import { useDemo } from '../state/DemoProvider';
 import type { DemoStore } from '../state/store';
 
 import {
-  readRuntimeLiveSettings,
+  clearStoredApi,
+  isHttpBaseUrl,
+  normalizeBaseUrl,
+  readLiveSettings,
+  readRuntimeApiBase,
   readRuntimeZone,
   readStoredVisibility,
   writeStoredVisibility,
@@ -167,10 +171,21 @@ export function LiveProvider({
   // `EXPO_PUBLIC_*` se inlinea al compilar: el acceso tiene que ser estático.
   // El override de runtime (`?api=` y storage) entra después, en `config`.
   // La región no entra: sale de la zona elegida (`cdmx → mx`, `bogota → co`).
-  const settings = useMemo(
-    () => readRuntimeLiveSettings(process.env.EXPO_PUBLIC_API_URL),
-    [],
-  );
+  //
+  // Se resuelve una sola vez y se guarda todo lo que el controlador necesita para
+  // auto-reparar: el origen de la base en uso y la base del build a la que volver
+  // si el override guardado ya no resuelve. Leer dos veces la resolución repetiría
+  // la escritura del `?api=` en storage.
+  const runtime = useMemo(() => {
+    const buildUrl = process.env.EXPO_PUBLIC_API_URL;
+    const resolved = readRuntimeApiBase(buildUrl);
+    return {
+      settings: readLiveSettings(resolved?.raw),
+      origin: resolved?.origin ?? null,
+      buildBase: isHttpBaseUrl(buildUrl) ? normalizeBaseUrl(buildUrl) : null,
+    };
+  }, []);
+  const settings = runtime.settings;
 
   /**
    * Zona persistida de una visita anterior. Se lee **una vez**, antes de crear
@@ -188,6 +203,12 @@ export function LiveProvider({
   const [controller] = useState<LiveController>(() =>
     createLiveController({
       settings,
+      // Auto-reparación de un override muerto: el controlador sólo la intenta si
+      // la base en uso vino del storage, y borra esa clave al descartarla. En un
+      // runtime sin storage del navegador el origen es `env` y no se repara nada.
+      apiBaseOrigin: runtime.origin,
+      buildApiBase: runtime.buildBase,
+      clearStoredApi,
       initialZoneKey: initialZone,
       initialVisibility,
       onZoneChange: writeStoredZone,

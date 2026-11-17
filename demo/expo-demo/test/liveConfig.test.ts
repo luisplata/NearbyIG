@@ -13,6 +13,7 @@ import {
   readStoredZone,
   resolveApiBase,
   resolveZone,
+  shouldHealApiOverride,
   writeStoredZone,
 } from '../src/live/config';
 
@@ -236,5 +237,84 @@ describe('zona persistida entre cargas', () => {
     });
     expect(result).toBe('bogota');
     expect(stored.get('nearbyig.demoZone')).toBe('bogota');
+  });
+});
+
+/**
+ * Decisión pura de auto-reparación: es la que evita que un túnel apagado guardado
+ * deje al usuario sin salida. Sólo storage + fallo de red + build válido distinto
+ * + primer intento disparan el descarte del override.
+ */
+describe('auto-reparación del override muerto', () => {
+  const DEAD = 'https://tunel-viejo.ngrok-free.app';
+  const BUILD = 'https://api.ejemplo.test';
+
+  it('storage contra una base del build distinta: se repara', () => {
+    expect(
+      shouldHealApiOverride({
+        origin: 'storage',
+        currentBase: DEAD,
+        buildBase: BUILD,
+        alreadyHealed: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('un `?api=` explícito no se pisa: es una decisión del usuario', () => {
+    expect(
+      shouldHealApiOverride({
+        origin: 'query',
+        currentBase: DEAD,
+        buildBase: BUILD,
+        alreadyHealed: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('una base del build que falla no tiene a dónde volver', () => {
+    expect(
+      shouldHealApiOverride({
+        origin: 'env',
+        currentBase: BUILD,
+        buildBase: BUILD,
+        alreadyHealed: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('si las dos bases son la misma no hay nada que reparar', () => {
+    expect(
+      shouldHealApiOverride({
+        origin: 'storage',
+        currentBase: `${BUILD}/`,
+        buildBase: BUILD,
+        alreadyHealed: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('un solo reintento por controlador: ya reparado no vuelve a reparar', () => {
+    expect(
+      shouldHealApiOverride({
+        origin: 'storage',
+        currentBase: DEAD,
+        buildBase: BUILD,
+        alreadyHealed: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('sin base del build (o con una que no es http absoluta) no se repara', () => {
+    for (const buildBase of [null, '', '   ', '/api', 'ftp://host', 'https://']) {
+      expect(
+        shouldHealApiOverride({
+          origin: 'storage',
+          currentBase: DEAD,
+          buildBase,
+          alreadyHealed: false,
+        }),
+        `buildBase ${String(buildBase)}`,
+      ).toBe(false);
+    }
   });
 });

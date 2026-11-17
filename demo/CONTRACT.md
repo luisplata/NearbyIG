@@ -330,6 +330,23 @@ Expo exige barra inicial y prohíbe la final. Ni la app ni la landing hardcodean
 `/`, `/expo/` y `/contract/` son directorios con
 `index.html`: no dependen de rewrites ni de rutas profundas.
 
+### Base de la API en runtime
+
+La base del build (`EXPO_PUBLIC_API_URL`) se puede pisar sin rebuild, en este orden:
+`?api=` > `localStorage['nearbyig.api']` > build. Un override sólo vale si es
+`http(s)://host[:port]`; basura se descarta en silencio. `?api=off` borra el override
+guardado y vuelve a la base del build, sin tocar la zona demo (son overrides
+independientes).
+
+**Auto-reparación, una sola vez.** Si la primera llamada falla **por red** (el `fetch`
+rechaza: el host no resuelve) y la base en uso salió de `localStorage`, el override se
+descarta y se reintenta **una vez** contra la base del build. Un override guardado que
+gana sobre el build y ya no existe deja al usuario varado en "sin conexión": no hay gesto
+en la UI que lo saque. No se reparan: una base que vino de `?api=` (decisión explícita del
+usuario), una base del build, una respuesta HTTP con error (el host existe) ni un segundo
+fallo de red (ahí ya es una API caída y aplica el `offline` de siempre). Sin storage (nativo)
+no hay override que borrar y la regla no se activa.
+
 ## 13. Publicación
 
 Un único workflow (`.github/workflows/pages.yml`) publica un único artefacto de Pages:

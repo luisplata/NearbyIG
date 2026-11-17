@@ -61,6 +61,41 @@ export class LiveApiError extends Error {
   }
 }
 
+/**
+ * Marcas de un `fetch` rechazado **antes** de tener respuesta: el host no
+ * resuelve, no hay ruta o la red del device está apagada. Cada runtime escribe
+ * la suya (`TypeError` en todos): Chrome "Failed to fetch", React Native
+ * "Network request failed", Safari "Load failed", Firefox "NetworkError…" y
+ * undici/Node "fetch failed".
+ */
+const NETWORK_FAILURE_MARKERS = [
+  'failed to fetch',
+  'fetch failed',
+  'network request failed',
+  'load failed',
+  'networkerror',
+];
+
+/**
+ * ¿El error es un fallo de **red** (el pedido nunca llegó a un server)?
+ *
+ * Es la pregunta que habilita la auto-reparación del override de la API: una
+ * respuesta HTTP, aunque sea 500, ya prueba que el host existe y no debe
+ * descartar la base elegida. Por eso `LiveApiError` siempre da `false` y un
+ * `Error` de código con un mensaje cualquiera tampoco matchea: se exige la forma
+ * que producen los `fetch` reales al rechazar.
+ */
+export function isNetworkFailure(error: unknown): boolean {
+  if (error instanceof LiveApiError) {
+    return false;
+  }
+  if (!(error instanceof Error) || typeof error.message !== 'string') {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return NETWORK_FAILURE_MARKERS.some((marker) => message.includes(marker));
+}
+
 export type DiscoveryQuery = {
   radiusM: number;
   intention?: string;

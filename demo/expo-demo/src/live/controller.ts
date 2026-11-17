@@ -3,6 +3,7 @@ import type { DemoSource, DiscoveryFilters, UiProfile } from '../state/types';
 import { toUiProfiles } from './adapter';
 import {
   createLiveApi,
+  isNetworkFailure,
   LiveApiError,
   type DiscoveryQuery,
   type FetchLike,
@@ -17,7 +18,7 @@ import {
   setMessageStatus,
   toMatchRows,
 } from './chat';
-import type { LiveSettings } from './config';
+import { shouldHealApiOverride, type ApiBaseOrigin, type LiveSettings } from './config';
 import { applyEvents } from './events';
 import type { GeoPoint, GeoRequestOptions, GeoResult } from './geolocation';
 import { TRACK_OPTIONS } from './geolocation';
@@ -97,6 +98,12 @@ import { zoneForPoint } from './zones';
  * romperse. No hay un modo "mock" visible que elegir: el dataset es el piso, no
  * una opción de la UI. Dos latidos fallidos seguidos se tratan igual (la sesión
  * se perdió o la API se cayó), incluso si el stream seguía abierto.
+ *
+ * **Antes de rendirse, una reparación.** Si la primera llamada falla por red y la
+ * base en uso salió del override persistido, ese override se descarta y se
+ * reintenta una sola vez contra la base del build (`healApiOverride`). Es la
+ * salida de un túnel de demo apagado que quedó guardado: sin esto la UI no tiene
+ * cómo volver.
  */
 
 export type EventSourceLike = {
@@ -150,6 +157,23 @@ const ACTION_OK = { ok: true, code: null } as const;
 export type LiveControllerPorts = {
   /** `null` = modo live no configurado en este build. */
   settings: LiveSettings | null;
+  /**
+   * De dónde salió `settings.baseUrl`. La auto-reparación sólo actúa cuando la
+   * base vino de `storage`: un `?api=` es una decisión explícita del usuario.
+   */
+  apiBaseOrigin?: ApiBaseOrigin | null;
+  /**
+   * Base del build, normalizada y `http(s)`; `null` si el build no tiene una
+   * absoluta. Es el destino del único reintento cuando el override guardado ya
+   * no resuelve.
+   */
+  buildApiBase?: string | null;
+  /**
+   * Borra el override persistido (la clave `nearbyig.api`). Se llama una
+   * sola vez, cuando se descarta por muerto. En un runtime sin storage no hay
+   * nada que borrar y el comportamiento no cambia.
+   */
+  clearStoredApi?: () => void;
   fetchImpl?: FetchLike;
   /** `null` = el runtime no tiene `EventSource`; se usa polling. */
   createEventSource?: (url: string) => EventSourceLike | null;
@@ -323,9 +347,18 @@ function failureCause(status: Exclude<GeoResult['status'], 'ok'>): ZonePromptCau
 }
 
 export function createLiveController(ports: LiveControllerPorts): LiveController {
-  const settings = ports.settings;
-  const api: LiveApi | null =
+  /**
+   * `let`: la auto-reparación puede reemplazar la base viva por la del build sin
+   * recrear el controlador (recrearlo perdería zona, filtros y suscripciones).
+   */
+  let settings = ports.settings;
+  let api: LiveApi | null =
     settings === null ? null : createLiveApi({ baseUrl: settings.baseUrl, fetchImpl: ports.fetchImpl });
+  /**
+   * Una sola reparación por controlador. Sin este flag, un reintento fallido
+   * volvería a reparar y armaría un loop contra una API que no está.
+   */
+  let healedApiOverride = false;
 
   let state: LiveState = emptyLiveState();
   const listeners = new Set<() => void>();
@@ -401,6 +434,35 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   };
 
   const log = ports.log ?? ((): void => undefined);
+
+  /**
+   * Descarta el override guardado y reconstruye el cliente contra la base del
+   * build. Devuelve `true` sólo si efectivamente reparó: el llamador usa eso para
+   * reintentar **una vez**.
+   *
+   * El caso real: el override guardado (clave `nearbyig.api`) con un túnel
+   * apagado gana sobre la base del build, el host no resuelve y la UI no tenía
+   * salida. Borrar el override es parte de la reparación: si no, la próxima carga
+   * vuelve a caer en el mismo host muerto.
+   */
+  const healApiOverride = (): boolean => {
+    const buildBase = ports.buildApiBase ?? null;
+    const decision = shouldHealApiOverride({
+      origin: ports.apiBaseOrigin ?? null,
+      currentBase: api?.baseUrl ?? null,
+      buildBase,
+      alreadyHealed: healedApiOverride,
+    });
+    if (!decision || buildBase === null) {
+      return false;
+    }
+    healedApiOverride = true;
+    ports.clearStoredApi?.();
+    api = createLiveApi({ baseUrl: buildBase, fetchImpl: ports.fetchImpl });
+    settings = { baseUrl: buildBase };
+    log('[geo] api override descartado: reintento contra la base del build');
+    return true;
+  };
 
   /**
    * **Watchdog.** Un `onopen` con el stream mudo es el caso que rompía la demo a
@@ -1659,6 +1721,12 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       // ocupados, entra como invitado. Nunca hay que adivinar un slot.
       session = await api.openSession(regionKey);
     } catch (error) {
+      // Un host que no resuelve no es un error de sesión: si la base en uso salió
+      // del storage, primero se descarta el override y se reintenta contra el
+      // build. El flag del controlador garantiza un solo reintento.
+      if (isNetworkFailure(error) && healApiOverride()) {
+        return openSessionWith(zoneKey, geoPoint);
+      }
       failures = 0;
       set({
         status: 'offline',
