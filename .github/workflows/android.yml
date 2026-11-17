@@ -49,16 +49,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
+      # El runner ya trae el SDK en `$ANDROID_HOME`, así que no se usa
+      # `android-actions/setup-android`: con el cmdline-tools nuevo intenta
+      # instalar `tools`, que ya no existe, y falla antes de compilar nada.
+      #
       # Nombres exactos: AGP 9 numera las plataformas con minor (`android-37.0`),
       # `platforms;android-37` a secas no existe. Las licencias se aceptan de forma
-      # idempotente: en un runner nuevo no están y el `|| true` evita romper el rerun.
+      # idempotente: en un runner nuevo no están y el `|| true` absorbe el SIGPIPE
+      # de `yes` sin ocultar el resultado de la instalación.
       - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+          sdkmanager_bin="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | tail -1)"
+          yes | "$sdkmanager_bin" --licenses > /dev/null || true
+          "$sdkmanager_bin" "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: Install Expo dependencies
         working-directory: demo/expo-demo
