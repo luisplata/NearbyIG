@@ -1,5 +1,4 @@
-import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Pool } from 'pg';
 import type { AuthContext, SourceType } from '../auth/session.types';
 import { AppProblemError } from '../common/problem';
@@ -12,8 +11,6 @@ import { PG_POOL } from '../db/database.module';
 import { EventsService } from '../events/events.service';
 import type { Match, PingPeer } from '../pings/pings.types';
 import {
-  BOT_REPLIES,
-  BOT_REPLY_DELAY_MS,
   CLIENT_MESSAGE_ID_MAX_LENGTH,
   MATCH_LIST_LIMIT,
   MESSAGE_MAX_LENGTH,
@@ -61,20 +58,11 @@ interface MatchListRow {
 interface MatchAccess {
   readonly matchId: string;
   readonly peerProfileId: string;
-  /** El otro lado es un bot: no tiene fila de catálogo. */
-  readonly isBot: boolean;
-  /** El otro lado se puede proyectar (humano del catálogo o bot con dueño). */
+  /** El otro lado tiene fila en `profiles`: si no, la conversación está cerrada. */
   readonly peerProjectable: boolean;
   /** El par está bloqueado en cualquier dirección (v0.5). */
   readonly blocked: boolean;
-  /** Zona en la que nació el match, si una parte es un bot. `null` si no. */
-  readonly botZoneKey: string | null;
-  /** Zona vigente del bot del otro lado; `null` si no es bot o ya no está. */
-  readonly peerBotZone: string | null;
 }
-
-/** Un `profileId` de bot: `<owner>-b1` / `<owner>-b2`. */
-const BOT_PROFILE_ID = /-b[12]$/;
 
 /** `matchId` del path: un id malformado es 422, no 404. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -102,46 +90,26 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * no pueden dejar dos mensajes. El que pierde la carrera lee la fila que ganó y
  * devuelve **ese** mensaje, sin emitir un segundo evento.
  *
- * **El bot.** Si el otro lado es un bot, el server agenda su respuesta a los
- * ~2 s y emite `typing.started` en el acto. El timer vive en este proceso y hay
- * **uno por match** (`pendingBotReplies`): tres mensajes seguidos producen una
- * respuesta, no tres, y el cliente no simula nada. Un reinicio de la API pierde
- * la respuesta pendiente; la demo es efímera y el mensaje del humano ya está
- * persistido.
- *
  * **Lo que nunca sale ni se loguea.** Ni coordenadas, ni `distanceM`/`bearingDeg`
  * (este módulo no consulta geometría), ni el `body` en un log, ni el `profileId`
  * de nadie: los logs llevan región, `matchId` y conteos.
  */
 @Injectable()
-export class ChatService implements OnModuleDestroy {
+export class ChatService {
   private readonly logger = new Logger(ChatService.name);
-
-  /**
-   * Un timer de respuesta por match. La clave es el `matchId`: es lo que hace
-   * que "sin timers duplicados" sea estructural y no una promesa — dos mensajes
-   * seguidos al mismo bot no agendan dos respuestas.
-   */
-  private readonly pendingBotReplies = new Map<string, NodeJS.Timeout>();
 
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     private readonly events: EventsService,
   ) {}
 
-  /** Apaga los timers pendientes para que un shutdown no deje trabajo colgado. */
-  onModuleDestroy(): void {
-    for (const timer of this.pendingBotReplies.values()) clearTimeout(timer);
-    this.pendingBotReplies.clear();
-  }
-
   /**
    * `GET /matches`: la bandeja del perfil de la sesión, más reciente primero.
    *
    * Un match cuyo peer no se puede proyectar no se lista: la fila de la bandeja
    * es una proyección de perfiles, no un log. Es el mismo criterio que la
-   * bandeja de pings, y el caso real es el mismo: un match con un bot cuyo dueño
-   * desapareció del catálogo.
+   * bandeja de pings, y el caso real es el mismo: un match viejo con un peer que
+   * ya no está en el catálogo.
    */
   async listMatches(session: AuthContext): Promise<MatchList> {
     const { rows } = await this.pool.query<MatchListRow>(
@@ -165,35 +133,12 @@ export class ChatService implements OnModuleDestroy {
                    AND unread.message_seq > coalesce(r.last_read_seq, 0)
               ) AS unread_count
          FROM matches m
-         CROSS JOIN LATERAL (
-           SELECT CASE
-                    WHEN m.profile_a_id = $2 THEN m.profile_b_id
-                    ELSE m.profile_a_id
-                  END AS peer_id
-         ) other
-         JOIN LATERAL (
-           SELECT cand.*
-             FROM (
-               -- El peer humano: la fila del catálogo, tal cual.
-               SELECT p.profile_id, p.nickname, p.initials, p.intention, p.photo_id, p.source_type
-                 FROM profiles p
-                WHERE p.region_key = m.region_key
-                  AND p.profile_id = other.peer_id
-               UNION ALL
-               -- Un bot no tiene fila de catálogo: hereda la de su dueño y se
-               -- distingue por sourceType, igual que en la bandeja de pings. El
-               -- respaldo por nombre cubre al bot que el ticker ya retiró, así
-               -- una conversación vieja no desaparece de la lista.
-               SELECT other.peer_id AS profile_id, o.nickname, o.initials, o.intention,
-                      o.photo_id, 'bot'::text
-                 FROM profiles o
-                WHERE o.region_key = m.region_key
-                  AND other.peer_id ~ '-b[12]$'
-                  AND o.profile_id = regexp_replace(other.peer_id, '-b[12]$', '')
-             ) cand
-            ORDER BY (cand.profile_id = other.peer_id) DESC
-            LIMIT 1
-         ) peer ON true
+         JOIN profiles peer
+           ON peer.region_key = m.region_key
+          AND peer.profile_id = CASE
+                                  WHEN m.profile_a_id = $2 THEN m.profile_b_id
+                                  ELSE m.profile_a_id
+                                END
          LEFT JOIN LATERAL (
            SELECT msg.message_id, msg.sender_profile_id, msg.client_message_id, msg.body, msg.created_at
              FROM messages msg
@@ -286,9 +231,6 @@ export class ChatService implements OnModuleDestroy {
    * Orden de las guardas: participación (403), estado del match (409), body
    * (422) y cuota (429). El body se valida **antes** de tocar la base para que
    * un pedido mal formado no gaste una consulta.
-   *
-   * Si el otro lado es un bot, la respuesta del bot se agenda acá: una sola vez
-   * por match, con `typing.started` emitido en el acto (`emitTyping`).
    */
   async send(session: AuthContext, rawMatchId: unknown, body: unknown): Promise<Message> {
     const matchId = parseMatchId(rawMatchId);
@@ -304,13 +246,12 @@ export class ChatService implements OnModuleDestroy {
       );
     }
 
-    // Cerrada por dos motivos: el otro lado ya no existe para la demo, o el bot
-    // del otro lado se volvió a sembrar en otra zona porque su dueño se mudó
-    // (v0.5). En los dos casos la historia queda legible y escribir es 409.
-    if (!access.peerProjectable || (access.botZoneKey !== null && access.peerBotZone !== access.botZoneKey)) {
+    // Cerrada por un solo motivo: el otro lado ya no está en el catálogo. La
+    // historia queda legible y escribir es 409.
+    if (!access.peerProjectable) {
       throw new AppProblemError(
         'MATCH_CLOSED',
-        'La conversación está cerrada: el otro lado ya no está en la demo o cambió de zona. La historia sigue legible.',
+        'La conversación está cerrada: el otro lado ya no está en la demo. La historia sigue legible.',
       );
     }
 
@@ -344,68 +285,46 @@ export class ChatService implements OnModuleDestroy {
 
     await this.emitCreated(session.regionKey, inserted);
 
-    // La campana del otro lado. Sólo si es humano: un bot no lee avisos y el
-    // propio emisor no se notifica. El aviso va después del insert y no en la
-    // misma transacción —el insert ya commiteó—: si fallara, el mensaje sigue
-    // siendo la fuente de verdad y `GET /matches` lo muestra con su unreadCount.
-    if (!access.isBot) {
-      await this.notifyMessage(session.regionKey, access.peerProfileId, session.profileId, inserted, matchId);
-    }
+    // La campana del otro lado. El propio emisor no se notifica. El aviso va
+    // después del insert y no en la misma transacción —el insert ya commiteó—:
+    // si fallara, el mensaje sigue siendo la fuente de verdad y `GET /matches`
+    // lo muestra con su unreadCount.
+    await this.notifyMessage(session.regionKey, access.peerProfileId, session.profileId, inserted, matchId);
 
-    if (access.isBot) {
-      await this.emitTyping(session.regionKey, matchId, access.peerProfileId);
-      this.scheduleBotReply(session.regionKey, matchId, access.peerProfileId);
-    }
-
-    this.logger.log(`mensaje creado region=${session.regionKey} bot=${access.isBot}`);
+    this.logger.log(`mensaje creado region=${session.regionKey}`);
     return toMessage(inserted);
   }
 
   /**
    * Resuelve el match y la participación de la sesión en una sola consulta.
    *
-   * `peer_projectable` mira las dos formas en que el otro lado existe: una fila
-   * de catálogo (humano) o el dueño de un bot (`<owner>-b1|b2` → `owner`). Un
-   * match donde ninguna de las dos aplica está cerrado: se puede leer, no
-   * escribir.
+   * `peer_projectable` es una sola pregunta: ¿el otro lado tiene fila en
+   * `profiles`? Un match donde no la tiene está cerrado: se puede leer, no
+   * escribir. El match no tiene FK a `profiles` (`005_pings.sql`), así que la
+   * pregunta hay que hacerla acá y no darla por hecha.
    */
   private async resolveAccess(session: AuthContext, matchId: string): Promise<MatchAccess> {
     const { rows } = await this.pool.query<{
       peer_id: string | null;
-      peer_in_catalog: boolean;
-      bot_owner_in_catalog: boolean;
+      peer_projectable: boolean;
       blocked: boolean;
-      bot_zone_key: string | null;
-      peer_bot_zone: string | null;
     }>(
       `SELECT other.peer_id,
               EXISTS (
                 SELECT 1 FROM profiles p
                  WHERE p.region_key = m.region_key
                    AND p.profile_id = other.peer_id
-              ) AS peer_in_catalog,
-              EXISTS (
-                SELECT 1 FROM profiles o
-                 WHERE o.region_key = m.region_key
-                   AND other.peer_id ~ '-b[12]$'
-                   AND o.profile_id = regexp_replace(other.peer_id, '-b[12]$', '')
-              ) AS bot_owner_in_catalog,
+              ) AS peer_projectable,
               -- Bloqueo (v0.5): en cualquier dirección. Se compara contra el
-              -- humano detrás del perfil, porque blocks nunca guarda un bot.
+              -- perfil del otro lado, que es la identidad que guarda blocks.
               EXISTS (
                 SELECT 1 FROM blocks bl
                  WHERE bl.region_key = m.region_key
                    AND (
-                        (bl.blocker_profile_id = $3 AND bl.blocked_profile_id = owner.peer_owner_id)
-                     OR (bl.blocker_profile_id = owner.peer_owner_id AND bl.blocked_profile_id = $3)
+                        (bl.blocker_profile_id = $3 AND bl.blocked_profile_id = other.peer_id)
+                     OR (bl.blocker_profile_id = other.peer_id AND bl.blocked_profile_id = $3)
                    )
-              ) AS blocked,
-              m.bot_zone_key,
-              (
-                SELECT b.zone_key FROM bots b
-                 WHERE b.region_key = m.region_key
-                   AND b.bot_profile_id = other.peer_id
-              ) AS peer_bot_zone
+              ) AS blocked
          FROM matches m
          CROSS JOIN LATERAL (
            SELECT CASE
@@ -414,13 +333,6 @@ export class ChatService implements OnModuleDestroy {
                     ELSE NULL
                   END AS peer_id
          ) other
-         CROSS JOIN LATERAL (
-           SELECT CASE
-                    WHEN other.peer_id ~ '-b[12]$'
-                      THEN regexp_replace(other.peer_id, '-b[12]$', '')
-                    ELSE other.peer_id
-                  END AS peer_owner_id
-         ) owner
         WHERE m.match_id = $1
           AND m.region_key = $2`,
       [matchId, session.regionKey, session.profileId],
@@ -442,11 +354,8 @@ export class ChatService implements OnModuleDestroy {
     return {
       matchId,
       peerProfileId: row.peer_id,
-      isBot: !row.peer_in_catalog,
-      peerProjectable: row.peer_in_catalog || row.bot_owner_in_catalog,
+      peerProjectable: row.peer_projectable,
       blocked: row.blocked,
-      botZoneKey: row.bot_zone_key,
-      peerBotZone: row.peer_bot_zone,
     };
   }
 
@@ -469,20 +378,7 @@ export class ChatService implements OnModuleDestroy {
     }
   }
 
-  /**
-   * Emite `typing.started`. Un fallo del log **no** hace fallar el envío: el
-   * mensaje ya está persistido y `GET .../messages` sigue siendo la fuente de
-   * verdad; el aviso es una notificación, no el dato.
-   */
-  private async emitTyping(regionKey: string, matchId: string, profileId: string): Promise<void> {
-    try {
-      await this.events.append(regionKey, 'typing.started', { matchId, profileId });
-    } catch (error) {
-      this.warnEmit('typing.started', regionKey, error);
-    }
-  }
-
-  /** Emite `message.created`; misma regla: el aviso no puede tumbar el mensaje. */
+  /** Emite `message.created`; el aviso no puede tumbar el mensaje. */
   private async emitCreated(regionKey: string, row: MessageRow): Promise<void> {
     try {
       await this.events.append(regionKey, 'message.created', {
@@ -517,7 +413,7 @@ export class ChatService implements OnModuleDestroy {
     row: MessageRow,
     matchId: string,
   ): Promise<void> {
-    if (recipientProfileId === actorProfileId || BOT_PROFILE_ID.test(recipientProfileId)) return;
+    if (recipientProfileId === actorProfileId) return;
     try {
       await this.pool.query(
         `INSERT INTO notifications
@@ -528,69 +424,6 @@ export class ChatService implements OnModuleDestroy {
     } catch (error) {
       this.logger.warn(
         `no se pudo registrar la notificación del mensaje region=${regionKey} match=${matchId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-
-  /** Agenda la respuesta del bot. Un timer por match: el segundo mensaje no agrega otro. */
-  private scheduleBotReply(regionKey: string, matchId: string, botProfileId: string): void {
-    if (this.pendingBotReplies.has(matchId)) return;
-    const timer = setTimeout(() => {
-      void this.replyAsBot(regionKey, matchId, botProfileId);
-    }, BOT_REPLY_DELAY_MS);
-    // Sin `unref` el timer mantiene vivo el proceso en un shutdown limpio.
-    timer.unref();
-    this.pendingBotReplies.set(matchId, timer);
-  }
-
-  /**
-   * El bot contesta. Texto fijo de `BOT_REPLIES`, elegido para no repetir el
-   * último que dijo: dos respuestas consecutivas del mismo bot nunca son iguales.
-   */
-  private async replyAsBot(regionKey: string, matchId: string, botProfileId: string): Promise<void> {
-    this.pendingBotReplies.delete(matchId);
-    try {
-      const { rows: previous } = await this.pool.query<{ body: string }>(
-        `SELECT body
-           FROM messages
-          WHERE match_id = $1 AND sender_profile_id = $2
-          ORDER BY message_seq DESC
-          LIMIT 1`,
-        [matchId, botProfileId],
-      );
-      const lastBody = previous[0]?.body;
-      const reply = BOT_REPLIES.find((text) => text !== lastBody) ?? BOT_REPLIES[0];
-
-      const { rows } = await this.pool.query<MessageRow>(
-        `INSERT INTO messages (region_key, match_id, sender_profile_id, client_message_id, body)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING message_seq, message_id, match_id, sender_profile_id, client_message_id, body, created_at`,
-        [regionKey, matchId, botProfileId, `bot-${randomUUID()}`, reply],
-      );
-      const inserted = rows[0];
-      if (inserted === undefined) return;
-
-      await this.emitCreated(regionKey, inserted);
-      // El aviso de la respuesta del bot es para el humano de la conversación.
-      const { rows: peers } = await this.pool.query<{ recipient: string }>(
-        `SELECT CASE WHEN profile_a_id = $2 THEN profile_b_id ELSE profile_a_id END AS recipient
-           FROM matches
-          WHERE match_id = $1`,
-        [matchId, botProfileId],
-      );
-      const recipient = peers[0]?.recipient;
-      if (recipient !== undefined) {
-        await this.notifyMessage(regionKey, recipient, botProfileId, inserted, matchId);
-      }
-      this.logger.log(`respuesta de bot region=${regionKey}`);
-    } catch (error) {
-      // El match o su región pueden haberse ido entre el envío y la respuesta
-      // (reset global, logout del dueño). No hay cliente esperando esto: se
-      // loguea sin datos personales y se deja el timer limpio.
-      this.logger.warn(
-        `respuesta de bot descartada region=${regionKey}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

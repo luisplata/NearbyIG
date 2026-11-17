@@ -32,12 +32,12 @@ import { Chip } from '../components/Chip';
  * **El ping, según la fuente.** En dataset el botón despacha `SEND_PING` y el
  * reducer simula la respuesta. Con sesión live llama a `POST /pings` y refleja
  * el estado real: `pending` deshabilita el botón (el server rechazaría un
- * duplicado con 409) y un `accepted` —el caso del bot, que acepta solo— muestra
+ * duplicado con 409) y un `accepted` muestra
  * el match creado. Los errores del backend se explican con su código, no con un
  * "algo salió mal".
  *
  * **Abrir chat.** Si ya hay match, el botón está acá mismo: antes la única
- * puerta era Pings → pestaña Matches, así que después de pinguear a un bot (que
+ * puerta era Pings → pestaña Matches, así que después de pinguear (que
  * acepta solo) el usuario veía "match creado" y no tenía por dónde seguir.
  */
 export function ProfileScreen() {
@@ -58,7 +58,6 @@ export function ProfileScreen() {
   const [error, setError] = useState<string | null>(null);
   const [blockBusy, setBlockBusy] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
-  const [blockNote, setBlockNote] = useState<string | null>(null);
   const [blockError, setBlockError] = useState<string | null>(null);
   if (profile === null) {
     return null;
@@ -69,7 +68,7 @@ export function ProfileScreen() {
   const liveBlock = pingSendBlock(livePing);
   const guest = liveMode && live.state.session?.sourceType !== 'human';
   const blocked = liveMode
-    ? isBlockedPeer(live.blocks, live.state.blockAliases, profile.id)
+    ? isBlockedPeer(live.blocks, profile.id)
     : state.blocked.includes(profile.id);
   const blockedReason = pingBlockedReason(state, profile.id);
   const alreadySent = state.pingsSent.includes(profile.id);
@@ -109,10 +108,8 @@ export function ProfileScreen() {
   };
 
   /**
-   * Bloquear/desbloquear, según el modo. En live el server es la autoridad y
-   * canoniza un bot a su dueño: el mapa de alias del controlador permite que
-   * esta misma tarjeta muestre "Bloqueado" aunque el server haya guardado al
-   * dueño. En dataset se mantiene la action del guion.
+   * Bloquear/desbloquear, según el modo. En live el server es la autoridad; en
+   * dataset se mantiene la action del guion.
    */
   const toggleBlock = async (): Promise<void> => {
     if (blockBusy) {
@@ -132,11 +129,6 @@ export function ProfileScreen() {
       setBlockError(result.code);
       return;
     }
-    setBlockNote(
-      !blocked && result.profileId !== null && result.profileId !== profile.id
-        ? safetyText('blockBotOwner', { owner: result.profileId })
-        : null,
-    );
     store.pushToast(blocked ? 'safety.unblocked' : 'safety.blocked');
   };
 
@@ -210,9 +202,6 @@ export function ProfileScreen() {
             {pingText('sendPending')}
           </Text>
         ) : null}
-        {livePing?.peer.sourceType === 'bot' && livePing.status === 'accepted' ? (
-          <Text style={[text.small, styles.match]}>{pingText('sendBotNote')}</Text>
-        ) : null}
         {liveMode ? null : blockedReason === null ? null : (
           <Text style={[text.small, styles.hint]}>{fmt(blockedReason)}</Text>
         )}
@@ -250,9 +239,6 @@ export function ProfileScreen() {
         </View>
       </View>
 
-      {blockNote === null ? null : (
-        <Text style={[text.small, styles.match]}>{blockNote}</Text>
-      )}
       {blockError === null ? null : (
         <Text style={[text.small, styles.error]}>
           {safetyText(safetyErrorKey(blockError), { code: blockError })}

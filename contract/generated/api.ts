@@ -3,7 +3,7 @@
  *
  * Source: contract/openapi.yaml
  * Generator: openapi-typescript 7.13.0 (pinned exact in package.json)
- * Contract: x-contract-id 3225f7e3ecd7
+ * Contract: x-contract-id bbdd239893ca
  *
  * Type-only client: no runtime code and no imports. Regenerate with
  * `npm run contract:generate`. The drift gate is `npm run contract:generate:check`.
@@ -260,9 +260,8 @@ export interface paths {
          *     `visibility` y `fallbackRequired`.
          *
          *     `visibility` (opcional, desde v0.5) es `visible` o `ghost`. En `ghost` la
-         *     sesión sigue online y sigue viendo, pero ni el humano ni sus dos bots
-         *     aparecen en `GET /discovery` ni en el stream de los demás; el dueño se
-         *     sigue viendo a sí mismo (sus bots incluidos). Omitir `visibility` conserva
+         *     sesión sigue online y sigue viendo, pero su perfil no aparece en
+         *     `GET /discovery` ni en el stream de los demás. Omitir `visibility` conserva
          *     la vigente: el heartbeat de posición no saca a nadie de ghost.
          *
          *     Fuera de todo polígono no es un error: responde 200 con
@@ -284,9 +283,9 @@ export interface paths {
          *     stream. No borra el perfil: `GET /demo/profiles` lo sigue devolviendo.
          *
          *     **No es lo mismo que `visibility: ghost`.** Apagar la presencia retira al
-         *     dueño y a sus bots para todos —incluido el dueño, que ya no tiene origen
-         *     para `GET /discovery`—; ghost los retira sólo para los demás y mantiene la
-         *     sesión viendo. Para "online pero invisible" es `PUT /presence` con
+         *     perfil para todos —incluido uno mismo, que ya no tiene origen para
+         *     `GET /discovery`—; ghost lo retira sólo para los demás y mantiene la sesión
+         *     viendo. Para "online pero invisible" es `PUT /presence` con
          *     `visibility: ghost`.
          *
          *     Es idempotente en el resultado pero no en el status: si no hay presencia
@@ -371,11 +370,10 @@ export interface paths {
          *     fila con su estado. `201`, no `200`: el ping es un recurso nuevo con
          *     identidad propia.
          *
-         *     **Destinatario.** Tiene que existir en la región de la sesión: un humano
-         *     del catálogo o un bot con dueño vivo. Un `profileId` de otra región, uno
-         *     inexistente y un bot cuyo dueño ya no tiene presencia son todos `404
-         *     PROFILE_NOT_FOUND`: el ping no cruza regiones y un bot sin presencia no
-         *     está.
+         *     **Destinatario.** Tiene que existir en el catálogo de la región de la
+         *     sesión (`source_type: human`). La presencia **no** es requisito: un ping a
+         *     alguien que no está en línea queda `pending` igual. Un `profileId`
+         *     inexistente o de otra región es `404 PROFILE_NOT_FOUND`.
          *
          *     **Uno pendiente por par dirigido.** `A → B` y `B → A` son dos pings
          *     distintos, pero `A → B` no puede tener dos pendientes a la vez: el segundo
@@ -387,15 +385,13 @@ export interface paths {
          *     crear uno nuevo. Devuelve `410` y no `409` porque el ping que estorba ya no
          *     existe como pendiente: lo que se perdió es la ventana, no el derecho.
          *
-         *     **Bot.** Un bot acepta solo. El ping vuelve ya `accepted`, con `matchId` y
-         *     sin que ningún humano toque nada: es el camino que hace que la demo se
-         *     sienta viva.
+         *     **Sin aceptación automática.** El ping vuelve `pending` y ahí queda hasta
+         *     que el destinatario lo resuelva. El `matchId` sigue en `null` hasta que una
+         *     persona acepta: ni el server ni un job aceptan por nadie.
          *
          *     **Bloqueo (v0.5).** Si el emisor bloqueó al destinatario, o el destinatario
          *     bloqueó al emisor, el ping es `403 CHAT_BLOCKED`. El mensaje no dice quién
          *     bloqueó a quién: para el bloqueado, el otro simplemente dejó de existir.
-         *     Bloquear un bot bloquea a su dueño, así que el caso del bot cae en la misma
-         *     regla.
          *
          *     **Cuota.** Hay un tope de envíos por ventana. Superarlo es `429
          *     RATE_LIMITED`: el pedido está bien, falta cuota.
@@ -477,14 +473,14 @@ export interface paths {
          *     del otro lado y el estado de la conversación. El más reciente primero.
          *
          *     Cada fila es `MatchListItem { match, peer, lastMessage, unreadCount }`: el
-         *     `peer` es el otro perfil (humano o bot, con la misma forma que la bandeja
-         *     de pings) y `unreadCount` cuenta los mensajes del otro lado posteriores a
-         *     tu última lectura. Un match recién aceptado viene con `lastMessage: null` y
+         *     `peer` es el otro perfil (con la misma forma que la bandeja de pings) y
+         *     `unreadCount` cuenta los mensajes del otro lado posteriores a tu última
+         *     lectura. Un match recién aceptado viene con `lastMessage: null` y
          *     `unreadCount: 0`.
          *
-         *     **Sólo el perfil de la sesión.** Un match entre otro humano y un bot —aun
-         *     cuando el bot sea de tu propiedad— no es tuyo y no aparece: la lista es de
-         *     conversaciones propias, no del mundo visible.
+         *     **Sólo el perfil de la sesión.** Un match entre otras dos personas no es
+         *     tuyo y no aparece: la lista es de conversaciones propias, no del mundo
+         *     visible.
          *
          *     Sin cursor: hasta los 100 matches más recientes (`maxItems`). La demo tiene
          *     un match por par y no necesita paginar.
@@ -539,13 +535,13 @@ export interface paths {
          *     o un campo de más es `422 VALIDATION_FAILED`. El server recorta los bordes
          *     del texto antes de guardarlo.
          *
-         *     **Un match cerrado no acepta mensajes.** Si el otro lado ya no existe (un
-         *     bot cuyo dueño se fue de la demo, un perfil regenerado), la conversación
-         *     queda legible pero escribir es `409 MATCH_CLOSED`.
+         *     **Un match cerrado no acepta mensajes.** Si el otro lado ya no existe en el
+         *     catálogo (un perfil regenerado, una sesión que dejó de encarnar un perfil),
+         *     la conversación queda legible pero escribir es `409 MATCH_CLOSED`.
          *
-         *     **El bot responde solo.** Si el otro lado es un bot, el server agenda su
-         *     respuesta (~2 s) y emite `typing.started` y `message.created` en el stream.
-         *     El cliente no simula nada: el mismo camino sirve para humano y bot.
+         *     **No hay respuesta automática.** Escribir es un acto de la sesión
+         *     autenticada: el server persiste ese mensaje y emite `message.created`. Nadie
+         *     escribe en nombre del otro lado.
          *
          *     **Cuota.** Hay un tope de mensajes por ventana: superarlo es `429
          *     RATE_LIMITED`.
@@ -653,8 +649,8 @@ export interface paths {
          *     hay `409` de duplicado: bloquear dos veces es la misma intención, no un
          *     conflicto.
          *
-         *     Bloquearse a sí mismo es `422 VALIDATION_FAILED`. Un bot se canoniza a su
-         *     dueño; un `profileId` inexistente en la región es `404 PROFILE_NOT_FOUND`.
+         *     Bloquearse a sí mismo es `422 VALIDATION_FAILED`; un `profileId`
+         *     inexistente en la región es `404 PROFILE_NOT_FOUND`.
          */
         post: operations["createBlock"];
         delete?: never;
@@ -680,10 +676,8 @@ export interface paths {
          *     Es **idempotente en el resultado**: si el par no estaba bloqueado, también
          *     es `204`. No hay `404` por "no había nada que borrar" porque el cliente que
          *     desbloquea dos veces (doble toque, reintento) no tiene que distinguir un
-         *     no-op de un error.
-         *
-         *     `profileId` se canoniza igual que en `POST`: desbloquear un bot revierte el
-         *     bloqueo de su dueño. Un invitado de relleno recibe `403 PROFILE_REQUIRED`.
+         *     no-op de un error. Un `profileId` que no es perfil de la región sí es `404`;
+         *     un invitado de relleno recibe `403 PROFILE_REQUIRED`.
          */
         delete: operations["deleteBlock"];
         options?: never;
@@ -709,8 +703,7 @@ export interface paths {
          *     `POST /blocks`, que es una decisión distinta y con efecto inmediato. El
          *     reporte tampoco cambia el descubrimiento de quien reporta.
          *
-         *     Un bot se canoniza a su dueño: el reporte nombra a la persona, igual que el
-         *     bloqueo. Reportarse a sí mismo es `422 VALIDATION_FAILED`.
+         *     Reportarse a sí mismo es `422 VALIDATION_FAILED`.
          */
         post: operations["createReport"];
         delete?: never;
@@ -780,7 +773,7 @@ export interface components {
          *     natural para que los seeds sean idempotentes en S1.
          *
          *     Invariante: `demoSlot == null` si y sólo si `sourceType == guest`. Un invitado
-         *     no ocupa slot; un humano o un bot siempre ocupa uno.
+         *     no ocupa slot; un perfil `human` siempre ocupa uno.
          */
         DemoSession: {
             /** @description JWT corto. Viaja sólo en el header `Authorization`. */
@@ -859,20 +852,23 @@ export interface components {
             payload: components["schemas"]["EventPayload"];
         };
         /**
-         * @description Cuerpo por `type`. La unión cubre hoy los seis tipos del enum: los dos de S2
-         *     (`profile.moved`, `profile.presence`) y los cuatro de S4/S5, que se declaran
-         *     ahora para que el cliente no cambie de unión cuando S4 los emita. Ningún
-         *     payload lleva coordenadas: `profile.moved` usa `distanceM`/`bearingDeg` como el
-         *     resto del sistema.
+         * @description Cuerpo por `type`. La unión cubre los cuatro tipos del enum. `ping.received`
+         *     y `match.created` se declaran aunque todavía no tengan productor, para que el
+         *     cliente tenga una sola unión. Ningún payload lleva coordenadas: la cercanía
+         *     viaja como `distanceM`/`bearingDeg` en discovery, no en un evento.
          */
-        EventPayload: components["schemas"]["ProfileMovedPayload"] | components["schemas"]["ProfilePresencePayload"] | components["schemas"]["PingReceivedPayload"] | components["schemas"]["MatchCreatedPayload"] | components["schemas"]["MessageCreatedPayload"] | components["schemas"]["TypingStartedPayload"];
+        EventPayload: components["schemas"]["ProfilePresencePayload"] | components["schemas"]["PingReceivedPayload"] | components["schemas"]["MatchCreatedPayload"] | components["schemas"]["MessageCreatedPayload"];
         /**
-         * @description Nombre del evento, cerrado a estos seis. El enum y los seis payloads entran
-         *     completos ahora aunque S2 sólo emita los dos primeros: S4/S5 agregan campos a
-         *     su payload, no tipos ni uniones nuevas, así que el cliente no cambia.
+         * @description Nombre del evento, cerrado a estos cuatro. `profile.moved` y `typing.started`
+         *     salieron en v0.6: sus únicos productores eran el ticker de bots y la
+         *     respuesta automática, y el contrato no declara tipos que nadie puede emitir.
+         *     Ojo: son **cuatro** en el contrato y **dos** en el `EventType` del server
+         *     (`profile.presence`, `message.created`); `ping.received` y `match.created`
+         *     siguen declarados sin productor, igual que antes de v0.4. No "arregles" el
+         *     tipo de TS a cuatro: el tipo del server es la lista de lo que emite.
          * @enum {string}
          */
-        EventType: "profile.moved" | "profile.presence" | "ping.received" | "match.created" | "message.created" | "typing.started";
+        EventType: "profile.presence" | "ping.received" | "match.created" | "message.created";
         /**
          * @description Página de polling. Tres campos planos a propósito: `Page` es metadata y
          *     `allOf` + `additionalProperties: false` bloquearía los hermanos. No hay
@@ -888,15 +884,6 @@ export interface components {
             nextCursor: string | null;
             /** @description Si quedan eventos después de esta página. */
             hasMore: boolean;
-        };
-        /** @description El perfil se movió. Distancia y rumbo relativos a quien recibe. */
-        ProfileMovedPayload: {
-            /** @description Id del perfil dentro de la región (la región la da el `id`). */
-            profileId: string;
-            /** @description Distancia en metros, ya calculada por el server. */
-            distanceM: number;
-            /** @description Rumbo en grados desde el norte, sentido horario. */
-            bearingDeg: number;
         };
         /** @description El perfil cambió de estado de presencia. No hay coordenadas ni zona. */
         ProfilePresencePayload: {
@@ -933,11 +920,6 @@ export interface components {
             messageId: string;
             /** @description Quién escribió; la sesión se reconoce por su propio `profileId`. */
             senderProfileId: string;
-        };
-        /** @description La otra parte está escribiendo. Efímero: no se persiste ni se replica. */
-        TypingStartedPayload: {
-            matchId: string;
-            profileId: string;
         };
         /**
          * @description Motivo del error, cerrado a estos 23 valores. `code` es el discriminante
@@ -1050,9 +1032,12 @@ export interface components {
         /**
          * @description Origen del perfil o de la sesión. `guest` es la sesión de relleno que se abre
          *     cuando los 10 slots de una región están tomados: no tiene `demoSlot`.
+         *     `bot` no existe desde v0.6: no hay población sintética, así que un
+         *     `sourceType: bot` es `422 VALIDATION_FAILED` como cualquier valor fuera del
+         *     enum.
          * @enum {string}
          */
-        SourceType: "human" | "bot" | "guest";
+        SourceType: "human" | "guest";
         /** @description Respuesta de `GET /demo/zones`: las zonas de una sola región. */
         ZoneList: {
             zones: components["schemas"]["ZoneSummary"][];
@@ -1234,9 +1219,9 @@ export interface components {
          *     Invariante: `zoneKey == null` si y sólo si `fallbackRequired == true`.
          *
          *     `visibility` es la vigente después del `PUT`: `ghost` deja la sesión online
-         *     pero fuera del descubrimiento y del stream de los demás (sus bots incluidos),
-         *     sin apagar la sesión. `online` sigue siendo `true` en ghost: la presencia
-         *     existe; lo que cambia es a quién se le muestra.
+         *     pero fuera del descubrimiento y del stream de los demás, sin apagar la
+         *     sesión. `online` sigue siendo `true` en ghost: la presencia existe; lo que
+         *     cambia es a quién se le muestra.
          */
         PresenceState: {
             /**
@@ -1337,10 +1322,10 @@ export interface components {
          */
         PingCreate: {
             /**
-             * @description `profileId` del destinatario tal como lo devolvió `GET /discovery`: un
-             *     humano del catálogo (`mx-p01`) o un bot (`mx-p01-b1`). Un `profileId` de
-             *     otra región es `404 PROFILE_NOT_FOUND` (el ping no cruza regiones) y el
-             *     propio es `422 VALIDATION_FAILED` (no se pinguea a sí mismo).
+             * @description `profileId` del destinatario tal como lo devolvió `GET /discovery`: una
+             *     persona del catálogo (`mx-p01`). Un `profileId` de otra región es `404
+             *     PROFILE_NOT_FOUND` (el ping no cruza regiones) y el propio es `422
+             *     VALIDATION_FAILED` (no se pinguea a sí mismo).
              */
             targetProfileId: string;
         };
@@ -1387,14 +1372,9 @@ export interface components {
          *     se ve. Nada de `distanceM`/`bearingDeg` (un ping no es un resultado de
          *     descubrimiento y la distancia de hace horas no dice nada), nada de
          *     coordenadas y nada del dataset que la fila no use.
-         *
-         *     Un bot hereda la proyección de su dueño (`nickname`, `initials`, `photoId`,
-         *     `intention`) y se distingue por `profileId` + `sourceType: bot`, igual que en
-         *     `GET /discovery`: no existe un segundo catálogo de personas para rellenar la
-         *     demo.
          */
         PingPeer: {
-            /** @description El `profileId` del otro perfil (humano o bot). */
+            /** @description El `profileId` del otro perfil. */
             profileId: string;
             /** @description Nombre visible. */
             nickname: string;
@@ -1487,9 +1467,9 @@ export interface components {
              */
             matchId: string;
             /**
-             * @description Quién escribió: el `profileId` del humano o el del bot (`<owner>-b1`). La
-             *     sesión se reconoce por su propio `profileId`; los mensajes del otro lado
-             *     son los que cuentan para `unreadCount`.
+             * @description Quién escribió: el `profileId` de la sesión autenticada. La sesión se
+             *     reconoce por su propio `profileId`; los mensajes del otro lado son los
+             *     que cuentan para `unreadCount`.
              */
             senderProfileId: string;
             /**
@@ -1570,8 +1550,8 @@ export interface components {
          *     tengan un solo lugar donde declararse.
          *
          *     **`peer` es el otro lado, siempre.** El cliente no cruza el match contra
-         *     `/demo/profiles` (que no conoce a los bots) ni busca su propio perfil en una
-         *     lista: la fila ya trae a quién dibujar, igual que la bandeja de pings.
+         *     `/demo/profiles` ni busca su propio perfil en una lista: la fila ya trae a
+         *     quién dibujar, igual que la bandeja de pings.
          *
          *     **`unreadCount` es del que mira.** Son los mensajes del otro lado posteriores
          *     a su última lectura de este match; los propios nunca cuentan, aunque el
@@ -1608,12 +1588,11 @@ export interface components {
          * @description Visibilidad de la presencia. Es una **preferencia de la sesión**, no un
          *     estado de la conexión:
          *
-         *     - `visible` (default): la presencia aparece en el descubrimiento de los demás
-         *       y sus bots se mueven para ellos.
-         *     - `ghost`: la sesión sigue viva y sigue viendo (a los demás y a sus propios
-         *       bots), pero ni el humano ni sus bots aparecen en el descubrimiento ni en el
-         *       stream de nadie más. Es "online pero invisible", distinto de
-         *       `DELETE /presence`, que apaga la presencia para todos —incluido uno mismo—.
+         *     - `visible` (default): la presencia aparece en el descubrimiento de los demás.
+         *     - `ghost`: la sesión sigue viva y sigue viendo a los demás, pero su perfil no
+         *       aparece en el descubrimiento ni en el stream de nadie más. Es "online pero
+         *       invisible", distinto de `DELETE /presence`, que apaga la presencia para
+         *       todos —incluido uno mismo—.
          *
          *     Un `PUT /presence` sin `visibility` no cambia la visibilidad vigente: el
          *     heartbeat de posición del cliente (cada pocos segundos) no puede sacar a
@@ -1625,27 +1604,23 @@ export interface components {
          * @description Body de `POST /blocks`. Nombra a quién bloquear y nada más: el bloqueador es
          *     la sesión.
          *
-         *     `profileId` puede ser un humano del catálogo (`mx-p03`) o un bot
-         *     (`mx-p03-b1`). En el segundo caso el server canoniza al dueño: bloquear un
-         *     bot bloquea a su dueño, porque el bot no tiene identidad propia que
-         *     sobreviva al dueño. La response publica el `profileId` canonizado, así el
-         *     cliente no tiene que repetir la regla.
+         *     `profileId` es el de un perfil real de la región (`mx-p03`). El server no
+         *     canoniza ni reescribe el id: la response publica exactamente el mismo. Un id
+         *     que no es perfil de la región es `404 PROFILE_NOT_FOUND`.
          *
-         *     Bloquearse a sí mismo es `422 VALIDATION_FAILED`; un `profileId` que no
-         *     existe en la región es `404 PROFILE_NOT_FOUND`.
+         *     Bloquearse a sí mismo es `422 VALIDATION_FAILED`.
          */
         BlockCreate: {
             /**
              * @description `profileId` del perfil a bloquear, tal como lo devolvió `GET /discovery`
-             *     o `GET /matches` (humano o bot).
+             *     o `GET /matches`.
              * @example mx-p04
              */
             profileId: string;
         };
         /**
-         * @description Un bloqueo propio. `profileId` es el perfil **canonizado** (si se pidió un
-         *     bot, el dueño): es la identidad con la que el bloqueo se guardó y con la que
-         *     `DELETE /blocks/{profileId}` lo revierte.
+         * @description Un bloqueo propio. `profileId` es el perfil bloqueado, el mismo que se pidió:
+         *     es la identidad con la que `DELETE /blocks/{profileId}` lo revierte.
          *
          *     `createdAt` es cuándo se creó el bloqueo. Repetir `POST /blocks` sobre un par
          *     ya bloqueado es idempotente: devuelve el mismo `createdAt` y no crea una
@@ -1697,15 +1672,15 @@ export interface components {
          * @description Body de `POST /reports`. Nombra a quién se reporta y por qué; el reportante
          *     es la sesión.
          *
-         *     `profileId` acepta un humano del catálogo o un bot. Como en los bloqueos, un
-         *     bot se canoniza a su dueño: el bot no existe sin la persona.
+         *     `profileId` es el de un perfil real de la región: el server no canoniza ni
+         *     reescribe el id, porque no hay otra identidad a la que apuntar.
          *
          *     Reportarse a sí mismo es `422 VALIDATION_FAILED`; un `profileId` inexistente
          *     en la región es `404 PROFILE_NOT_FOUND`.
          */
         ReportCreate: {
             /**
-             * @description Perfil reportado (humano o bot). Se guarda canonizado al humano.
+             * @description Perfil reportado. Se guarda tal como se envió.
              * @example mx-p07
              */
             profileId: string;
@@ -1732,9 +1707,9 @@ export interface components {
          * @description Tipo de aviso. Los tres valores son los tres hechos de la demo que generan
          *     una notificación, con los mismos nombres que los eventos del stream.
          *
-         *     `ping.received` lo produce `POST /pings` para el destinatario humano;
+         *     `ping.received` lo produce `POST /pings` para el destinatario;
          *     `match.created`, la aceptación de un ping; `message.created`, un mensaje
-         *     nuevo del otro lado (incluida la respuesta automática de un bot).
+         *     nuevo del otro lado.
          * @enum {string}
          */
         NotificationKind: "ping.received" | "match.created" | "message.created";
@@ -2114,8 +2089,8 @@ export interface components {
         /**
          * @description El destinatario de `POST /pings` no existe para esta sesión
          *     (`PROFILE_NOT_FOUND`): `profileId` de otra región, id inexistente, o un
-         *     bot cuyo dueño ya no tiene presencia viva. Un ping no cruza regiones y un
-         *     bot sin presencia no está.
+         *     perfil que abrió sesión pero no tiene presencia viva. Un ping no cruza
+         *     regiones y sin presencia el perfil no está en el descubrimiento.
          */
         PingTargetNotFound: {
             headers: {
@@ -2214,11 +2189,10 @@ export interface components {
         };
         /**
          * @description La conversación no acepta mensajes nuevos (`MATCH_CLOSED`): el otro lado
-         *     ya no existe para la demo (un bot cuyo dueño se fue, un perfil regenerado
-         *     por un seed) o la conversación se cerró porque el dueño del bot cambió de
-         *     zona demo y el bot se volvió a sembrar en otra (`v0.5`). Se puede leer
-         *     —la historia queda legible— y marcar leída; lo que no se puede es
-         *     escribir.
+         *     ya no existe en el catálogo (un perfil regenerado por un seed, o una
+         *     sesión que dejó de encarnar un perfil). Se puede leer —la historia queda
+         *     legible— y marcar leída; lo que no se puede es escribir. Cambiar de zona
+         *     demo no cierra nada: el match sigue abierto.
          */
         MatchClosed: {
             headers: {
@@ -2425,8 +2399,8 @@ export interface components {
         /**
          * @description El destinatario de `POST /pings` no existe para esta sesión
          *     (`PROFILE_NOT_FOUND`): `profileId` de otra región, id inexistente, o un
-         *     bot cuyo dueño ya no tiene presencia viva. Un ping no cruza regiones y un
-         *     bot sin presencia no está.
+         *     perfil que abrió sesión pero no tiene presencia viva. Un ping no cruza
+         *     regiones y sin presencia el perfil no está en el descubrimiento.
          */
         "responses-PingTargetNotFound": {
             headers: {
@@ -2540,11 +2514,10 @@ export interface components {
         };
         /**
          * @description La conversación no acepta mensajes nuevos (`MATCH_CLOSED`): el otro lado
-         *     ya no existe para la demo (un bot cuyo dueño se fue, un perfil regenerado
-         *     por un seed) o la conversación se cerró porque el dueño del bot cambió de
-         *     zona demo y el bot se volvió a sembrar en otra (`v0.5`). Se puede leer
-         *     —la historia queda legible— y marcar leída; lo que no se puede es
-         *     escribir.
+         *     ya no existe en el catálogo (un perfil regenerado por un seed, o una
+         *     sesión que dejó de encarnar un perfil). Se puede leer —la historia queda
+         *     legible— y marcar leída; lo que no se puede es escribir. Cambiar de zona
+         *     demo no cierra nada: el match sigue abierto.
          */
         "responses-MatchClosed": {
             headers: {
@@ -2949,8 +2922,8 @@ export interface operations {
         };
         responses: {
             /**
-             * @description Ping creado. `status` es `pending` o, si el destinatario es un bot,
-             *     `accepted` con `matchId` ya resuelto.
+             * @description Ping creado y `pending`. `matchId` es `null` hasta que el destinatario
+             *     lo acepte.
              */
             201: {
                 headers: {
@@ -3228,10 +3201,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /**
-                 * @description Perfil a desbloquear: el humano canonizado, o el bot cuyo dueño se
-                 *     quiere desbloquear (se canoniza al dueño).
-                 */
+                /** @description Perfil a desbloquear, tal como lo devolvió `GET /blocks`. */
                 profileId: string;
             };
             cookie?: never;

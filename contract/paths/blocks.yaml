@@ -12,9 +12,10 @@
 # sigue legible. El detalle de la regla vive en `schemas/blocks.yaml` y en
 # `backend/README.md`.
 #
-# **Bloquear un bot es bloquear a su dueño.** Un bot (`mx-p03-b1`) no tiene
-# identidad propia: es una proyección de la persona. El server canoniza
-# `profileId` al dueño y la response publica el canonizado.
+# **Sin canonización.** El `profileId` de un bloqueo es el de un perfil real del
+# catálogo: el server no lo reescribe a otro id. Un id que no es perfil de la
+# región es `404 PROFILE_NOT_FOUND`, y el cliente no tiene que conocer ninguna
+# regla de alias.
 #
 # Errores: 401 de `demoSession`; 403 `PROFILE_REQUIRED` si la sesión es un
 # invitado de relleno (no tiene perfil que bloquee); 404 `PROFILE_NOT_FOUND` si el
@@ -64,8 +65,8 @@ blocks:
       hay `409` de duplicado: bloquear dos veces es la misma intención, no un
       conflicto.
 
-      Bloquearse a sí mismo es `422 VALIDATION_FAILED`. Un bot se canoniza a su
-      dueño; un `profileId` inexistente en la región es `404 PROFILE_NOT_FOUND`.
+      Bloquearse a sí mismo es `422 VALIDATION_FAILED`; un `profileId`
+      inexistente en la región es `404 PROFILE_NOT_FOUND`.
     tags:
       - blocks
     requestBody:
@@ -103,10 +104,8 @@ blocks-profile:
       Es **idempotente en el resultado**: si el par no estaba bloqueado, también
       es `204`. No hay `404` por "no había nada que borrar" porque el cliente que
       desbloquea dos veces (doble toque, reintento) no tiene que distinguir un
-      no-op de un error.
-
-      `profileId` se canoniza igual que en `POST`: desbloquear un bot revierte el
-      bloqueo de su dueño. Un invitado de relleno recibe `403 PROFILE_REQUIRED`.
+      no-op de un error. Un `profileId` que no es perfil de la región sí es `404`;
+      un invitado de relleno recibe `403 PROFILE_REQUIRED`.
     tags:
       - blocks
     parameters:
@@ -114,8 +113,7 @@ blocks-profile:
         in: path
         required: true
         description: |
-          Perfil a desbloquear: el humano canonizado, o el bot cuyo dueño se
-          quiere desbloquear (se canoniza al dueño).
+          Perfil a desbloquear, tal como lo devolvió `GET /blocks`.
         schema:
           type: string
           minLength: 1

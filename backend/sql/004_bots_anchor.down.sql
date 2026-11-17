@@ -6,4 +6,7 @@
 
 DROP VIEW IF EXISTS presence_anchors;
 
-ALTER TABLE bots DROP COLUMN IF EXISTS anchor;
+-- `ALTER TABLE IF EXISTS`: este down corre también en `--rollback-all` después
+-- de 008, que se llevó `bots`. Sin el `IF EXISTS` la cadena de rollback revienta
+-- con "relation bots does not exist".
+ALTER TABLE IF EXISTS bots DROP COLUMN IF EXISTS anchor;

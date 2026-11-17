@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Load test de la demo — 10 humanos + 20 bots por región, sin dependencias.
+ * Load test de la demo — humanos reales por región, sin dependencias.
  *
- *   node scripts/load-test.mjs                         # 10 humanos/región, 60 s
- *   node scripts/load-test.mjs --humans=2 --duration=20 # versión reducida
+ *   node scripts/load-test.mjs                          # 10 humanos/región, 60 s
+ *   node scripts/load-test.mjs --humans=2 --duration=20 # piloto de 2 humanos
  *   node scripts/load-test.mjs --regions=mx --pings=0   # sólo lectura
  *
  * Qué carga genera, por humano:
@@ -11,11 +11,13 @@
  *   * `PUT /presence` cada 2,5 s (el intervalo del cliente, PR-6);
  *   * `GET /discovery` cada 3 s (lo que mira una pestaña abierta);
  *   * un `GET /events` con ticket al empezar, leído hasta el final;
- *   * un ping a su bot y dos mensajes al match, una sola vez (calentamiento).
+ *   * un ping a **otra sesión real** de la misma región, la aceptación de ese
+ *     ping y dos mensajes al match, una sola vez (calentamiento).
  *
- * Los **bots no los crea el script**: el servidor siembra 2 por humano vivo
- * (`BotsService`), así que con 10 humanos por región la densidad es la del plan
- * (10 humanos + 20 bots). El reporte cuenta cuántos bots vio cada observador.
+ * La densidad es la de las sesiones que abre este script y nada más: no hay
+ * población sintética en el servidor. Con `--humans=2` hay un par por región
+ * (ping → accept → chat); con 10, cinco pares disjuntos. Un humano impar no
+ * chatea: no tiene peer. Un invitado (región llena) tampoco: no puede pinguar.
  *
  * Mide latencia de pared (incluye red local) por endpoint y reporta p50/p95/p99,
  * status y errores. Un `5xx` o una tasa de error por encima del umbral hace que
@@ -64,7 +66,7 @@ const options = parseArgs(process.argv);
 const latencies = new Map();
 const statuses = new Map();
 const errors = [];
-const botsSeen = new Set();
+let matchesMade = 0;
 let streamEvents = 0;
 let streamConnections = 0;
 const streamsOpened = [];
@@ -151,20 +153,15 @@ async function startHuman(regionKey, index) {
   });
   if (session.status !== 201 && session.status !== 200) return null;
 
-  const { token, profileId, demoSlot } = session.body;
-  const human = { regionKey, index, token, profileId, demoSlot, stop: [] };
+  const { token, profileId, demoSlot, sourceType } = session.body;
+  const human = { regionKey, index, token, profileId, demoSlot, sourceType, stop: [] };
 
   const presenceBody = { demoZoneKey: regionKey === 'mx' ? 'cdmx' : 'bogota' };
   human.stop.push(
     startLoop(options.presenceMs, () => request('presence', '/presence', { method: 'PUT', token, body: presenceBody })),
   );
   human.stop.push(
-    startLoop(options.discoveryMs, async () => {
-      const response = await request('discovery', '/discovery?radiusM=5000', { token });
-      for (const row of response.body?.results ?? []) {
-        if (row.profileId.endsWith('-b1') || row.profileId.endsWith('-b2')) botsSeen.add(row.profileId);
-      }
-    }),
+    startLoop(options.discoveryMs, () => request('discovery', '/discovery?radiusM=5000', { token })),
   );
 
   // Stream SSE: ticket de un uso y lectura hasta que el test termina.
@@ -205,39 +202,54 @@ async function startHuman(regionKey, index) {
   return human;
 }
 
-/** Ping al bot propio + mensajes del calentamiento, midiendo cada request. */
-async function warmUpChat(human) {
-  if (options.pings <= 0) return;
-  const target = `${human.profileId}-b1`;
-
-  // El bot existe recién cuando el ticker lo sembró (≤ 2 s). Un 404 acá no es
-  // un error del sistema: se reintenta sin contarlo como fallo de la API.
-  let ping = null;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const response = await request('ping', '/pings', {
-      method: 'POST',
-      token: human.token,
-      body: { targetProfileId: target },
-    });
-    if (response.status === 201) {
-      ping = response.body;
-      break;
-    }
-    if (response.status === 404 || response.status === 409) {
-      await sleep(500);
-      continue;
-    }
-    return;
+/**
+ * Pares disjuntos por región: `[0,1]`, `[2,3]`, … Un par por cada dos sesiones,
+ * para que no haya dos pings cruzados sobre el mismo par (el match es único por
+ * par y el segundo `accept` sería ruido, no carga útil).
+ */
+function pairByRegion(humans) {
+  const byRegion = new Map();
+  for (const human of humans) {
+    if (human.sourceType !== 'human') continue;
+    if (!byRegion.has(human.regionKey)) byRegion.set(human.regionKey, []);
+    byRegion.get(human.regionKey).push(human);
   }
-  if (ping?.matchId === undefined || ping?.matchId === null) return;
+  const pairs = [];
+  for (const list of byRegion.values()) {
+    for (let index = 0; index + 1 < list.length; index += 2) pairs.push([list[index], list[index + 1]]);
+  }
+  return pairs;
+}
+
+/** Ping a otra sesión real, aceptación y mensajes del calentamiento, midiendo cada request. */
+async function warmUpChat(pair) {
+  if (options.pings <= 0) return;
+  const [sender, recipient] = pair;
+
+  const ping = await request('ping', '/pings', {
+    method: 'POST',
+    token: sender.token,
+    body: { targetProfileId: recipient.profileId },
+  });
+  if (ping.status !== 201) return;
+  const pingId = ping.body?.id;
+  if (pingId === undefined || pingId === null) return;
+
+  // La aceptación es del destinatario: el match nace de dos personas, no de una.
+  const accepted = await request('accept', `/pings/${pingId}/accept`, { method: 'POST', token: recipient.token });
+  const match = accepted.body?.match ?? accepted.body;
+  const matchId = match?.id;
+  if (matchId === undefined || matchId === null) return;
+  matchesMade += 1;
 
   for (let index = 0; index < options.messages; index += 1) {
-    await request('message', `/matches/${ping.matchId}/messages`, {
+    await request('message', `/matches/${matchId}/messages`, {
       method: 'POST',
-      token: human.token,
-      body: { clientMessageId: `load-${human.profileId}-${index}`, body: `carga ${index}` },
+      token: sender.token,
+      body: { clientMessageId: `load-${sender.profileId}-${index}`, body: `carga ${index}` },
     });
   }
+  await request('messages-read', `/matches/${matchId}/messages`, { token: recipient.token });
 }
 
 async function main() {
@@ -261,9 +273,11 @@ async function main() {
   }
   console.log(`[load] sesiones abiertas: ${humans.length}`);
 
-  // Presencia primero para que el ticker siembre los bots; después el chat.
+  // Presencia primero: el ping necesita que las dos sesiones existan y el
+  // discovery que haya una presencia viva del otro lado; después el chat.
   await sleep(options.warmupMs);
-  await Promise.all(humans.map((human) => warmUpChat(human)));
+  const pairs = pairByRegion(humans);
+  await Promise.all(pairs.map((pair) => warmUpChat(pair)));
 
   const startedAt = performance.now();
   await sleep(options.durationSeconds * 1_000);
@@ -283,7 +297,7 @@ async function main() {
     .reduce((sum, [, count]) => sum + count, 0);
 
   console.log('\n## Resultado\n');
-  console.log(`Duración medida: ${elapsedSeconds.toFixed(1)} s · humanos: ${humans.length} · bots vistos: ${botsSeen.size} únicos`);
+  console.log(`Duración medida: ${elapsedSeconds.toFixed(1)} s · humanos: ${humans.length} · pares con match: ${matchesMade}/${pairs.length}`);
   console.log(`Streams: ${streamConnections} conectados · ${streamEvents} eventos recibidos`);
   console.log(`Requests: ${totalRequests} · no-2xx: ${totalErrors} · 5xx/red: ${serverErrors} · ~${(totalRequests / elapsedSeconds).toFixed(1)} req/s\n`);
 

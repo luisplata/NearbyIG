@@ -9,7 +9,7 @@ openapi: 3.1.0
 
 info:
   title: NearbyIG API
-  version: 0.5.0
+  version: 0.6.0
   summary: Contrato congelado de la demo (S1–S5).
   description: |
     Contrato de la demo NearbyIG escrito a mano antes del server. La superficie
@@ -33,7 +33,7 @@ info:
     **v0.3 (delta sobre v0.2):** entra el flujo de conexión mínimo de S4.
       * `POST /pings`, `GET /pings`, `POST /pings/{pingId}/accept` y
         `POST /pings/{pingId}/reject`: enviar, mirar la bandeja y resolver.
-      * `Ping`, `PingList` (con `PingPeer`) y `Match`. El bot acepta solo.
+      * `Ping`, `PingList` (con `PingPeer`) y `Match`.
       * `PING_DUPLICATE` y `PING_EXPIRED` salen de `x-reserved`: ya tienen
         operation. Se suman `PING_FORBIDDEN`, `PING_NOT_FOUND` y
         `PING_RESOLVED`, que son las tres decisiones nuevas del cliente.
@@ -46,7 +46,7 @@ info:
       * `GET /matches/{matchId}/messages` — la conversación paginada con cursor
         opaco, en orden cronológico.
       * `POST /matches/{matchId}/messages` — escribir, idempotente por
-        `clientMessageId`. Si el otro lado es un bot, el bot responde solo.
+        `clientMessageId`.
       * `POST /matches/{matchId}/read` — marcar leídos los mensajes del otro.
       * `GET /me` — el perfil de la propia sesión (`SelfProfile`, que estaba
         declarado desde S0 sin consumer).
@@ -54,8 +54,8 @@ info:
       * `MATCH_NOT_FOUND` y `CHAT_BLOCKED` salen de `x-reserved`; se suma
         `MATCH_CLOSED` (409) para una conversación que ya no acepta mensajes. El
         enum queda sin códigos reservados.
-      * `message.created` y `typing.started` dejan de ser payloads declarados sin
-        productor: el chat los emite en el stream existente.
+      * `message.created` deja de ser un payload declarado sin productor: el
+        chat lo emite en el stream existente.
     Block y report siguen fuera.
 
     **v0.5 (delta sobre v0.4):** entra la privacidad de S5. La regla es aditiva:
@@ -63,10 +63,9 @@ info:
     `visibility`.
       * `Visibility` (`visible` | `ghost`) en `PUT /presence` y en
         `PresenceState`. Ghost es "online pero invisible": la sesión sigue viva y
-        viendo, pero ni el humano ni sus bots aparecen para los demás.
+        viendo, pero su perfil deja de aparecer para los demás.
       * `GET /blocks`, `POST /blocks` y `DELETE /blocks/{profileId}`: bloqueo
-        idempotente, con identidad del otro en la lista. Bloquear un bot bloquea
-        a su dueño.
+        idempotente, con identidad del otro en la lista.
       * `POST /reports`: registro sin consola de moderación y sin PII en el
         acuse.
       * `GET /notifications` y `POST /notifications/read`: avisos persistidos de
@@ -74,14 +73,28 @@ info:
         badge de pings pendientes del cliente sigue funcionando.
       * `PROFILE_REQUIRED` (403) es el único código nuevo: el invitado de relleno
         no tiene perfil que bloquear ni reportar.
-      * `MATCH_CLOSED` ahora también cierra una conversación con un bot cuyo
-        dueño cambió de zona: la historia queda legible y no acepta mensajes
-        nuevos.
+
+    **v0.6 (delta sobre v0.5):** sale la población sintética y el vocabulario que
+    sólo existía para ella. Ninguna operation nace ni muere: cambia lo que el
+    contrato dice y a quién le permite hacerlo.
+      * `SourceType` queda en `{human, guest}`. `sourceType: bot` ya no valida:
+        es `422 VALIDATION_FAILED` como cualquier valor fuera del enum.
+      * `EventType` queda en `{profile.presence, ping.received, match.created,
+        message.created}`. Salen `profile.moved` y `typing.started` con sus
+        payloads: sus únicos productores eran el ticker de la población y la
+        respuesta automática.
+      * La prosa deja de describir automatismos. Un ping queda `pending` hasta
+        que una persona lo resuelva; un mensaje lo escribe la sesión autenticada
+        y no hay respuesta diferida. `MATCH_CLOSED` cierra una conversación cuyo
+        otro lado ya no está en el catálogo, no una que "cambió de zona".
+      * `contract/event/sample-log.json` se regenera con las 40 entradas en
+        `profile.presence`: las invariantes del replay (duplicado deliberado,
+        `occurredAt` invertido, 39 `seq` únicos) no cambian.
 
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: '3225f7e3ecd7'
+  x-contract-id: 'bbdd239893ca'
 
 servers:
   - url: http://localhost:3000
@@ -131,24 +144,22 @@ tags:
       El flujo de conexión de S4. Un ping es una propuesta de una dirección;
       aceptarlo crea **un** `Match` por par y rechazarlo no crea nada. La bandeja
       (`GET /pings?box=`) trae el ping y la proyección del otro perfil, sin
-      coordenadas: quién fue, no dónde está. Un bot acepta solo, así la demo se
-      siente viva sin que nadie mire la pantalla del bot.
+      coordenadas: quién fue, no dónde está. Un ping queda pendiente hasta que la
+      otra persona lo resuelva: no hay aceptación automática.
   - name: matches
     description: |
       El chat de S4. Un match es una conversación: `GET /matches` es la bandeja
       (con el otro perfil, el último mensaje y `unreadCount`), `GET
       /matches/{matchId}/messages` la conversación paginada y `POST
       /matches/{matchId}/messages` la escritura idempotente por
-      `clientMessageId`. `POST /matches/{matchId}/read` apaga el badge. Si el otro
-      lado es un bot, responde solo. Sin coordenadas: un chat cuenta quién habló,
-      no dónde estaba.
+      `clientMessageId`. `POST /matches/{matchId}/read` apaga el badge. Sin
+      coordenadas: un chat cuenta quién habló, no dónde estaba.
   - name: blocks
     description: |
       Bloqueo de S5. `GET /blocks` lista lo que la sesión bloqueó, `POST /blocks`
       bloquea (idempotente) y `DELETE /blocks/{profileId}` revierte. El efecto es
       bidireccional: el par no se ve en discovery, no se puede pinguear y la
-      conversación existente no acepta mensajes nuevos. Bloquear un bot bloquea a
-      su dueño.
+      conversación existente no acepta mensajes nuevos.
   - name: reports
     description: |
       Reporte de S5. `POST /reports` registra la señal con un motivo cerrado y
@@ -420,8 +431,8 @@ components:
       description: |
         El destinatario de `POST /pings` no existe para esta sesión
         (`PROFILE_NOT_FOUND`): `profileId` de otra región, id inexistente, o un
-        bot cuyo dueño ya no tiene presencia viva. Un ping no cruza regiones y un
-        bot sin presencia no está.
+        perfil que abrió sesión pero no tiene presencia viva. Un ping no cruza
+        regiones y sin presencia el perfil no está en el descubrimiento.
       x-error-code: PROFILE_NOT_FOUND
       content:
         application/problem+json:
@@ -506,11 +517,10 @@ components:
     MatchClosed:
       description: |
         La conversación no acepta mensajes nuevos (`MATCH_CLOSED`): el otro lado
-        ya no existe para la demo (un bot cuyo dueño se fue, un perfil regenerado
-        por un seed) o la conversación se cerró porque el dueño del bot cambió de
-        zona demo y el bot se volvió a sembrar en otra (`v0.5`). Se puede leer
-        —la historia queda legible— y marcar leída; lo que no se puede es
-        escribir.
+        ya no existe en el catálogo (un perfil regenerado por un seed, o una
+        sesión que dejó de encarnar un perfil). Se puede leer —la historia queda
+        legible— y marcar leída; lo que no se puede es escribir. Cambiar de zona
+        demo no cierra nada: el match sigue abierto.
       x-error-code: MATCH_CLOSED
       content:
         application/problem+json:
@@ -552,8 +562,6 @@ components:
       $ref: './schemas/events.yaml#/EventType'
     EventsPage:
       $ref: './schemas/events.yaml#/EventsPage'
-    ProfileMovedPayload:
-      $ref: './schemas/events.yaml#/ProfileMovedPayload'
     ProfilePresencePayload:
       $ref: './schemas/events.yaml#/ProfilePresencePayload'
     PingReceivedPayload:
@@ -562,8 +570,6 @@ components:
       $ref: './schemas/events.yaml#/MatchCreatedPayload'
     MessageCreatedPayload:
       $ref: './schemas/events.yaml#/MessageCreatedPayload'
-    TypingStartedPayload:
-      $ref: './schemas/events.yaml#/TypingStartedPayload'
     ErrorCode:
       $ref: './schemas/errors.yaml#/ErrorCode'
     Problem:

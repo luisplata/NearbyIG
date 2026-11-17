@@ -70,17 +70,6 @@ export function toUiProfiles(rows: readonly LiveProfileRow[]): UiProfile[] {
 }
 
 /**
- * Los `profileId` que son bots en una foto de `/discovery`.
- *
- * `UiProfile` sigue siendo el espejo de los 13 campos del dataset: la identidad
- * de origen no se dibuja, pero el toggle de bots necesita saber cuáles recortar.
- * Se calcula acá, donde ya se conoce la fila cruda, y viaja al lado del catálogo.
- */
-export function botIdsOf(rows: readonly LiveProfileRow[]): string[] {
-  return rows.filter((row) => row.sourceType === 'bot').map((row) => row.profileId);
-}
-
-/**
  * Perfil propio para el tab Perfil, ya proyectado para la UI.
  *
  * **Por qué no es un `UiProfile`.** El perfil propio no viene de `/discovery`:

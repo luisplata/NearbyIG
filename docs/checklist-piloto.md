@@ -279,7 +279,28 @@ Si se self-hostea PostgreSQL en el Droplet, el backup del Droplet y los dumps a 
 
 ---
 
-## 10. Links de compra y creación
+## 10. Requisitos de la prueba de piloto
+
+La prueba del piloto es de **personas reales**: no hay perfiles automáticos que
+rellenen el radar. Lo que se exige para darla por válida:
+
+| Requisito | Criterio | Cómo se verifica |
+|---|---|---|
+| **≥ 2 dispositivos reales** | Dos dispositivos físicos distintos (dos teléfonos, o teléfono + notebook), uno por persona | Los dos abren la URL live y entran con identidades distintas |
+| **Misma región** | Los dos en `mx` (o los dos en `co`); **una** región por corrida | `GET /me` devuelve el mismo `regionKey` en los dos |
+| **Misma zona** | `cdmx` (o `bogota`) en los dos | La fila del otro aparece en `GET /discovery` |
+| **Identidades `human`** | Ninguno entra como invitado | `sourceType: 'human'` en `GET /me`; si la región está llena, liberar slot |
+| **Caso de una sola persona** | Con un solo dispositivo conectado el radar queda vacío | Estado vacío honesto, `results: []` — **no** es un fallo |
+| **Flujo completo** | ping → aceptar → match → chat, ghost, bloqueo, reset propio | Checklist de [`demo-script.md`](demo-script.md) §12 |
+
+El guion acto por acto, con qué decir y qué mirar, es
+[`demo-script.md`](demo-script.md). El procedimiento de operación (reset, load
+test de ensayo, qué verificar) está en
+[`runbook-demo.md`](runbook-demo.md) §10.2.
+
+---
+
+## 11. Links de compra y creación
 
 - [DigitalOcean — Droplets](https://www.digitalocean.com/pricing/droplets)
 - [DigitalOcean — Managed PostgreSQL](https://www.digitalocean.com/pricing/managed-databases)

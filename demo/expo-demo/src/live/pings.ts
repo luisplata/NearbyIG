@@ -8,7 +8,7 @@ import type { PingsCopyKey } from './pingsCopy';
  * **Por qué una fila propia.** La bandeja necesita el `peer` ya proyectado por
  * el server —nickname, iniciales, foto e intención del otro— y el ping con su
  * estado. El cliente no cruza el ping contra `/demo/profiles` porque no conoce a
- * los bots y una segunda copia del shape se desincroniza en cuanto el ping
+ * el contrato y una segunda copia del shape se desincroniza en cuanto el ping
  * crece. Acá sólo se valida y se ordena; nada se inventa.
  *
  * **Qué se descarta.** `fromProfileId`/`toProfileId` no se dibujan: la

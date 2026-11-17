@@ -26,7 +26,7 @@ export const QUICK_REPLY_KEYS = ['chat.self.1', 'chat.self.2', 'chat.self.3'] as
  * **Conversación real.** Si hay un match abierto en el controlador live
  * (`live.chat`), se dibuja `GET /matches/{id}/messages`: historial paginado,
  * burbujas por emisor, envío optimista con `clientMessageId`, estado de envío,
- * error por código y la respuesta del bot cuando llega por el stream.
+ * error por código y la respuesta del otro lado cuando llega por el stream.
  *
  * **Guion del dataset.** Sin match abierto se muestra el chat mock de siempre
  * (mensajes del catálogo, typing, revelación y accesos de seguridad). El dataset
@@ -126,20 +126,17 @@ function MockChat() {
  * Conversación real de un match.
  *
  * **Scroll al último.** Se ancla al final cuando cambia la cantidad de mensajes:
- * abrir, mandar y la respuesta del bot tienen que dejar el mensaje nuevo a la
- * vista. La página del contrato es ascendente, así que "el último" es el final
+ * abrir, mandar y la respuesta del otro lado tienen que dejar el mensaje nuevo a
+ * la vista. La página del contrato es ascendente, así que "el último" es el final
  * del array.
  *
- * **Burbujas.** Las propias a la derecha; las del otro a la izquierda. Las del
- * bot llevan borde y etiqueta: un bot que responde solo tiene que distinguirse de
- * una persona, aunque el texto sea igual de corto.
+ * **Burbujas.** Las propias a la derecha; las del otro a la izquierda.
  */
 function LiveChat({ chat }: { chat: LiveChatState }) {
   const live = useLive();
   const [draft, setDraft] = useState('');
   const scroller = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const peer = chat.peer;
-  const isBot = peer?.sourceType === 'bot';
   const count = chat.messages.length;
 
   useEffect(() => {
@@ -168,10 +165,9 @@ function LiveChat({ chat }: { chat: LiveChatState }) {
             <Text numberOfLines={1} style={[text.title, { fontSize: fontSize[2] }]}>
               {peer?.nickname ?? chatText('title')}
             </Text>
-            {isBot ? <Chip label={chatText('matchBotTag')} /> : null}
           </View>
           <Text numberOfLines={1} style={[text.small, { color: colors.muted }]}>
-            {isBot ? chatText('botNote') : chatText('tabMatches')}
+            {chatText('tabMatches')}
           </Text>
         </View>
       </View>
@@ -189,12 +185,7 @@ function LiveChat({ chat }: { chat: LiveChatState }) {
           </Text>
         ) : null}
         {chat.messages.map((message) => (
-          <LiveBubble
-            key={message.key}
-            message={message}
-            bot={!message.mine && isBot}
-            onRetry={() => retry(message)}
-          />
+          <LiveBubble key={message.key} message={message} onRetry={() => retry(message)} />
         ))}
       </ScrollView>
 
@@ -232,11 +223,9 @@ function LiveChat({ chat }: { chat: LiveChatState }) {
 
 function LiveBubble({
   message,
-  bot,
   onRetry,
 }: {
   message: LiveChatMessage;
-  bot: boolean;
   onRetry: () => void;
 }) {
   const mine = message.mine;
@@ -250,7 +239,6 @@ function LiveBubble({
             styles.bubble,
             { backgroundColor: mine ? colors.gradientMid : colors.surfaceAlt },
             mine ? styles.bubbleCornerMine : styles.bubbleCornerPeer,
-            bot ? styles.bubbleBot : null,
           ]}
         >
           <Text style={[text.body, styles.bubbleText]}>{message.body}</Text>
@@ -348,10 +336,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[2],
     paddingVertical: space[1],
     borderRadius: radii[1],
-  },
-  bubbleBot: {
-    borderWidth: 1,
-    borderColor: colors.accent,
   },
   bubbleCornerMine: {
     borderBottomRightRadius: 2,

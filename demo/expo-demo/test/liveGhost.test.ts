@@ -81,7 +81,7 @@ function makeServer() {
     }),
     'GET /api/discovery': () => ({
       status: 200,
-      body: JSON.stringify({ results: [row('mx-p02'), row('mx-p02-b1', { distanceM: 900 })] }),
+      body: JSON.stringify({ results: [row('mx-p02'), row('mx-p03', { distanceM: 900 })] }),
     }),
     'GET /api/me': () => ({ status: 404, body: '{"code":"NOT_FOUND"}' }),
     'GET /api/events/poll': () => ({
@@ -175,7 +175,7 @@ describe('ghost en el borde live', () => {
     // El dueño sigue viendo su foto y sus bots: el server es quien esconde.
     expect(controller.getState().discovery.map((item) => item.profileId)).toEqual([
       'mx-p02',
-      'mx-p02-b1',
+      'mx-p03',
     ]);
     await controller.stop();
   });

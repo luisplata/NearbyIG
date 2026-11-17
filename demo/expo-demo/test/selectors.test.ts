@@ -4,6 +4,7 @@ import { fixtures } from '../src/generated/fixtures';
 import { initialState, reduce } from '../src/state/reducer';
 import {
   avatarState,
+  bellBadgeCount,
   canPing,
   canSendInChat,
   isRevealed,
@@ -187,5 +188,29 @@ describe('proyección de posición', () => {
     const dot = projectProfile(profileById('p03')!, 0);
     expect(Number.isFinite(dot.x)).toBe(true);
     expect(Number.isFinite(dot.y)).toBe(true);
+  });
+});
+
+describe('badge de la campana', () => {
+  it('en live manda el unreadCount del server', () => {
+    const live: DemoState = { ...state(), source: 'live' };
+    expect(bellBadgeCount(live, 2)).toBe(2);
+    expect(bellBadgeCount(live, 0)).toBe(0);
+  });
+
+  it('en dataset es el guion del mock', () => {
+    expect(bellBadgeCount(initialState(), 2)).toBe(0);
+    expect(
+      bellBadgeCount(
+        {
+          ...initialState(),
+          notifications: [
+            { id: 'n1', kind: 'match', profileId: 'p01', read: false },
+            { id: 'n2', kind: 'ping', profileId: 'p02', read: true },
+          ],
+        },
+        7,
+      ),
+    ).toBe(1);
   });
 });

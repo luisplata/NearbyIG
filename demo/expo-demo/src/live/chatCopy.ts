@@ -22,17 +22,15 @@ export const chatCopy = {
   tabMatches: 'Matches',
   matchesHint: 'Matches reales de esta sesión: abrí uno para conversar.',
   matchesEmpty:
-    'Todavía no hay matches. Mandá un ping: en la demo los bots aceptan solos y la conversación aparece acá.',
+    'Todavía no hay matches. Mandá un ping y, cuando la otra persona lo acepte, la conversación aparece acá.',
   matchesEmptyCta: 'Buscar gente',
   matchNoMessages: 'Match creado. Todavía no hay mensajes.',
   matchYouPrefix: 'Vos: ',
-  matchBotTag: 'bot',
   unreadA11y: '{count} mensajes sin leer',
   openChat: 'Abrir chat',
   opening: 'Abriendo…',
 
   conversationEmpty: 'Match creado. Escribí el primer mensaje.',
-  botNote: 'Bot de la demo: responde solo con texto fijo.',
   loading: 'Cargando conversación…',
   loadingMore: 'Cargando mensajes…',
   loadMore: 'Cargar mensajes nuevos',

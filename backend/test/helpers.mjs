@@ -407,7 +407,7 @@ export async function createBlock(token, body) {
   return api('/blocks', { method: 'POST', token, body });
 }
 
-/** `DELETE /blocks/{profileId}`. El id se manda tal cual (bots y vacíos incluidos). */
+/** `DELETE /blocks/{profileId}`. El id se manda tal cual (vacíos incluidos). */
 export async function deleteBlock(token, profileId) {
   return api(`/blocks/${encodeURIComponent(profileId)}`, { method: 'DELETE', token });
 }
@@ -468,16 +468,6 @@ export async function notificationRowsOf(regionKey, recipientProfileId) {
     );
     return rows;
   });
-}
-
-/** Mueve la zona de un bot sin esperar al ticker (simula al dueño mudándose). */
-export async function setBotZone(regionKey, botProfileId, zoneKey) {
-  await withDb((client) =>
-    client.query(
-      'UPDATE bots SET zone_key = $3 WHERE region_key = $1 AND bot_profile_id = $2',
-      [regionKey, botProfileId, zoneKey],
-    ),
-  );
 }
 
 /** Vence la sesión ahora: es el estado que deja el TTL sin esperar 2 h. */
@@ -592,104 +582,6 @@ export async function eventRowsIn(regionKey) {
   });
 }
 
-/**
- * Filas de `bots` de una región, **sin** centro ni posición: el test mira
- * identidad, zona y métricas, nunca la geometría privada.
- */
-export async function botRows(regionKey) {
-  return withDb(async (client) => {
-    const { rows } = await client.query(
-      `SELECT bot_profile_id, owner_profile_id, bot_index, zone_key,
-              waypoint_index, distance_m, bearing_deg
-         FROM bots
-        WHERE region_key = $1
-        ORDER BY bot_profile_id`,
-      [regionKey],
-    );
-    return rows;
-  });
-}
-
-/**
- * Vence el tramo de todos los bots de una región: en el próximo tick el mundo
- * avanza un waypoint sin esperar los 5 s reales. Es el equivalente de
- * `expirePresence` para el ticker.
- */
-export async function expireBotLegs(regionKey) {
-  await withDb((client) =>
-    client.query(
-      `UPDATE bots SET leg_started_at = now() - interval '1 hour' WHERE region_key = $1`,
-      [regionKey],
-    ),
-  );
-}
-
-/**
- * Geometría de los bots de una región **como distancias**, nunca coordenadas.
- *
- * `ref` es el punto esperado del dueño (su presencia con GPS o el centroide de
- * su zona demo) y se recalcula acá a propósito, sin usar la vista
- * `presence_anchors`: el test tiene que tener su propia definición de dónde
- * debería estar el ancla. Si las tres distancias son 0/900–1200/300–1700, el
- * bot está donde tiene que estar sin que el test mire un `lng` o un `lat`.
- *
- * `created_ms` sale como número (epoch en ms) porque es lo que distingue
- * "resembró" de "siguió el mismo loop": un avance de waypoint no lo toca.
- */
-export async function botAnchorRows(regionKey) {
-  return withDb(async (client) => {
-    const { rows } = await client.query(
-      `SELECT b.bot_profile_id,
-              b.owner_profile_id,
-              b.zone_key,
-              b.waypoint_index,
-              (extract(epoch FROM b.created_at) * 1000)::bigint::text AS created_ms,
-              round(ST_Distance(b.anchor::geography, ref.point::geography))::int AS anchor_to_ref_m,
-              round(ST_Distance(b.center::geography, ref.point::geography))::int AS center_to_ref_m,
-              round(ST_Distance(b.position::geography, ref.point::geography))::int AS position_to_ref_m
-         FROM bots b
-         JOIN LATERAL (
-           SELECT coalesce(pr.point, ST_PointOnSurface(z.polygon)) AS point
-             FROM presence pr
-             JOIN sessions s ON s.session_id = pr.session_id
-             LEFT JOIN zones z
-               ON z.region_key = pr.region_key AND z.zone_key = pr.zone_key
-            WHERE pr.region_key = b.region_key
-              AND s.profile_id = b.owner_profile_id
-              AND pr.zone_key IS NOT NULL
-              AND pr.expires_at > now()
-              AND s.revoked_at IS NULL
-              AND s.expires_at > now()
-            ORDER BY pr.expires_at DESC, s.session_id
-            LIMIT 1
-         ) ref ON true
-        WHERE b.region_key = $1
-        ORDER BY b.bot_profile_id`,
-      [regionKey],
-    );
-    return rows.map((row) => ({ ...row, created_ms: Number(row.created_ms) }));
-  });
-}
-
-/** Waypoints del loop de un dueño que caen fuera del polígono de su zona. */
-export async function botWaypointsOutsideZone(regionKey, ownerProfileId) {
-  return withDb(async (client) => {
-    const { rows } = await client.query(
-      `SELECT count(*)::int AS outside
-         FROM bot_waypoints w
-         JOIN bots b
-           ON b.region_key = w.region_key AND b.bot_profile_id = w.bot_profile_id
-         JOIN zones z
-           ON z.region_key = b.region_key AND z.zone_key = b.zone_key
-        WHERE w.region_key = $1
-          AND b.owner_profile_id = $2
-          AND NOT ST_Covers(z.polygon, w.point)`,
-      [regionKey, ownerProfileId],
-    );
-    return rows[0].outside;
-  });
-}
-
 /** Distancia del punto privado de una sesión al centroide de su zona. */
 export async function presenceToCentroidM(sessionId) {
   return withDb(async (client) => {
@@ -704,7 +596,6 @@ export async function presenceToCentroidM(sessionId) {
   });
 }
 
-/** Espera activa de una condición async, con timeout: el ticker es asíncrono. */
 /**
  * Espera a que una condición se cumpla, sondeando.
  *
@@ -861,8 +752,7 @@ export async function expirePresence(sessionId) {
  * Empuja el vencimiento de las presencias del escenario.
  *
  * El TTL de 12 s es del contrato y se prueba en `presence.test.mjs`; acá sirve
- * para que un test del mundo (bots, eventos) no dependa de la duración de la
- * suite. No cambia la semántica de lectura: `expires_at > now()` sigue siendo la
+ * para que un test del log de eventos no dependa de la duración de la suite. No cambia la semántica de lectura: `expires_at > now()` sigue siendo la
  * única autoridad y el reloj se mueve igual, sólo que más tarde.
  */
 export async function extendPresence(sessionIds, seconds = 120) {

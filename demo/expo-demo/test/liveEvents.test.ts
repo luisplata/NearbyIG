@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyEvents } from '../src/live/events';
-import { seqOf, parseEvent, type LiveEvent, type LiveProfileRow } from '../src/live/types';
+import { EVENT_TYPES, seqOf, parseEvent, type LiveEvent, type LiveProfileRow } from '../src/live/types';
 
 const row = (overrides: Partial<LiveProfileRow> = {}): LiveProfileRow => ({
   profileId: 'mx-p01',
@@ -22,13 +22,6 @@ const row = (overrides: Partial<LiveProfileRow> = {}): LiveProfileRow => ({
   statusKey: 'status.p01',
   bioKey: 'bio.p01',
   ...overrides,
-});
-
-const moved = (seq: number, profileId: string, distanceM: number, bearingDeg = 90): LiveEvent => ({
-  id: `mx:${String(seq).padStart(12, '0')}`,
-  type: 'profile.moved',
-  occurredAt: '2026-11-13T09:00:00.000Z',
-  payload: { profileId, distanceM, bearingDeg },
 });
 
 const presence = (seq: number, profileId: string, online: boolean): LiveEvent => ({
@@ -53,40 +46,43 @@ describe('envelope', () => {
     expect(parseEvent('{')).toBeNull();
     expect(parseEvent('{"id":"mx:000000000001"}')).toBeNull();
     expect(
-      parseEvent('{"id":"mx:000000000001","type":"profile.moved","occurredAt":"x","payload":{}}'),
+      parseEvent('{"id":"mx:000000000001","type":"profile.presence","occurredAt":"x","payload":{}}'),
     ).not.toBeNull();
+  });
+
+  it('el front tipa los cuatro eventos del contrato v0.6', () => {
+    expect(EVENT_TYPES).toEqual([
+      'profile.presence',
+      'ping.received',
+      'match.created',
+      'message.created',
+    ]);
   });
 });
 
 describe('aplicación de eventos', () => {
-  it('parchea distancia y rumbo de la foto vigente', () => {
-    const result = applyEvents([row()], [moved(7, 'mx-p01', 900, 180)], 0);
-    expect(result.changed).toBe(true);
-    expect(result.lastSeq).toBe(7);
-    expect(result.rows[0].distanceM).toBe(900);
-    expect(result.rows[0].bearingDeg).toBe(180);
-  });
-
   it('dedupe por seq: el mismo evento dos veces se aplica una sola vez', () => {
-    const first = applyEvents([row()], [moved(7, 'mx-p01', 900)], 0);
-    const second = applyEvents(first.rows, [moved(7, 'mx-p01', 1500)], first.lastSeq);
+    const first = applyEvents([row()], [presence(7, 'mx-p01', false)], 0);
+    expect(first.changed).toBe(true);
+    expect(first.lastSeq).toBe(7);
+    const second = applyEvents(first.rows, [presence(7, 'mx-p01', true)], first.lastSeq);
     expect(second.changed).toBe(false);
-    expect(second.rows[0].distanceM).toBe(900);
+    expect(second.rows[0].online).toBe(false);
     expect(second.lastSeq).toBe(7);
   });
 
   it('un evento viejo (seq menor al último visto) no retrocede la foto', () => {
-    const result = applyEvents([row({ distanceM: 900 })], [moved(3, 'mx-p01', 240)], 7);
+    const result = applyEvents([row({ online: false })], [presence(3, 'mx-p01', true)], 7);
     expect(result.changed).toBe(false);
-    expect(result.rows[0].distanceM).toBe(900);
+    expect(result.rows[0].online).toBe(false);
     expect(result.lastSeq).toBe(7);
   });
 
   it('ordena por seq, no por occurredAt', () => {
-    const late = { ...moved(9, 'mx-p01', 400), occurredAt: '2026-11-13T08:00:00.000Z' };
-    const early = { ...moved(8, 'mx-p01', 500), occurredAt: '2026-11-13T23:00:00.000Z' };
-    const result = applyEvents([row()], [late, early], 0);
-    expect(result.rows[0].distanceM).toBe(400);
+    const late = { ...presence(9, 'mx-p01', true), occurredAt: '2026-11-13T08:00:00.000Z' };
+    const early = { ...presence(8, 'mx-p01', false), occurredAt: '2026-11-13T23:00:00.000Z' };
+    const result = applyEvents([row({ online: false })], [late, early], 0);
+    expect(result.rows[0].online).toBe(true);
     expect(result.lastSeq).toBe(9);
   });
 
@@ -99,7 +95,7 @@ describe('aplicación de eventos', () => {
   });
 
   it('un perfil que no está en la foto pide una foto nueva en vez de inventar filas', () => {
-    const result = applyEvents([row()], [moved(5, 'mx-p99-b1', 800)], 0);
+    const result = applyEvents([row()], [presence(5, 'mx-p99', false)], 0);
     expect(result.changed).toBe(false);
     expect(result.unknownProfile).toBe(true);
     expect(result.rows).toHaveLength(1);
@@ -112,7 +108,7 @@ describe('aplicación de eventos', () => {
     expect(on.rows[0].online).toBe(true);
   });
 
-  it('los eventos de S4/S5 se aceptan y se ignoran', () => {
+  it('los eventos de chat se aceptan y se ignoran', () => {
     const ping: LiveEvent = {
       id: 'mx:000000000010',
       type: 'ping.received',
@@ -128,12 +124,12 @@ describe('aplicación de eventos', () => {
   it('un evento con payload inválido no rompe ni cambia la fila', () => {
     const broken: LiveEvent = {
       id: 'mx:000000000011',
-      type: 'profile.moved',
+      type: 'profile.presence',
       occurredAt: '2026-11-13T09:00:00.000Z',
-      payload: { profileId: 'mx-p01', distanceM: '900' },
+      payload: { profileId: 'mx-p01', online: 'sí' },
     };
     const result = applyEvents([row()], [broken], 0);
     expect(result.changed).toBe(false);
-    expect(result.rows[0].distanceM).toBe(240);
+    expect(result.rows[0].online).toBe(true);
   });
 });

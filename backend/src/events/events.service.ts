@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Pool } from 'pg';
 import type { AuthContext } from '../auth/session.types';
-import { BotsService } from '../bots/bots.service';
 import { validationFailed } from '../common/validation';
 import { AppProblemError } from '../common/problem';
 import { APP_CONFIG } from '../config/config.module';
@@ -47,31 +46,21 @@ interface EventRow {
  * reloj puede invertirse.
  *
  * **Visibilidad.** El log es de la región; la proyección es del observador: pasan
- * los humanos de la región (menos él, menos los que están en ghost o bloqueados)
- * y sus bots visibles, propios incluidos y cortados en el cap de 6
- * (`BotsService.visibleBotIds`, la misma definición que `GET /discovery`). Los
- * bots de un dueño en ghost no pasan —ni los nuevos ni los que ya estaban en el
- * log— porque el filtro es de lectura y no de escritura.
+ * los humanos de la región (menos él, menos los que están en ghost o bloqueados).
+ * El filtro es de lectura y no de escritura, así que un evento que ya estaba en
+ * el log deja de llegar cuando su sujeto sale de la lista.
  *
  * **La excepción: `online:false`.** El aviso de que alguien dejó de estar
  * (`DELETE /presence`, ghost o bloqueo) es lo que permite sacarle la tarjeta al
  * cliente; por eso viaja siempre, aunque el sujeto ya no esté en la lista. Si se
  * filtrara como el resto, el radar de los demás quedaría con un fantasma pegado
  * hasta el próximo refresh de discovery.
- *
- * **Frame de las medidas.** `profile.moved` lleva `distanceM`/`bearingDeg` contra
- * el ancla de la zona (el frame del mundo), no contra el observador: el log es
- * uno y append-only, así que un payload por receptor exigiría guardar una
- * coordenada o recalcular en lectura (y el mismo `seq` dejaría de valer lo
- * mismo). `GET /discovery` es la proyección por observador; el detalle y la
- * consecuencia para el cliente están en el README, "Frames de distancia".
  */
 @Injectable()
 export class EventsService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-    private readonly bots: BotsService,
   ) {}
 
   /**
@@ -179,7 +168,7 @@ export class EventsService {
    */
   async readPage(session: AuthContext, cursor: EventCursor | null, limit: number): Promise<EventsPage> {
     const [subjects, matchIds] = await Promise.all([
-      this.bots.visibleSubjects(session),
+      this.visibleSubjects(session),
       this.visibleMatchIds(session),
     ]);
     const page = await this.readRows(session.regionKey, cursor, limit, subjects, matchIds);
@@ -193,6 +182,53 @@ export class EventsService {
   }
 
   /**
+   * Sujetos visibles para un observador: los humanos de su región (menos él,
+   * menos los que están en ghost y menos el par bloqueado).
+   *
+   * El humano no se ve a sí mismo. No se filtra por presencia viva: un humano sin
+   * presencia tiene que seguir en la lista para que su `profile.presence
+   * online:false` llegue —si se filtrara por "vivo", el aviso de que se fue nunca
+   * saldría—.
+   */
+  private async visibleSubjects(session: AuthContext): Promise<VisibleSubjects> {
+    // Humanos de la región, menos uno mismo, menos los que están en ghost y
+    // menos el par bloqueado (en cualquier dirección).
+    const humans = await this.pool.query<{ profile_id: string }>(
+      `SELECT p.profile_id
+         FROM profiles p
+        WHERE p.region_key = $1
+          AND p.source_type = 'human'
+          AND p.profile_id <> $2
+          AND NOT EXISTS (
+            SELECT 1
+              FROM presence pr
+              JOIN sessions s ON s.session_id = pr.session_id
+             WHERE pr.region_key = p.region_key
+               AND s.profile_id = p.profile_id
+               AND pr.expires_at > now()
+               AND pr.visibility = 'ghost'
+               AND s.revoked_at IS NULL
+               AND s.expires_at > now()
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM blocks bl
+             WHERE bl.region_key = p.region_key
+               AND (
+                    (bl.blocker_profile_id = $2 AND bl.blocked_profile_id = p.profile_id)
+                 OR (bl.blocker_profile_id = p.profile_id AND bl.blocked_profile_id = $2)
+               )
+          )
+        ORDER BY p.profile_id`,
+      [session.regionKey, session.profileId],
+    );
+
+    return {
+      humans: humans.rows.map((row) => row.profile_id),
+    };
+  }
+
+  /**
    * Los matches de los que la sesión es **parte**, para filtrar los eventos de
    * chat.
    *
@@ -201,9 +237,6 @@ export class EventsService {
    * región" no alcanza —filtrar por región le mostraría a cualquiera las
    * conversaciones ajenas—. Ver el match donde el observador es uno de los dos
    * lados es la única lectura que no filtra el chat de otro.
-   *
-   * Un match con un bot propio entra por el perfil del humano, no por el bot: la
-   * conversación es del humano que escribió, no del dueño del bot.
    */
   private async visibleMatchIds(session: AuthContext): Promise<readonly string[]> {
     const { rows } = await this.pool.query<{ match_id: string }>(
@@ -246,13 +279,12 @@ export class EventsService {
                -- tarjeta pegada en pantalla para siempre.
                (event_type = 'profile.presence'
                 AND (payload->>'online' = 'false' OR payload->>'profileId' = ANY($3::text[])))
-            OR (event_type = 'profile.moved'    AND payload->>'profileId' = ANY($4::text[]))
-            OR (event_type IN ('message.created', 'typing.started')
-                AND payload->>'matchId' = ANY($6::text[]))
+            OR (event_type = 'message.created'
+                AND payload->>'matchId' = ANY($4::text[]))
           )
         ORDER BY seq
         LIMIT $5`,
-      [regionKey, cursor?.seq ?? 0, subjects.humans, subjects.bots, limit + 1, [...matchIds]],
+      [regionKey, cursor?.seq ?? 0, subjects.humans, [...matchIds], limit + 1],
     );
 
     return rows.slice(0, limit).map((row) => ({

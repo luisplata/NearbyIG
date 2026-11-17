@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import {
+  acceptPing,
   assertStackUp,
   createPing,
   deletePingsOf,
@@ -10,7 +11,6 @@ import {
   sendMessage,
   snapshotSessionIds,
   updatePresence,
-  waitFor,
   withDb,
 } from '../helpers.mjs';
 
@@ -29,7 +29,12 @@ import {
  * ser `429 RATE_LIMITED` —el `code` del contrato— para que el cliente sepa qué
  * hacer sin parsear el texto.
  *
- * Aislamiento: región `co` y slots 7–9, que ningún otro archivo usa, y limpieza
+ * **El aceptador es humano.** Antes el límite de pings se probaba contra el bot
+ * propio, que aceptaba solo y dejaba el par libre sin más. Sin población
+ * sintética, el aceptador es una segunda sesión real: acepta cada ping y así
+ * cada envío cuenta como hecho sin quedar `pending`.
+ *
+ * Aislamiento: región `co` y slots 6–9, que ningún otro archivo usa, y limpieza
  * de todo lo creado al final. El bucket de discovery es por `sessionId`, así que
  * no puede contaminar otras suites.
  */
@@ -37,10 +42,10 @@ import {
 const REGION = 'co';
 const ZONE = 'bogota';
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 let snapshot = [];
 const opened = [];
+/** El aceptador humano: una sola sesión para las dos pruebas de escritura. */
+let acceptor;
 
 async function openAt(slot) {
   const response = await openSession({ regionKey: REGION, demoSlot: slot });
@@ -52,27 +57,11 @@ async function openAt(slot) {
   return session;
 }
 
-/**
- * Los bots no existen hasta que el ticker del mundo los siembra (cada 2 s) y
- * sólo entonces se les puede pingear. Se espera a que aparezcan en el propio
- * discovery: es el mismo predicado que usa `POST /pings` para resolver el
- * destino, así que no hay una segunda definición de "bot vivo" en el test.
- */
-async function waitForBot(session, botId) {
-  await waitFor(
-    async () => {
-      const response = await listDiscovery(session.token);
-      if (response.status !== 200) return null;
-      return response.body.results.some((row) => row.profileId === botId) ? true : null;
-    },
-    { label: `el bot ${botId} en discovery` },
-  );
-}
-
 describe('rate limits: 429 RATE_LIMITED con el code del contrato', () => {
   before(async () => {
     await assertStackUp();
     snapshot = await snapshotSessionIds();
+    acceptor = await openAt(6);
   });
 
   after(async () => {
@@ -117,24 +106,25 @@ describe('rate limits: 429 RATE_LIMITED con el code del contrato', () => {
     assert.ok(refused > 0, 'el límite no se ejerció: 65 consultas seguidas dieron todas 200');
 
     // El rechazo es temporal: 600 ms de recarga alcanzan para el token siguiente.
-    await sleep(600);
+    await new Promise((resolve) => setTimeout(resolve, 600));
     const afterRefill = await listDiscovery(session.token);
     assert.equal(afterRefill.status, 200, JSON.stringify(afterRefill.body));
   });
 
   test('pings: el envío 31 del minuto es 429', async () => {
     const session = await openAt(8);
-    // El ping al bot propio se acepta solo: cada uno es un hecho contado, sin
-    // necesitar 30 destinatarios distintos ni dejar pendientes.
-    const target = `${session.profileId}-b1`;
-    await waitForBot(session, target);
+    // El aceptador humano cierra cada ping: es el mismo camino que la demo y
+    // deja el par libre para el envío siguiente.
 
     for (let index = 1; index <= 30; index += 1) {
-      const response = await createPing(session.token, { targetProfileId: target });
+      const response = await createPing(session.token, { targetProfileId: acceptor.profileId });
       assert.equal(response.status, 201, `ping ${index}: ${JSON.stringify(response.body)}`);
+      assert.equal(response.body.status, 'pending', `ping ${index}: un humano no acepta solo`);
+      const accepted = await acceptPing(acceptor.token, response.body.id);
+      assert.equal(accepted.status, 200, `accept ${index}: ${JSON.stringify(accepted.body)}`);
     }
 
-    const refused = await createPing(session.token, { targetProfileId: target });
+    const refused = await createPing(session.token, { targetProfileId: acceptor.profileId });
     assert.equal(refused.status, 429, JSON.stringify(refused.body));
     assert.equal(refused.body.code, 'RATE_LIMITED');
     assert.equal(refused.body.status, 429);
@@ -143,11 +133,12 @@ describe('rate limits: 429 RATE_LIMITED con el code del contrato', () => {
 
   test('mensajes: el envío 61 del minuto es 429', async () => {
     const session = await openAt(9);
-    await waitForBot(session, `${session.profileId}-b1`);
-    const ping = await createPing(session.token, { targetProfileId: `${session.profileId}-b1` });
+    const ping = await createPing(session.token, { targetProfileId: acceptor.profileId });
     assert.equal(ping.status, 201, JSON.stringify(ping.body));
-    const matchId = ping.body.matchId;
-    assert.equal(typeof matchId, 'string', 'el ping al bot tiene que crear el match');
+    const accepted = await acceptPing(acceptor.token, ping.body.id);
+    assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+    const matchId = accepted.body.id;
+    assert.equal(typeof matchId, 'string', 'el ping aceptado tiene que producir el match');
 
     for (let index = 1; index <= 60; index += 1) {
       const response = await sendMessage(session.token, matchId, {

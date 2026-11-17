@@ -10,8 +10,8 @@ import type { GeoPoint } from './geolocation';
  * (`adapter.ts`) es el único punto que las convierte a la forma de la UI.
  */
 
-/** `SourceType` del contrato. */
-export type SourceType = 'human' | 'bot' | 'guest';
+/** `SourceType` del contrato v0.6: `bot` ya no existe. */
+export type SourceType = 'human' | 'guest';
 
 /**
  * `ProfileSummary`: la fila de `GET /demo/profiles` y la de `GET /discovery`.
@@ -85,8 +85,7 @@ export type LivePing = {
  * `PingPeer`: el otro lado del ping, ya proyectado por el server.
  *
  * No lleva medidas ni coordenadas a propósito: la bandeja cuenta quién
- * escribió, no dónde está. Un bot se distingue por `sourceType` + `profileId`,
- * igual que en `GET /discovery`.
+ * escribió, no dónde está.
  */
 export type LivePingPeer = {
   profileId: string;
@@ -199,7 +198,7 @@ export type LiveChatState = {
  *
  * No es lo mismo que no tener presencia: `DELETE /presence` apaga la sesión para
  * todos (incluido el dueño, que ya no tiene origen para descubrir); `ghost`
- * mantiene la sesión viendo y esconde al humano y a sus bots de los demás.
+ * mantiene la sesión viendo y esconde al humano de los demás.
  */
 export type Visibility = 'visible' | 'ghost';
 
@@ -293,14 +292,12 @@ export function isPingStatus(value: unknown): value is PingStatus {
   return typeof value === 'string' && PING_STATUSES.includes(value as PingStatus);
 }
 
-/** Los seis tipos del enum `EventType`. */
+/** Los cuatro tipos del enum `EventType` del contrato v0.6. */
 export const EVENT_TYPES = [
-  'profile.moved',
   'profile.presence',
   'ping.received',
   'match.created',
   'message.created',
-  'typing.started',
 ] as const;
 
 export type LiveEventType = (typeof EVENT_TYPES)[number];
@@ -434,12 +431,6 @@ export type LiveState = {
   blocksAt: number | null;
   /** `Problem.code` del último bloqueo/desbloqueo fallido. */
   blockError: string | null;
-  /**
-   * `profileId` pedido → `profileId` canonizado por el server. Bloquear un bot
-   * bloquea a su dueño; el mapa permite que la tarjeta del bot también muestre
-   * "Bloqueado" sin repetir la regla de nombres.
-   */
-  blockAliases: Record<string, string>;
   /** Perfiles reportados en esta sesión: el acuse local para no repetir el envío. */
   reported: string[];
   /** `Problem.code` del último reporte fallido. */
@@ -489,7 +480,6 @@ export function emptyLiveState(): LiveState {
     blocks: [],
     blocksAt: null,
     blockError: null,
-    blockAliases: {},
     reported: [],
     reportError: null,
     notifications: [],

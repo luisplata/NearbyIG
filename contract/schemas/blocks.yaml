@@ -7,9 +7,9 @@
 # publica la lista propia (`GET /blocks`), nunca la ajena.
 #
 # **No hay FK al catálogo en la columna del bloqueado** (ver `backend/sql/007_privacy.sql`):
-# un bloqueo puede apuntar a un humano del catálogo o a un bot, y el server lo
-# canoniza al humano. Un bot es una proyección de su dueño, así que bloquear a
-# `mx-p03-b1` bloquea a `mx-p03`; la fila guarda el dueño y no el bot.
+# la fila guarda el `profileId` tal como llegó, y la proyección lo resuelve contra
+# el catálogo. Desde v0.6 no hay identidad derivada: el id del bloqueo es el de un
+# perfil real de la región.
 #
 # Sin coordenadas y sin distancia: bloquear a alguien no publica dónde estaba.
 
@@ -22,21 +22,18 @@ BlockCreate:
     Body de `POST /blocks`. Nombra a quién bloquear y nada más: el bloqueador es
     la sesión.
 
-    `profileId` puede ser un humano del catálogo (`mx-p03`) o un bot
-    (`mx-p03-b1`). En el segundo caso el server canoniza al dueño: bloquear un
-    bot bloquea a su dueño, porque el bot no tiene identidad propia que
-    sobreviva al dueño. La response publica el `profileId` canonizado, así el
-    cliente no tiene que repetir la regla.
+    `profileId` es el de un perfil real de la región (`mx-p03`). El server no
+    canoniza ni reescribe el id: la response publica exactamente el mismo. Un id
+    que no es perfil de la región es `404 PROFILE_NOT_FOUND`.
 
-    Bloquearse a sí mismo es `422 VALIDATION_FAILED`; un `profileId` que no
-    existe en la región es `404 PROFILE_NOT_FOUND`.
+    Bloquearse a sí mismo es `422 VALIDATION_FAILED`.
   properties:
     profileId:
       type: string
       minLength: 1
       description: |
         `profileId` del perfil a bloquear, tal como lo devolvió `GET /discovery`
-        o `GET /matches` (humano o bot).
+        o `GET /matches`.
       examples:
         - mx-p04
 
@@ -47,9 +44,8 @@ Block:
     - profileId
     - createdAt
   description: |
-    Un bloqueo propio. `profileId` es el perfil **canonizado** (si se pidió un
-    bot, el dueño): es la identidad con la que el bloqueo se guardó y con la que
-    `DELETE /blocks/{profileId}` lo revierte.
+    Un bloqueo propio. `profileId` es el perfil bloqueado, el mismo que se pidió:
+    es la identidad con la que `DELETE /blocks/{profileId}` lo revierte.
 
     `createdAt` es cuándo se creó el bloqueo. Repetir `POST /blocks` sobre un par
     ya bloqueado es idempotente: devuelve el mismo `createdAt` y no crea una

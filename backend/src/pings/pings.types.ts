@@ -5,8 +5,7 @@ import type { SourceType } from '../auth/session.types';
  *
  * La fila `Ping` es la del recurso; la bandeja no la devuelve pelada, la anida en
  * `PingListItem { ping, peer }` porque cada fila muestra **al otro** perfil. Eso
- * evita que el cliente cruce el ping contra `/demo/profiles` (que además no
- * conoce a los bots).
+ * evita que el cliente cruce el ping contra `/demo/profiles`.
  */
 
 /** Los cuatro estados del contrato. `pending` es el único del que se sale. */

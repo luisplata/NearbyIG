@@ -43,9 +43,19 @@ const CUSTOM: Preferences = {
   gender: 'female',
   verifiedOnly: true,
   onlineOnly: true,
-  includeBots: false,
   soundEnabled: false,
 };
+
+/** Preferencia de un build anterior (tenía el toggle de bots). */
+const LEGACY = `${JSON.stringify({
+  radiusM: 1000,
+  intentions: ['networking', 'friendship'],
+  gender: 'female',
+  verifiedOnly: true,
+  onlineOnly: true,
+  includeBots: false,
+  soundEnabled: false,
+})}`;
 
 describe('modelo de preferencias', () => {
   it('sin storage o con basura no hay preferencias que hidratar', () => {
@@ -70,7 +80,7 @@ describe('modelo de preferencias', () => {
         gender: 'otro',
         verifiedOnly: 'sí',
         onlineOnly: true,
-        includeBots: false,
+        soundEnabled: 'no',
       }),
     );
     expect(parsed).toEqual({
@@ -79,16 +89,27 @@ describe('modelo de preferencias', () => {
       gender: null,
       verifiedOnly: DEFAULT_PREFERENCES.verifiedOnly,
       onlineOnly: true,
-      includeBots: false,
       soundEnabled: DEFAULT_PREFERENCES.soundEnabled,
     });
+  });
+
+  it('una preferencia heredada con `includeBots` se lee igual y no vuelve al storage', () => {
+    // Un build anterior guardó el toggle de bots. No puede romper la hidratación
+    // ni sobrevivir: el parser lo ignora y la primera escritura lo borra.
+    const parsed = parsePreferences(LEGACY);
+    expect(parsed).toEqual(CUSTOM);
+    expect(parsed).not.toHaveProperty('includeBots');
+
+    const rewritten = serializePreferences(parsed!);
+    expect(rewritten).not.toContain('includeBots');
+    expect(JSON.parse(rewritten)).toEqual(CUSTOM);
   });
 
   it('los filtros del estado se proyectan a preferencias', () => {
     const state = initialState();
     const prefs = preferencesOf(
       { ...state.filters, radiusM: 500, gender: 'male', onlineOnly: true },
-      false,
+      true,
     );
     expect(prefs).toEqual({
       radiusM: 500,
@@ -96,8 +117,7 @@ describe('modelo de preferencias', () => {
       gender: 'male',
       verifiedOnly: false,
       onlineOnly: true,
-      includeBots: false,
-      soundEnabled: DEFAULT_PREFERENCES.soundEnabled,
+      soundEnabled: true,
     });
   });
 
@@ -141,7 +161,7 @@ describe('hidratación y reset', () => {
     expect(state.filters.verifiedOnly).toBe(true);
     expect(state.filters.onlineOnly).toBe(true);
     // El sonido es una preferencia más: la foto tiene que reflejar el toggle.
-    expect(preferencesOf(state.filters, false, CUSTOM.soundEnabled)).toEqual(CUSTOM);
+    expect(preferencesOf(state.filters, CUSTOM.soundEnabled)).toEqual(CUSTOM);
   });
 
   it('restablecer vuelve a fábrica sin tocar la zona ni la sesión', () => {
@@ -152,7 +172,7 @@ describe('hidratación y reset', () => {
     for (const action of resetActions()) {
       state = reduce(state, action).state;
     }
-    expect(preferencesOf(state.filters, true)).toEqual(DEFAULT_PREFERENCES);
+    expect(preferencesOf(state.filters)).toEqual(DEFAULT_PREFERENCES);
     // La zona no es estado del reducer: nada de este reset la puede mover.
     expect(resetActions().some((action) => JSON.stringify(action).includes('Zone'))).toBe(false);
     expect(visibleProfiles(state)).toHaveLength(10);
@@ -160,39 +180,49 @@ describe('hidratación y reset', () => {
 });
 
 describe('storage de preferencias', () => {
-  it('una recarga hidrata el store completo: filtros y bots', () => {
+  it('una recarga hidrata el store completo: filtros y sonido', () => {
     const storage = fakeStore();
     writeStoredPreferences(serializePreferences(CUSTOM), storage);
 
-    const bot: UiProfile = {
-      id: 'mx-p02-b1',
-      nickname: 'Fran',
-      initials: 'FR',
+    const live: UiProfile = {
+      id: 'mx-p02',
+      nickname: 'Nico',
+      initials: 'NI',
       gender: 'female',
       intention: 'networking',
       verified: true,
       online: true,
-      distanceM: 900,
+      distanceM: 320,
       bearingDeg: 90,
       photoId: 'ph02',
-      instagramHandle: 'fran',
+      instagramHandle: 'nico',
       statusKey: 'status.p02',
       bioKey: 'bio.p02',
     };
-    const human: UiProfile = { ...bot, id: 'mx-p02', nickname: 'Nico', distanceM: 320 };
-    const store = createDemoStore(initialState([human, bot], 'live', [bot.id]));
+    const other: UiProfile = { ...live, id: 'mx-p03', nickname: 'Fran' };
+    const store = createDemoStore(initialState([live, other], 'live'));
 
     // Exactamente lo que hace PreferencesProvider al montar.
     const stored = parsePreferences(readStoredPreferences(storage))!;
     for (const action of restoreActions(stored)) {
       store.dispatch(action);
     }
-    store.setIncludeBots(stored.includeBots);
 
     const state = store.getState();
-    expect(preferencesOf(state.filters, state.includeBots, stored.soundEnabled)).toEqual(CUSTOM);
+    expect(preferencesOf(state.filters, stored.soundEnabled)).toEqual(CUSTOM);
     expect(state.catalog).toHaveLength(2);
-    expect(visibleProfiles(state).map((profile) => profile.id)).toEqual(['mx-p02']);
+    expect(visibleProfiles(state).map((profile) => profile.id)).toEqual(['mx-p02', 'mx-p03']);
+  });
+
+  it('una preferencia heredada se reescribe sin la clave muerta', () => {
+    const storage = fakeStore();
+    writeStoredPreferences(LEGACY, storage);
+
+    const stored = parsePreferences(readStoredPreferences(storage))!;
+    const persisted = serializePreferences(preferencesOf(initialState().filters, stored.soundEnabled));
+    writeStoredPreferences(persisted, storage);
+
+    expect(storage.dump.get(PREFERENCES_STORAGE_KEY)).not.toContain('includeBots');
   });
 
   it('escribe, lee y borra en la clave del build', () => {

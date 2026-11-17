@@ -28,7 +28,7 @@ const LIVE_PROFILE = (overrides: Partial<UiProfile> = {}): UiProfile => ({
 
 const LIVE_CATALOG: readonly UiProfile[] = [
   LIVE_PROFILE({ id: 'mx-p02', distanceM: 320 }),
-  LIVE_PROFILE({ id: 'mx-p01-b1', nickname: 'Vale', distanceM: 910, intention: 'networking' }),
+  LIVE_PROFILE({ id: 'mx-p02', nickname: 'Vale', distanceM: 910, intention: 'networking' }),
 ];
 
 describe('catálogo del estado', () => {
@@ -51,7 +51,7 @@ describe('catálogo del estado', () => {
     expect(store.getState().source).toBe('live');
     expect(visibleProfiles(store.getState()).map((profile) => profile.id)).toEqual([
       'mx-p02',
-      'mx-p01-b1',
+      'mx-p02',
     ]);
     expect(profileById('mx-p02', store.getState().catalog)?.nickname).toBe('Nico');
     expect(profileById('p01', store.getState().catalog)).toBeNull();
@@ -72,8 +72,8 @@ describe('catálogo del estado', () => {
     const store = createDemoStore();
     store.setCatalog(LIVE_CATALOG, 'live');
 
-    store.dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: 'mx-p01-b1' });
-    expect(store.getState().profileId).toBe('mx-p01-b1');
+    store.dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: 'mx-p02' });
+    expect(store.getState().profileId).toBe('mx-p02');
     expect(store.getState().overlay).toBe('profile');
 
     store.dispatch({ type: 'SEND_PING', profileId: 'mx-p02' });
@@ -99,7 +99,7 @@ describe('catálogo del estado', () => {
     expect(store.getState().source).toBe('live');
     expect(visibleProfiles(store.getState()).map((profile) => profile.id)).toEqual([
       'mx-p02',
-      'mx-p01-b1',
+      'mx-p02',
     ]);
   });
 
@@ -153,9 +153,9 @@ describe('catálogo live desde el adapter', () => {
       ...overrides,
     });
     const store = createDemoStore();
-    store.setCatalog(toUiProfiles([row(), row({ profileId: 'mx-p01-b1', distanceM: 900 })]), 'live');
+    store.setCatalog(toUiProfiles([row(), row({ profileId: 'mx-p02', distanceM: 900 })]), 'live');
 
-    expect(store.getState().catalog.map((profile) => profile.id)).toEqual(['mx-p01', 'mx-p01-b1']);
+    expect(store.getState().catalog.map((profile) => profile.id)).toEqual(['mx-p01', 'mx-p02']);
     expect(visibleProfiles(store.getState()).map((profile) => profile.distanceM)).toEqual([240, 900]);
   });
 });

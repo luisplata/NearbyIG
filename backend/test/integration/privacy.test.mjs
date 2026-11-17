@@ -11,7 +11,6 @@ import {
   deleteBlock,
   deletePingsOf,
   deleteSessionsCreatedSince,
-  expireBotLegs,
   extendPresence,
   listBlocks,
   listDiscovery,
@@ -33,23 +32,20 @@ import {
 } from '../helpers.mjs';
 
 /**
- * Privacidad de S5 (delta v0.5): ghost, bloqueo, reporte, notificaciones y el
- * cierre de conversación por cambio de zona.
+ * Privacidad de S5 (delta v0.5), recalibrada a humanos en `remove-bots`.
  *
  * Lo que fija este archivo, que es la promesa del sprint:
  *
- *  - ghost: el humano y sus bots desaparecen del discovery y del stream de los
- *    demás, el dueño se sigue viendo (sus bots incluidos) y volver a `visible`
- *    los reaparece;
- *  - bloqueo: el par deja de verse, no hay ping en ninguna dirección, la
- *    conversación existente no acepta mensajes nuevos (`403 CHAT_BLOCKED`) y
- *    desbloquear lo revierte; un bot se canoniza a su dueño;
+ *  - ghost: el humano desaparece del discovery y del stream de los demás, sigue
+ *    leyendo su propio descubrimiento (sin verse) y volver a `visible` lo
+ *    reaparece con su aviso `online:true`;
+ *  - bloqueo: el par deja de verse, no hay ping en ninguna dirección y la
+ *    conversación existente no acepta mensajes nuevos (`403 CHAT_BLOCKED`);
+ *    desbloquear lo revierte. Un id que no está en el catálogo no se bloquea;
  *  - reporte: queda registrado, el acuse no expone PII y no cambia el
  *    descubrimiento;
- *  - notificaciones: ping, match, mensaje y respuesta de bot generan avisos
- *    persistidos, `unreadCount` cuenta bien y marcar (todas o por id) lo baja;
- *  - cambio de zona: la conversación con un bot queda legible y escribir es
- *    `409 MATCH_CLOSED`; volver a la zona original la reabre.
+ *  - notificaciones: ping, match y mensaje generan avisos persistidos con el
+ *    peer, `unreadCount` cuenta bien y marcar (todas o por id) lo baja.
  *
  * Aislamiento: cada escenario abre sus slots y borra lo suyo (pings, matches,
  * bloqueos, reportes y notificaciones de los perfiles del escenario) y las
@@ -60,13 +56,6 @@ const REGION = 'mx';
 const ZONE = 'cdmx';
 
 const idsOf = (body) => body.results.map((row) => row.profileId);
-
-const botIdsOf = (profileId) => [`${profileId}-b1`, `${profileId}-b2`];
-
-const movedFor = (events, profileIds) =>
-  events.filter(
-    (event) => event.type === 'profile.moved' && profileIds.includes(event.payload.profileId),
-  );
 
 describe('ghost: online pero invisible', () => {
   let snapshot = [];
@@ -79,6 +68,10 @@ describe('ghost: online pero invisible', () => {
     return { ...session.body, sessionId: sessionIdOf(session.body.token) };
   };
 
+  /** Página del log de la región desde `seq` inclusive. */
+  const eventsSince = async (token, seq) =>
+    pollEvents(token, { cursor: `${REGION}:${String(seq).padStart(12, '0')}`, limit: 100 });
+
   before(async () => {
     await assertStackUp();
     snapshot = await snapshotSessionIds();
@@ -89,34 +82,18 @@ describe('ghost: online pero invisible', () => {
     const bPresence = await updatePresence(b.token, { demoZoneKey: ZONE });
     assert.equal(bPresence.status, 200, JSON.stringify(bPresence.body));
     await extendPresence([a.sessionId, b.sessionId], 600);
-
-    // Los bots de A los crea el ticker: sin ellos no hay nada que esconder.
-    await waitFor(
-      () =>
-        withDb(async (client) => {
-          const { rows } = await client.query(
-            'SELECT count(*)::int AS count FROM bots WHERE region_key = $1 AND owner_profile_id = $2',
-            [REGION, a.profileId],
-          );
-          return rows[0].count === 2;
-        }),
-      { label: 'los 2 bots de A', timeoutMs: 15_000 },
-    );
   });
 
   after(async () => {
-    await deletePingsOf(REGION, [a.profileId, b.profileId, ...botIdsOf(a.profileId)]);
+    await deletePingsOf(REGION, [a.profileId, b.profileId]);
     await clearPrivacyOf(REGION, [a.profileId, b.profileId]);
     await deleteSessionsCreatedSince(snapshot);
   });
 
-  test('B ve a A y sus bots; en ghost, ni el humano ni los bots', async () => {
+  test('B ve a A; en ghost, A desaparece del descubrimiento', async () => {
     const before = await listDiscovery(b.token);
     assert.equal(before.status, 200, JSON.stringify(before.body));
-    assert.ok(idsOf(before.body).includes(a.profileId), 'B ve a A visible');
-    for (const botId of botIdsOf(a.profileId)) {
-      assert.ok(idsOf(before.body).includes(botId), `B ve ${botId}`);
-    }
+    assert.deepEqual(idsOf(before.body), [a.profileId], 'B no ve a A visible');
 
     const ghost = await updatePresence(a.token, { demoZoneKey: ZONE, visibility: 'ghost' });
     assert.equal(ghost.status, 200, JSON.stringify(ghost.body));
@@ -126,75 +103,62 @@ describe('ghost: online pero invisible', () => {
 
     const hidden = await listDiscovery(b.token);
     assert.equal(hidden.status, 200, JSON.stringify(hidden.body));
-    assert.equal(idsOf(hidden.body).includes(a.profileId), false, 'A no aparece para B');
-    for (const botId of botIdsOf(a.profileId)) {
-      assert.equal(idsOf(hidden.body).includes(botId), false, `${botId} no aparece para B`);
-    }
+    assert.deepEqual(idsOf(hidden.body), [], 'A aparece para B estando en ghost');
   });
 
-  test('el dueño se sigue viendo a sí mismo, con sus bots', async () => {
+  test('en ghost, A sigue viendo a los demás pero no se ve a sí mismo', async () => {
+    // Contrato v0.5: ghost es "online pero invisible" — la sesión sigue viva y
+    // **sigue viendo** a los demás; lo que se retira es su propia fila para
+    // terceros. El perfil propio nunca aparece, tampoco acá.
     const own = await listDiscovery(a.token);
     assert.equal(own.status, 200, JSON.stringify(own.body));
-    assert.equal(idsOf(own.body).includes(a.profileId), false, 'sigue sin verse el humano (regla de siempre)');
-    for (const botId of botIdsOf(a.profileId)) {
-      assert.ok(idsOf(own.body).includes(botId), `en ghost, A ve su ${botId}`);
-    }
+    assert.deepEqual(idsOf(own.body), [b.profileId], 'el dueño en ghost dejó de ver a los demás');
+    assert.ok(!idsOf(own.body).includes(a.profileId), 'el dueño en ghost se ve a sí mismo');
   });
 
-  test('el stream de B deja de mover los bots de A en ghost', async () => {
-    // Baseline: **visible**, el ticker mueve los bots de A y B los recibe.
+  test('el stream de B recibe el aviso online:false de A en ghost', async () => {
+    // Baseline: **visible** y sin evento pendiente que confunda la lectura.
     assert.equal((await updatePresence(a.token, { demoZoneKey: ZONE, visibility: 'visible' })).status, 200);
-    const baselineSeq = await maxEventSeq(REGION);
-    await expireBotLegs(REGION);
-    await waitFor(
-      async () => movedFor((await pollEvents(b.token, { cursor: `mx:${String(baselineSeq).padStart(12, '0')}` })).body.events, botIdsOf(a.profileId)).length > 0,
-      { label: 'los movimientos de los bots de A', timeoutMs: 15_000 },
-    );
+    const seq = await maxEventSeq(REGION);
 
-    // En ghost: el cursor se toma **antes** del PUT para que la página incluya
-    // el aviso de que A se fue. Se fuerza el tramo y se mira el log de B.
-    const ghostSeq = await maxEventSeq(REGION);
+    // El cursor se toma **antes** del PUT para que la página incluya el aviso.
     assert.equal((await updatePresence(a.token, { demoZoneKey: ZONE, visibility: 'ghost' })).status, 200);
-    await expireBotLegs(REGION);
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
-    const page = await pollEvents(b.token, { cursor: `mx:${String(ghostSeq).padStart(12, '0')}` });
-    assert.equal(page.status, 200, JSON.stringify(page.body));
-    assert.deepEqual(
-      movedFor(page.body.events, botIdsOf(a.profileId)),
-      [],
-      'los bots de un dueño en ghost no se mueven para B',
+    const offline = await waitFor(
+      async () => {
+        const page = await eventsSince(b.token, seq);
+        assert.equal(page.status, 200, JSON.stringify(page.body));
+        return (
+          page.body.events.find(
+            (event) => event.type === 'profile.presence' && event.payload.profileId === a.profileId,
+          ) ?? null
+        );
+      },
+      { label: 'el online:false de A en ghost' },
     );
-
-    // El aviso de "se fue" sí llega: es lo que saca la tarjeta del radar.
-    const offline = page.body.events.filter(
-      (event) => event.type === 'profile.presence' && event.payload.profileId === a.profileId,
-    );
-    assert.ok(
-      offline.some((event) => event.payload.online === false),
-      'ghost avisa online:false para que el cliente lo saque',
-    );
+    assert.equal(offline.payload.online, false, 'ghost avisa online:false para que el cliente lo saque');
   });
 
-  test('volver a visible reaparece para B y vuelve a moverse en el stream', async () => {
+  test('volver a visible reaparece para B y avisa online:true', async () => {
+    const seq = await maxEventSeq(REGION);
     const visible = await updatePresence(a.token, { demoZoneKey: ZONE, visibility: 'visible' });
     assert.equal(visible.status, 200, JSON.stringify(visible.body));
     assert.equal(visible.body.visibility, 'visible');
 
-    const seen = await listDiscovery(b.token);
-    for (const botId of botIdsOf(a.profileId)) {
-      assert.ok(idsOf(seen.body).includes(botId), `${botId} reaparece para B`);
-    }
-
-    const seq = await maxEventSeq(REGION);
-    await expireBotLegs(REGION);
-    await waitFor(
-      async () =>
-        movedFor(
-          (await pollEvents(b.token, { cursor: `mx:${String(seq).padStart(12, '0')}` })).body.events,
-          botIdsOf(a.profileId),
-        ).length > 0,
-      { label: 'los movimientos de los bots de A al volver', timeoutMs: 15_000 },
+    const back = await waitFor(
+      async () => {
+        const page = await eventsSince(b.token, seq);
+        return (
+          page.body.events.find(
+            (event) => event.type === 'profile.presence' && event.payload.profileId === a.profileId,
+          ) ?? null
+        );
+      },
+      { label: 'el online:true de A al volver' },
     );
+    assert.equal(back.payload.online, true);
+
+    const seen = await listDiscovery(b.token);
+    assert.deepEqual(idsOf(seen.body), [a.profileId], 'A no reaparece para B');
   });
 
   test('un PUT sin visibility conserva el ghost (el heartbeat no lo saca)', async () => {
@@ -207,7 +171,7 @@ describe('ghost: online pero invisible', () => {
     assert.equal(beat.body.visibility, 'ghost', 'omitir visibility no devuelve a visible');
 
     const hidden = await listDiscovery(b.token);
-    assert.equal(idsOf(hidden.body).includes(`${a.profileId}-b1`), false);
+    assert.deepEqual(idsOf(hidden.body), [], 'el heartbeat sacó a A del ghost');
 
     const back = await updatePresence(a.token, { demoZoneKey: ZONE, visibility: 'visible' });
     assert.equal(back.body.visibility, 'visible');
@@ -246,7 +210,7 @@ describe('bloqueo', () => {
       assert.equal(presence.status, 200, JSON.stringify(presence.body));
     }
     await extendPresence([a.sessionId, b.sessionId], 600);
-    await deletePingsOf(REGION, [a.profileId, b.profileId, ...botIdsOf(a.profileId), ...botIdsOf(b.profileId)]);
+    await deletePingsOf(REGION, [a.profileId, b.profileId]);
     await clearPrivacyOf(REGION, [a.profileId, b.profileId]);
 
     // La conversación que el bloqueo tiene que cerrar (sin borrarla).
@@ -260,7 +224,7 @@ describe('bloqueo', () => {
   });
 
   after(async () => {
-    await deletePingsOf(REGION, [a.profileId, b.profileId, ...botIdsOf(a.profileId), ...botIdsOf(b.profileId)]);
+    await deletePingsOf(REGION, [a.profileId, b.profileId]);
     await clearPrivacyOf(REGION, [a.profileId, b.profileId]);
     await deleteSessionsCreatedSince(snapshot);
   });
@@ -291,13 +255,9 @@ describe('bloqueo', () => {
 
   test('el par desaparece del discovery en las dos direcciones', async () => {
     const forB = await listDiscovery(b.token);
-    assert.equal(idsOf(forB.body).includes(a.profileId), false, 'A no está para B');
-    for (const botId of botIdsOf(a.profileId)) {
-      assert.equal(idsOf(forB.body).includes(botId), false, `el ${botId} de A tampoco`);
-    }
-
+    assert.deepEqual(idsOf(forB.body), [], 'A no está para B');
     const forA = await listDiscovery(a.token);
-    assert.equal(idsOf(forA.body).includes(b.profileId), false, 'B no está para A (efecto simétrico)');
+    assert.deepEqual(idsOf(forA.body), [], 'B no está para A (efecto simétrico)');
   });
 
   test('no hay ping en ninguna dirección: CHAT_BLOCKED', async () => {
@@ -320,22 +280,27 @@ describe('bloqueo', () => {
     assert.equal(send.body.code, 'CHAT_BLOCKED');
   });
 
-  test('bloquear un bot canoniza al dueño y desbloquear por bot también', async () => {
-    // El bot de B: la fila tiene que guardar al dueño, no al bot. El service no
-    // exige que el bot esté vivo para canonizar (el dueño es el que existe).
-    const botId = `${b.profileId}-b1`;
-    const blocked = await createBlock(a.token, { profileId: botId });
-    assert.equal(blocked.status, 201, JSON.stringify(blocked.body));
-    assert.equal(blocked.body.profileId, b.profileId, 'la fila guarda al dueño, no al bot');
+  test('un perfil fuera del catálogo no se bloquea y desbloquearlo es un no-op', async () => {
+    // `mx-p01-b1` era una identidad sintética: con la población fuera del
+    // esquema no hay fila que bloquear, ni canónica ni derivada.
+    const ghostId = 'mx-p01-b1';
+    const blocked = await createBlock(a.token, { profileId: ghostId });
+    assert.equal(blocked.status, 404, JSON.stringify(blocked.body));
+    assert.equal(blocked.body.code, 'PROFILE_NOT_FOUND');
 
-    const rows = await blockRowsOf(REGION, a.profileId);
-    assert.deepEqual(rows.map((row) => row.blocked_profile_id), [b.profileId]);
-
-    // Desbloquear por el id del bot revierte el del dueño.
-    assert.equal((await deleteBlock(a.token, botId)).status, 204);
+    // Borrar es idempotente y no exige que el perfil exista: 204.
+    assert.equal((await deleteBlock(a.token, ghostId)).status, 204);
     assert.deepEqual(await blockRowsOf(REGION, a.profileId), []);
 
-    // Y B sigue bloqueando a A: se limpia para el caso de unblock.
+    // Y no se canoniza a nadie: no existe un dueño detrás de ese id.
+    const bBlocks = await blockRowsOf(REGION, b.profileId);
+    assert.deepEqual(
+      bBlocks.map((row) => row.blocked_profile_id),
+      [a.profileId],
+      'el bloqueo de B dejó de apuntar a A',
+    );
+
+    // Se limpia el bloqueo de B para el caso de unblock.
     const unblock = await deleteBlock(b.token, a.profileId);
     assert.equal(unblock.status, 204);
     assert.equal((await deleteBlock(b.token, a.profileId)).status, 204, 'desbloquear dos veces es 204');
@@ -343,7 +308,7 @@ describe('bloqueo', () => {
 
   test('unblock revierte discovery, ping y chat', async () => {
     const forB = await listDiscovery(b.token);
-    assert.ok(idsOf(forB.body).includes(a.profileId), 'A reaparece para B');
+    assert.deepEqual(idsOf(forB.body), [a.profileId], 'A no reaparece para B');
 
     const ping = await createPing(a.token, { targetProfileId: b.profileId });
     assert.equal(ping.status, 201, JSON.stringify(ping.body));
@@ -412,7 +377,7 @@ describe('reportes', () => {
   test('reportar no cambia el descubrimiento del reportado', async () => {
     const forB = await listDiscovery(b.token);
     assert.equal(forB.status, 200, JSON.stringify(forB.body));
-    assert.ok(idsOf(forB.body).includes(a.profileId), 'B sigue viendo a A');
+    assert.deepEqual(idsOf(forB.body), [a.profileId], 'B dejó de ver a A');
   });
 
   test('errores del reporte: motivo fuera del enum, auto-reporte y perfil inexistente', async () => {
@@ -454,26 +419,12 @@ describe('notificaciones', () => {
       assert.equal(presence.status, 200, JSON.stringify(presence.body));
     }
     await extendPresence([a.sessionId, b.sessionId], 600);
-    await deletePingsOf(REGION, [a.profileId, b.profileId, ...botIdsOf(a.profileId)]);
+    await deletePingsOf(REGION, [a.profileId, b.profileId]);
     await clearPrivacyOf(REGION, [a.profileId, b.profileId]);
-
-    // Para el caso del bot: el ping a `<b>-b1` exige que el bot exista, y lo
-    // crea el ticker cuando B tiene presencia.
-    await waitFor(
-      () =>
-        withDb(async (client) => {
-          const { rows } = await client.query(
-            'SELECT count(*)::int AS count FROM bots WHERE region_key = $1 AND owner_profile_id = $2',
-            [REGION, b.profileId],
-          );
-          return rows[0].count === 2;
-        }),
-      { label: 'los bots de B', timeoutMs: 15_000 },
-    );
   });
 
   after(async () => {
-    await deletePingsOf(REGION, [a.profileId, b.profileId, ...botIdsOf(a.profileId), ...botIdsOf(b.profileId)]);
+    await deletePingsOf(REGION, [a.profileId, b.profileId]);
     await clearPrivacyOf(REGION, [a.profileId, b.profileId]);
     await deleteSessionsCreatedSince(snapshot);
   });
@@ -491,6 +442,7 @@ describe('notificaciones', () => {
     assert.equal(received.pingId, ping.body.id);
     assert.equal(received.matchId, null);
     assert.equal(received.peer.profileId, a.profileId);
+    assert.equal(received.peer.sourceType, 'human');
     assert.ok(received.peer.nickname);
 
     const accepted = await acceptPing(b.token, ping.body.id);
@@ -550,28 +502,6 @@ describe('notificaciones', () => {
     for (const item of list.notifications) assert.notEqual(item.readAt, null);
   });
 
-  test('la respuesta del bot también deja notificación para el humano', async () => {
-    const ping = await createPing(a.token, { targetProfileId: `${b.profileId}-b1` });
-    assert.equal(ping.status, 201, JSON.stringify(ping.body));
-    assert.equal(ping.body.status, 'accepted', 'el bot acepta solo');
-
-    const sent = await sendMessage(a.token, ping.body.matchId, {
-      clientMessageId: 'notif-bot',
-      body: 'hola bot',
-    });
-    assert.equal(sent.status, 201, JSON.stringify(sent.body));
-
-    const notification = await waitFor(
-      async () => {
-        const list = await readIds(a.token);
-        return list.notifications.find((item) => item.kind === 'message.created' && item.peer.sourceType === 'bot');
-      },
-      { label: 'la notificación de la respuesta del bot', timeoutMs: 10_000 },
-    );
-    assert.equal(notification.matchId, ping.body.matchId);
-    assert.equal(notification.peer.profileId, `${b.profileId}-b1`);
-  });
-
   test('un id ajeno se ignora y un body malformado es 422', async () => {
     const foreign = await markNotificationsRead(a.token, {
       notificationIds: ['00000000-0000-4000-8000-000000000000'],
@@ -581,113 +511,5 @@ describe('notificaciones', () => {
 
     const malformed = await markNotificationsRead(a.token, { notificationIds: ['nope'] });
     assert.equal(malformed.status, 422, JSON.stringify(malformed.body));
-  });
-});
-
-describe('cambio de zona: la conversación se cierra', () => {
-  let snapshot = [];
-  let a;
-  let b;
-  let matchId;
-  const botId = (profileId) => `${profileId}-b1`;
-
-  const open = async (slot) => {
-    const session = await openSession({ regionKey: REGION, demoSlot: slot });
-    assert.equal(session.status, 201, JSON.stringify(session.body));
-    return { ...session.body, sessionId: sessionIdOf(session.body.token) };
-  };
-
-  /** La zona con la que la conversación quedó atada, leída de la tabla. */
-  const recordedZone = async () =>
-    withDb(async (client) => {
-      const { rows } = await client.query('SELECT bot_zone_key FROM matches WHERE match_id = $1', [matchId]);
-      return rows[0]?.bot_zone_key;
-    });
-
-  /** La zona vigente del bot, leída de la tabla (no hay endpoint que la exponga). */
-  const botZone = async () =>
-    withDb(async (client) => {
-      const { rows } = await client.query(
-        'SELECT zone_key FROM bots WHERE region_key = $1 AND bot_profile_id = $2',
-        [REGION, botId(b.profileId)],
-      );
-      return rows[0]?.zone_key;
-    });
-
-  before(async () => {
-    await assertStackUp();
-    snapshot = await snapshotSessionIds();
-    a = await open(2);
-    b = await open(1);
-    for (const session of [a, b]) {
-      const presence = await updatePresence(session.token, { demoZoneKey: ZONE });
-      assert.equal(presence.status, 200, JSON.stringify(presence.body));
-    }
-    await extendPresence([a.sessionId, b.sessionId], 600);
-    await deletePingsOf(REGION, [a.profileId, b.profileId, ...botIdsOf(b.profileId)]);
-    await clearPrivacyOf(REGION, [a.profileId, b.profileId]);
-
-    await waitFor(
-      () =>
-        withDb(async (client) => {
-          const { rows } = await client.query(
-            'SELECT count(*)::int AS count FROM bots WHERE region_key = $1 AND owner_profile_id = $2',
-            [REGION, b.profileId],
-          );
-          return rows[0].count === 2;
-        }),
-      { label: 'los bots de B', timeoutMs: 15_000 },
-    );
-
-    const ping = await createPing(a.token, { targetProfileId: botId(b.profileId) });
-    assert.equal(ping.status, 201, JSON.stringify(ping.body));
-    matchId = ping.body.matchId;
-    assert.equal(await recordedZone(), ZONE, 'el match nace con la zona del bot');
-  });
-
-  after(async () => {
-    await deletePingsOf(REGION, [a.profileId, b.profileId, ...botIdsOf(b.profileId)]);
-    await clearPrivacyOf(REGION, [a.profileId, b.profileId]);
-    await deleteSessionsCreatedSince(snapshot);
-  });
-
-  test('el bot ya no está en la zona de la conversación: legible, MATCH_CLOSED al escribir', async () => {
-    assert.equal(await botZone(), ZONE, 'el bot vive en cdmx');
-
-    // La demo tiene **una** zona por región (`mx → cdmx`, `co → bogota`), así que
-    // no hay una segunda zona real a la que mudar al dueño; y mover `bots.zone_key`
-    // a mano lo deshace `reconcile()` en el tick siguiente (2 s), que es
-    // exactamente el mecanismo real: el bot se vuelve a sembrar en su zona. Para
-    // probar la regla de forma determinista se mueve el **otro** lado de la
-    // comparación: la zona con la que nació la conversación. La invariante es la
-    // misma (`matches.bot_zone_key` == `bots.zone_key`).
-    await withDb((client) =>
-      client.query('UPDATE matches SET bot_zone_key = $2 WHERE match_id = $1', [matchId, 'mx-otra-zona']),
-    );
-
-    const readable = await listMessages(a.token, matchId);
-    assert.equal(readable.status, 200, JSON.stringify(readable.body), 'la historia sigue legible');
-
-    const send = await sendMessage(a.token, matchId, { clientMessageId: 'zona-1', body: 'seguimos?' });
-    assert.equal(send.status, 409, JSON.stringify(send.body));
-    assert.equal(send.body.code, 'MATCH_CLOSED');
-
-    assert.equal((await listMessages(a.token, matchId)).status, 200);
-  });
-
-  test('volver a la zona del bot reabre la conversación', async () => {
-    await withDb(async (client) => {
-      await client.query(
-        `UPDATE matches m
-            SET bot_zone_key = b.zone_key
-           FROM bots b
-          WHERE m.match_id = $1
-            AND b.region_key = $2
-            AND b.bot_profile_id = $3`,
-        [matchId, REGION, botId(b.profileId)],
-      );
-    });
-    const send = await sendMessage(a.token, matchId, { clientMessageId: 'zona-2', body: 'volvimos' });
-    assert.equal(send.status, 201, JSON.stringify(send.body));
   });
 });

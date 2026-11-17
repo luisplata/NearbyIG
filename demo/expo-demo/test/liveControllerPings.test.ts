@@ -18,8 +18,8 @@ const ROW = (profileId: string, overrides: Record<string, unknown> = {}) => ({
   profileId,
   regionKey: 'mx',
   demoSlot: null,
-  sourceType: profileId.includes('-b') ? 'bot' : 'human',
-  nickname: profileId.includes('-b') ? 'Fran' : 'Nico',
+  sourceType: 'human',
+  nickname: profileId === 'mx-p03' ? 'Fran' : 'Nico',
   initials: 'NI',
   intention: 'friendship',
   gender: 'male',
@@ -73,7 +73,7 @@ function makePingServer() {
               initials: 'NI',
               intention: 'friendship',
               photoId: 'ph02',
-              sourceType: peerId.includes('-b') ? 'bot' : 'human',
+              sourceType: 'human',
             },
           };
         }),
@@ -96,12 +96,12 @@ function makePingServer() {
     'GET /api/demo/profiles': () => ({
       status: 200,
       body: JSON.stringify({
-        profiles: [ROW('mx-p02'), ROW('mx-p02-b1'), ROW(SESSION.profileId, { demoSlot: 4 })],
+        profiles: [ROW('mx-p02'), ROW('mx-p03'), ROW(SESSION.profileId, { demoSlot: 4 })],
       }),
     }),
     'GET /api/discovery': () => ({
       status: 200,
-      body: JSON.stringify({ results: [ROW('mx-p02'), ROW('mx-p02-b1', { distanceM: 900 })] }),
+      body: JSON.stringify({ results: [ROW('mx-p02'), ROW('mx-p03', { distanceM: 900 })] }),
     }),
     'GET /api/me': () => ({ status: 404, body: '{"code":"NOT_FOUND"}' }),
     'GET /api/events/poll': () => ({
@@ -121,15 +121,15 @@ function makePingServer() {
         };
       }
       seq += 1;
-      const isBot = target.includes('-b');
+      // v0.6: ningún ping se auto-acepta. El match nace con `accept`.
       const ping: Ping = {
         id: `ping-${nextId}`,
         fromProfileId: SESSION.profileId,
         toProfileId: target,
-        status: isBot ? 'accepted' : 'pending',
+        status: 'pending',
         createdAt: new Date(2026, 0, 1, 12, seq).toISOString(),
         expiresAt: '2026-12-31T00:00:00.000Z',
-        matchId: isBot ? `match-${nextId}` : null,
+        matchId: null,
       };
       nextId += 1;
       pings.push(ping);
@@ -246,19 +246,6 @@ describe('pings reales en el controller', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]!.ping.status).toBe('pending');
     expect(sent[0]!.peer.profileId).toBe('mx-p02');
-    await controller.stop();
-  });
-
-  it('ping a un bot vuelve accepted con matchId (acepta solo)', async () => {
-    const server = makePingServer();
-    const controller = makeController(server);
-    await controller.start();
-
-    const result = await controller.sendPing('mx-p02-b1');
-    expect(result.ok).toBe(true);
-    expect(result.status).toBe('accepted');
-    expect(result.matchId).toBe('match-1');
-    expect(controller.getState().pingError).toBeNull();
     await controller.stop();
   });
 

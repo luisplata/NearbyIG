@@ -21,7 +21,8 @@ export function profileById(
 
 /**
  * Perfiles visibles: sin bloqueados, dentro del radio, con los filtros activos
- * y ordenados por distancia ascendente (empatan por `id`).
+ * y ordenados por distancia ascendente (empatan por `id`). El catálogo live ya
+ * viene sin población sintética: acá no hay nada que recortar por origen.
  */
 export function visibleProfiles(state: DemoState): UiProfile[] {
   // Sin filtro explícito de intención se muestran los 10 perfiles del dataset
@@ -29,15 +30,8 @@ export function visibleProfiles(state: DemoState): UiProfile[] {
   // sólo cuando el usuario la elige (SET_SELF_INTENTION).
   const intentions = state.filters.intentions;
   const gender = state.filters.gender;
-  // El toggle de bots es del cliente: el server sigue devolviendo el catálogo
-  // completo y acá se recorta, así apagar bots no cambia lo que ve la otra
-  // sesión ni obliga a un query param nuevo.
-  const bots = state.includeBots ? null : new Set(state.botIds);
   const result: UiProfile[] = [];
   for (const profile of state.catalog) {
-    if (bots !== null && bots.has(profile.id)) {
-      continue;
-    }
     if (state.blocked.includes(profile.id)) {
       continue;
     }

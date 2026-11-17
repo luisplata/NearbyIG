@@ -25,8 +25,7 @@ reports:
       `POST /blocks`, que es una decisión distinta y con efecto inmediato. El
       reporte tampoco cambia el descubrimiento de quien reporta.
 
-      Un bot se canoniza a su dueño: el reporte nombra a la persona, igual que el
-      bloqueo. Reportarse a sí mismo es `422 VALIDATION_FAILED`.
+      Reportarse a sí mismo es `422 VALIDATION_FAILED`.
     tags:
       - reports
     requestBody:

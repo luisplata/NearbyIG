@@ -9,16 +9,18 @@
 EventType:
   type: string
   enum:
-    - profile.moved
     - profile.presence
     - ping.received
     - match.created
     - message.created
-    - typing.started
   description: |
-    Nombre del evento, cerrado a estos seis. El enum y los seis payloads entran
-    completos ahora aunque S2 sólo emita los dos primeros: S4/S5 agregan campos a
-    su payload, no tipos ni uniones nuevas, así que el cliente no cambia.
+    Nombre del evento, cerrado a estos cuatro. `profile.moved` y `typing.started`
+    salieron en v0.6: sus únicos productores eran el ticker de bots y la
+    respuesta automática, y el contrato no declara tipos que nadie puede emitir.
+    Ojo: son **cuatro** en el contrato y **dos** en el `EventType` del server
+    (`profile.presence`, `message.created`); `ping.received` y `match.created`
+    siguen declarados sin productor, igual que antes de v0.4. No "arregles" el
+    tipo de TS a cuatro: el tipo del server es la lista de lo que emite.
 
 EventEnvelope:
   type: object
@@ -56,42 +58,15 @@ EventEnvelope:
 
 EventPayload:
   description: |
-    Cuerpo por `type`. La unión cubre hoy los seis tipos del enum: los dos de S2
-    (`profile.moved`, `profile.presence`) y los cuatro de S4/S5, que se declaran
-    ahora para que el cliente no cambie de unión cuando S4 los emita. Ningún
-    payload lleva coordenadas: `profile.moved` usa `distanceM`/`bearingDeg` como el
-    resto del sistema.
+    Cuerpo por `type`. La unión cubre los cuatro tipos del enum. `ping.received`
+    y `match.created` se declaran aunque todavía no tengan productor, para que el
+    cliente tenga una sola unión. Ningún payload lleva coordenadas: la cercanía
+    viaja como `distanceM`/`bearingDeg` en discovery, no en un evento.
   oneOf:
-    - $ref: '#/ProfileMovedPayload'
     - $ref: '#/ProfilePresencePayload'
     - $ref: '#/PingReceivedPayload'
     - $ref: '#/MatchCreatedPayload'
     - $ref: '#/MessageCreatedPayload'
-    - $ref: '#/TypingStartedPayload'
-
-ProfileMovedPayload:
-  type: object
-  additionalProperties: false
-  required:
-    - profileId
-    - distanceM
-    - bearingDeg
-  description: El perfil se movió. Distancia y rumbo relativos a quien recibe.
-  properties:
-    profileId:
-      type: string
-      minLength: 1
-      description: Id del perfil dentro de la región (la región la da el `id`).
-    distanceM:
-      type: integer
-      minimum: 200
-      maximum: 5000
-      description: Distancia en metros, ya calculada por el server.
-    bearingDeg:
-      type: integer
-      minimum: 0
-      maximum: 359
-      description: Rumbo en grados desde el norte, sentido horario.
 
 ProfilePresencePayload:
   type: object
@@ -108,10 +83,9 @@ ProfilePresencePayload:
       type: boolean
       description: Nunca null.
 
-# Payloads de S4/S5. Se declaran en S0 —con el envelope y el enum— para que el
-# cliente tenga una sola unión desde el principio y S4 no renombre nada. El
-# contenido es el mínimo con el que la demo puede pintar el evento: S4 agrega
-# campos a su payload, que es un cambio de contrato revisable, no un tipo nuevo.
+# Payloads sin productor todavía. Se declaran con el envelope y el enum para que
+# el cliente tenga una sola unión desde el principio: cuando el server los emita,
+# suma campos a su payload —un cambio revisable—, no un tipo nuevo.
 
 PingReceivedPayload:
   type: object
@@ -176,22 +150,6 @@ MessageCreatedPayload:
       type: string
       minLength: 1
       description: Quién escribió; la sesión se reconoce por su propio `profileId`.
-
-TypingStartedPayload:
-  type: object
-  additionalProperties: false
-  required:
-    - matchId
-    - profileId
-  description: |
-    La otra parte está escribiendo. Efímero: no se persiste ni se replica.
-  properties:
-    matchId:
-      type: string
-      minLength: 1
-    profileId:
-      type: string
-      minLength: 1
 
 EventsPage:
   type: object

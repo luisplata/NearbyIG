@@ -16,10 +16,10 @@
 #   * Nada de `distanceM`/`bearingDeg`: la cercanía la resolvió `/discovery`
 #     antes del ping y no cambia lo que dice un mensaje.
 #
-# Lo que este archivo NO declara: `typing` como DTO de request. El evento
-# `typing.started` ya existe en `schemas/events.yaml` y en v0.4 lo emite el bot;
-# no hay operation de "estoy escribiendo" porque la demo no la necesita y una
-# operation sin consumer es superficie que nadie ejercita.
+# Lo que este archivo NO declara: `typing` como DTO de request. No hay operation
+# de "estoy escribiendo" porque la demo no la necesita y una operation sin
+# consumer es superficie que nadie ejercita. El evento `typing.started` salió del
+# contrato en v0.6 junto con su único productor.
 
 Message:
   type: object
@@ -57,9 +57,9 @@ Message:
       type: string
       minLength: 1
       description: |
-        Quién escribió: el `profileId` del humano o el del bot (`<owner>-b1`). La
-        sesión se reconoce por su propio `profileId`; los mensajes del otro lado
-        son los que cuentan para `unreadCount`.
+        Quién escribió: el `profileId` de la sesión autenticada. La sesión se
+        reconoce por su propio `profileId`; los mensajes del otro lado son los
+        que cuentan para `unreadCount`.
     clientMessageId:
       type: string
       minLength: 1
@@ -174,8 +174,8 @@ MatchListItem:
     tengan un solo lugar donde declararse.
 
     **`peer` es el otro lado, siempre.** El cliente no cruza el match contra
-    `/demo/profiles` (que no conoce a los bots) ni busca su propio perfil en una
-    lista: la fila ya trae a quién dibujar, igual que la bandeja de pings.
+    `/demo/profiles` ni busca su propio perfil en una lista: la fila ya trae a
+    quién dibujar, igual que la bandeja de pings.
 
     **`unreadCount` es del que mira.** Son los mensajes del otro lado posteriores
     a su última lectura de este match; los propios nunca cuentan, aunque el

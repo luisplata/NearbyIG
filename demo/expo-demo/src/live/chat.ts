@@ -20,7 +20,7 @@ import type { ChatCopyKey } from './chatCopy';
  * cliente ya tiene como burbuja optimista, y comparar por `body` + hora falla en
  * cuanto dos mensajes dicen lo mismo (que en un chat pasa todo el tiempo).
  *
- * **Lo que este archivo NO hace.** No decide si el mensaje es del bot: eso es
+ * **Lo que este archivo NO hace.** No decide quién es el otro: eso es
  * `peer.sourceType` en la bandeja y `senderProfileId` en la conversación, y la
  * pantalla lo usa sólo para el estilo. Nada de coordenadas, nada de distancias.
  */

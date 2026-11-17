@@ -179,11 +179,133 @@ describe('migraciones y seeds', () => {
     await withDb(async (client) => {
       await client.query('BEGIN');
       try {
-        assert.deepEqual(await shape(client), applied, 'la migración está aplicada en la base viva');
+        const live = await shape(client);
+        assert.deepEqual(
+          {
+            blocks: live.blocks,
+            reports: live.reports,
+            notifications: live.notifications,
+            visibility: live.visibility,
+          },
+          { blocks: true, reports: true, notifications: true, visibility: true },
+          'la migración está aplicada en la base viva',
+        );
+        // `bot_zone_key` no se asserta contra la base viva: una migración
+        // posterior (008) puede haberla borrado. Su ciclo se prueba en el par
+        // down/up de abajo, que es el delta completo de 007.
         await client.query(down);
         assert.deepEqual(await shape(client), reverted, 'el down se lleva las tablas y las columnas');
         await client.query(up);
         assert.deepEqual(await shape(client), applied, 'el up vuelve a dejar el delta completo');
+      } finally {
+        await client.query('ROLLBACK');
+      }
+    });
+  });
+
+  /**
+   * Rollback de 008 probado de verdad, pero **dentro de una transacción**: la
+   * suite comparte la base con los demás archivos, así que el `ROLLBACK` final
+   * devuelve el esquema y los datos al estado aplicado.
+   *
+   * El orden es el del runbook: `008` aplicada → su `down` deja el esquema
+   * post-007 vacío → `004_bots_anchor.down.sql` corre **sin lanzar** (era el bug:
+   * un `ALTER TABLE bots` sobre una tabla que 008 se llevó) → `008` vuelve a
+   * subir. Se ejecuta el SQL real de los archivos, no una paráfrasis.
+   */
+  test('008_drop_bots baja a post-007 y vuelve a subir sin perder el vocabulario', async () => {
+    const up = await readFile('sql/008_drop_bots.sql', 'utf8');
+    const down = await readFile('sql/008_drop_bots.down.sql', 'utf8');
+    const down004 = await readFile('sql/004_bots_anchor.down.sql', 'utf8');
+
+    const shape = (client) =>
+      client
+        .query(`
+          SELECT to_regclass('public.bots')             IS NOT NULL AS bots,
+                 to_regclass('public.bot_waypoints')    IS NOT NULL AS bot_waypoints,
+                 to_regclass('public.presence_anchors') IS NOT NULL AS presence_anchors,
+                 EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'matches'
+                            AND column_name = 'bot_zone_key')      AS bot_zone_key,
+                 EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'bots'
+                            AND column_name = 'anchor')            AS anchor,
+                 (SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                   WHERE conname = 'events_event_type_check')      AS events_check,
+                 (SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                   WHERE conname = 'profiles_source_type_check')   AS profiles_check,
+                 (SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                   WHERE conname = 'sessions_source_type_check')   AS sessions_check
+        `)
+        .then(({ rows }) => rows[0]);
+
+    /** `'bot'` como valor del CHECK, no como substring de `bot_waypoints`. */
+    const admits = (definition, value) => definition.includes(`'${value}'`);
+
+    const assertPost008 = (row, when) => {
+      assert.deepEqual(
+        {
+          bots: row.bots,
+          bot_waypoints: row.bot_waypoints,
+          presence_anchors: row.presence_anchors,
+          bot_zone_key: row.bot_zone_key,
+          anchor: row.anchor,
+        },
+        { bots: false, bot_waypoints: false, presence_anchors: false, bot_zone_key: false, anchor: false },
+        when,
+      );
+      for (const [name, definition] of [
+        ['profiles', row.profiles_check],
+        ['sessions', row.sessions_check],
+      ]) {
+        assert.equal(admits(definition, 'bot'), false, `${when}: ${name} todavía admite 'bot'`);
+      }
+      assert.equal(admits(row.events_check, 'profile.moved'), false, when);
+      assert.equal(admits(row.events_check, 'typing.started'), false, when);
+      assert.equal(admits(row.events_check, 'profile.presence'), true, when);
+      assert.equal(admits(row.events_check, 'message.created'), true, when);
+      assert.equal(admits(row.profiles_check, 'human'), true, when);
+      assert.equal(admits(row.profiles_check, 'guest'), true, when);
+    };
+
+    const assertPost007 = (row, when) => {
+      assert.deepEqual(
+        {
+          bots: row.bots,
+          bot_waypoints: row.bot_waypoints,
+          presence_anchors: row.presence_anchors,
+          bot_zone_key: row.bot_zone_key,
+          anchor: row.anchor,
+        },
+        { bots: true, bot_waypoints: true, presence_anchors: true, bot_zone_key: true, anchor: true },
+        when,
+      );
+      for (const [name, definition] of [
+        ['profiles', row.profiles_check],
+        ['sessions', row.sessions_check],
+      ]) {
+        assert.equal(admits(definition, 'bot'), true, `${when}: ${name} no restauró 'bot'`);
+      }
+      assert.equal(admits(row.events_check, 'profile.moved'), true, when);
+      assert.equal(admits(row.events_check, 'typing.started'), true, when);
+    };
+
+    await withDb(async (client) => {
+      await client.query('BEGIN');
+      try {
+        assertPost008(await shape(client), 'la 008 está aplicada en la base viva');
+
+        await client.query(down);
+        assertPost007(await shape(client), 'el down recrea la estructura post-007 vacía');
+
+        // El bug que este gate previene: `ALTER TABLE bots` sin la tabla.
+        await client.query(down004);
+        const afterBotsDown = await shape(client);
+        assert.equal(afterBotsDown.presence_anchors, false, '004.down se lleva la vista');
+        assert.equal(afterBotsDown.anchor, false, '004.down se lleva la columna del ancla');
+
+        await client.query(up);
+        assertPost008(await shape(client), 'el up vuelve a dejar el esquema post-008');
       } finally {
         await client.query('ROLLBACK');
       }

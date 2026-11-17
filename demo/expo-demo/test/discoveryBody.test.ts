@@ -22,18 +22,25 @@ describe('vista → cuerpo de descubrimiento', () => {
 
 describe('cuerpo con 0 perfiles', () => {
   it('el radar se sigue viendo aunque no haya nadie', () => {
-    expect(discoveryLayout('radar', 0)).toBe('radarMap');
-    expect(discoveryLayout('map', 0)).toBe('radarMap');
+    expect(discoveryLayout('radar', 0, false)).toBe('radarMap');
+    expect(discoveryLayout('map', 0, true)).toBe('radarMap');
     // El orden importa: el estado vacío no puede ganarle al radar.
-    expect(discoveryLayout('radar', 0)).not.toBe('emptyList');
+    expect(discoveryLayout('radar', 0, true)).not.toBe('emptyList');
   });
 
-  it('la lista sin perfiles muestra el estado vacío', () => {
-    expect(discoveryLayout('list', 0)).toBe('emptyList');
+  it('la lista sin perfiles y con filtros muestra el vacío de filtros', () => {
+    expect(discoveryLayout('list', 0, true)).toBe('emptyList');
+  });
+
+  it('la lista sin perfiles y sin filtros muestra el vacío de densidad', () => {
+    // Nadie en el radio no es un filtro mal puesto: no hay CTA que ofrecer.
+    expect(discoveryLayout('list', 0, false)).toBe('emptyDensity');
+    expect(discoveryLayout('list', 0, false)).not.toBe('emptyList');
   });
 
   it('con perfiles, la lista los muestra y el radar no cambia', () => {
-    expect(discoveryLayout('list', 3)).toBe('list');
-    expect(discoveryLayout('radar', 3)).toBe('radarMap');
+    expect(discoveryLayout('list', 3, false)).toBe('list');
+    expect(discoveryLayout('list', 3, true)).toBe('list');
+    expect(discoveryLayout('radar', 3, true)).toBe('radarMap');
   });
 });

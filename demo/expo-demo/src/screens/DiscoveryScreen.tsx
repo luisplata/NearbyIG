@@ -6,17 +6,14 @@ import { unreadMatchCount } from '../live/chat';
 import { liveText } from '../live/liveCopy';
 import { useLive } from '../live/LiveProvider';
 import { matchForPeer } from '../live/matches';
-import { prefsCopy } from '../live/prefsCopy';
 import { mapCenterFor, regionForZone } from '../live/regions';
 import { useDemo } from '../state/DemoProvider';
-import { usePreferences } from '../state/PreferencesProvider';
 import { formatRadius } from '../state/format';
 import { pingsBadgeCount, visibleProfiles } from '../state/selectors';
 import type { UiProfile } from '../state/types';
 import { colors, fontSize, space, text } from '../theme/theme';
 
 import { BottomNav } from '../components/BottomNav';
-import { Chip } from '../components/Chip';
 import { EmptyState } from '../components/EmptyState';
 import { IconButton } from '../components/IconButton';
 import { ProfileList } from '../components/ProfileList';
@@ -26,6 +23,7 @@ import { RadiusControl } from '../components/RadiusControl';
 import type { NavItem } from '../navigation/navItems';
 
 import { discoveryLayout } from './discoveryBody';
+import { discoveryText } from './discoveryCopy';
 
 /**
  * Pantalla base: descubrimiento en lista o en la composición radar-sobre-mapa,
@@ -35,7 +33,6 @@ import { discoveryLayout } from './discoveryBody';
 export function DiscoveryScreen() {
   const { state, dispatch, store } = useDemo();
   const live = useLive();
-  const prefs = usePreferences();
   const [refreshing, setRefreshing] = useState(false);
   const [listAtTop, setListAtTop] = useState(true);
   const profiles = useMemo(() => visibleProfiles(state), [state]);
@@ -60,8 +57,8 @@ export function DiscoveryScreen() {
 
   /**
    * Bloqueo rápido desde la tarjeta. En dataset es la action del guion; en live
-   * el server bloquea (y canoniza bots al dueño) y la próxima foto de discovery
-   * saca la fila. El toast es el mismo host para los dos modos.
+   * el server bloquea y la próxima foto de discovery saca la fila. El toast es
+   * el mismo host para los dos modos.
    */
   const onBlock = (profile: UiProfile): void => {
     if (!liveMode) {
@@ -113,7 +110,7 @@ export function DiscoveryScreen() {
     dispatch({ type: 'SET_VIEW', view: item.view });
   };
 
-  const body = discoveryLayout(state.view, profiles.length);
+  const body = discoveryLayout(state.view, profiles.length, filtered);
 
   /**
    * El gesto y el botón del header comparten este camino: un solo "actualizar".
@@ -172,14 +169,6 @@ export function DiscoveryScreen() {
         {filtered ? (
           <Text style={[text.small, { color: colors.accent }]}>{fmt('discovery.filtersApplied')}</Text>
         ) : null}
-        {/* Control visible del toggle de bots: un toque, sin abrir filtros. */}
-        {prefs.botCount === 0 ? null : (
-          <Chip
-            label={prefs.includeBots ? prefsCopy.botsOn : prefsCopy.botsOff}
-            selected={prefs.includeBots}
-            onPress={prefs.toggleBots}
-          />
-        )}
       </View>
 
       <View style={styles.radius}>
@@ -212,6 +201,8 @@ export function DiscoveryScreen() {
               actionLabel={fmt('empty.filtersCta')}
               onAction={() => dispatch({ type: 'CLEAR_FILTERS' })}
             />
+          ) : body === 'emptyDensity' ? (
+            <EmptyState message={discoveryText('emptyDensity')} />
           ) : (
             <>
               <Text style={[text.small, styles.listHeading]}>{fmt('discovery.listHeading')}</Text>
@@ -219,7 +210,6 @@ export function DiscoveryScreen() {
                 state={state}
                 profiles={profiles}
                 onOpen={onOpen}
-                onClearFilters={() => dispatch({ type: 'CLEAR_FILTERS' })}
                 onBlock={onBlock}
                 onReport={onReport}
                 chatFor={chatFor}

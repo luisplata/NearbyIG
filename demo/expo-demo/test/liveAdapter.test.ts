@@ -59,16 +59,16 @@ describe('adapter de descubrimiento', () => {
   });
 
   it('descarta la identidad de slot: la tarjeta y el radar no la dibujan', () => {
-    const profile = toUiProfile(row({ demoSlot: 7, inUse: true, sourceType: 'bot' }))!;
+    const profile = toUiProfile(row({ demoSlot: 7, inUse: true, sourceType: 'guest' }))!;
     expect(profile).not.toHaveProperty('demoSlot');
     expect(profile).not.toHaveProperty('inUse');
     expect(profile).not.toHaveProperty('sourceType');
     expect(profile).not.toHaveProperty('regionKey');
   });
 
-  it('un perfil bot entra como cualquier perfil', () => {
-    const profile = toUiProfile(row({ profileId: 'mx-p01-b2', sourceType: 'bot', distanceM: 1060 }))!;
-    expect(profile.id).toBe('mx-p01-b2');
+  it('un perfil invitado entra como cualquier perfil', () => {
+    const profile = toUiProfile(row({ profileId: 'mx-p02', sourceType: 'guest', distanceM: 1060 }))!;
+    expect(profile.id).toBe('mx-p02');
     expect(profile.distanceM).toBe(1060);
   });
 

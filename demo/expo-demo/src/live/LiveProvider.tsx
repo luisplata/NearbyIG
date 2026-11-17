@@ -196,8 +196,8 @@ export function LiveProvider({
       requestPoint: requestBrowserPoint,
       // El usuario puede copiar estos logs cuando algo no cuadra. Sin coordenadas.
       log: (message) => console.info(message),
-      onCatalog: (profiles, source, botIds) => {
-        store.setCatalog(profiles === null ? fixtures.profiles : profiles, source, botIds);
+      onCatalog: (profiles, source) => {
+        store.setCatalog(profiles === null ? fixtures.profiles : profiles, source);
       },
       // Un ping nuevo usa el mismo host de toasts del guion: una sola pila de
       // avisos y el mismo timer de 4 s.

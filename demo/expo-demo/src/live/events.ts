@@ -10,11 +10,11 @@ import { seqOf } from './types';
  * para la página de polling, así que los dos transportes comparten esta función
  * y no puede haber dos reglas que se desincronicen.
  *
- * **Qué toca.** Sólo `profile.moved` (medidas) y `profile.presence` (online). Los
- * otros cuatro tipos son de S4/S5: se aceptan y se descartan para no romper la
- * unión cuando el backend empiece a emitirlos.
+ * **Qué toca.** Sólo `profile.presence` (online). Los otros tres tipos son de
+ * chat y avisos: se aceptan y se descartan para no romper la unión cuando el
+ * backend los emita.
  *
- * **Qué no inventa.** Un `profile.moved` de un perfil que no está en la foto
+ * **Qué no inventa.** Un `profile.presence` de un perfil que no está en la foto
  * (entró a la región, o la foto es vieja) no crea una fila: la fila necesita
  * nombre, foto y claves de copy que el evento no trae. Se marca
  * `unknownProfile` y el controller pide una foto nueva.
@@ -56,22 +56,6 @@ export function applyEvents(
       continue;
     }
 
-    if (event.type === 'profile.moved') {
-      const row = byId.get(profileId);
-      const distanceM = event.payload['distanceM'];
-      const bearingDeg = event.payload['bearingDeg'];
-      if (row === undefined) {
-        unknownProfile = true;
-        continue;
-      }
-      if (typeof distanceM !== 'number' || typeof bearingDeg !== 'number') {
-        continue;
-      }
-      byId.set(profileId, { ...row, distanceM, bearingDeg });
-      changed = true;
-      continue;
-    }
-
     if (event.type === 'profile.presence') {
       const row = byId.get(profileId);
       const online = event.payload['online'];
@@ -88,7 +72,8 @@ export function applyEvents(
   }
 
   if (!changed) {
-    return { rows: rows as LiveProfileRow[], lastSeq: highest, changed: false, unknownProfile };
+    return {
+    rows: rows as LiveProfileRow[], lastSeq: highest, changed: false, unknownProfile };
   }
 
   // Se preserva el orden de la foto (ya viene por distancia ascendente); parchear

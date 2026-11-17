@@ -8,20 +8,12 @@ import { PG_POOL } from '../db/database.module';
 import type { PingPeer } from '../pings/pings.types';
 import type { Block, BlockList } from './blocks.types';
 
-/** Un `profileId` de bot: `<owner>-b1` / `<owner>-b2`. */
-const BOT_PROFILE_ID = /-b[12]$/;
-
 /**
  * Tope de bloqueos por minuto. No protege de un abuso grave (bloquear es
  * idempotente y por perfil), pero corta el loop que inserta filas sin fin: un
  * reset limpia decenas, no millones.
  */
 const BLOCK_RATE_PER_MINUTE = 30;
-
-/** El humano detrás de un `profileId`: el mismo si no es bot, el dueño si lo es. */
-function canonicalProfileId(profileId: string): string {
-  return profileId.replace(BOT_PROFILE_ID, '');
-}
 
 /** `profileId` del body: obligatorio, con forma de id y sin campos de más. */
 function parseBlockBody(body: unknown): string {
@@ -53,9 +45,9 @@ interface BlockListRow extends BlockRow {
  * direcciones. Guardar la dirección es lo que permite que `GET /blocks` liste
  * "lo que yo bloqueé" sin revelar "quién me bloqueó".
  *
- * **Un bot se canoniza a su dueño.** Los bots no tienen identidad propia: son
- * una proyección de la persona. Bloquear `mx-p03-b1` guarda `mx-p03`; bloquear
- * al dueño esconde los dos bots por la misma vía (`blocks` no guarda bots).
+ * **Un id fuera del catálogo es 404.** El bloqueo guarda el perfil que el
+ * cliente nombró, sin canjearlo por otro: si no tiene fila en `profiles`, no
+ * existe y no hay nada que bloquear.
  *
  * **Idempotente.** `POST` sobre un par ya bloqueado devuelve la fila original
  * (`ON CONFLICT DO NOTHING` + `SELECT`), y `DELETE` sobre un par sin bloqueo
@@ -90,9 +82,9 @@ export class BlocksService {
               p.photo_id        AS peer_photo_id,
               p.source_type     AS peer_source_type
          FROM blocks b
-         -- Un bloqueo apunta siempre a un humano del catálogo (el server
-         -- canoniza bots antes de insertar), así que el JOIN es directo. Un
-         -- perfil que ya no está no se dibuja, igual que en la bandeja de pings.
+         -- El bloqueo apunta a un perfil del catálogo, así que el JOIN es
+         -- directo. Un perfil que ya no está no se dibuja, igual que en la
+         -- bandeja de pings.
          JOIN profiles p
            ON p.region_key = b.region_key
           AND p.profile_id = b.blocked_profile_id
@@ -127,7 +119,7 @@ export class BlocksService {
       { capacity: BLOCK_RATE_PER_MINUTE, refillPerSecond: BLOCK_RATE_PER_MINUTE / 60 },
       `Superaste el tope de ${BLOCK_RATE_PER_MINUTE} bloqueos por minuto.`,
     );
-    const target = canonicalProfileId(requested);
+    const target = requested;
     if (target === session.profileId) {
       throw validationFailed('No podés bloquearte a vos mismo.');
     }
@@ -174,7 +166,7 @@ export class BlocksService {
     this.assertHasProfile(session);
     // La forma se valida igual que en el body: un NUL en el path no puede
     // llegar a Postgres (500) ni un id de 5 KB pasar por "no existía" (204).
-    const target = canonicalProfileId(parseProfileId(rawProfileId, 'profileId del path'));
+    const target = parseProfileId(rawProfileId, 'profileId del path');
     if (target === session.profileId) {
       throw validationFailed('No podés desbloquearte a vos mismo: nunca estuviste bloqueado.');
     }
@@ -199,7 +191,7 @@ export class BlocksService {
     }
   }
 
-  /** `404 PROFILE_NOT_FOUND` si el humano canonizado no está en la región. */
+  /** `404 PROFILE_NOT_FOUND` si el perfil no está en la región. */
   private async assertProfileExists(regionKey: string, profileId: string): Promise<void> {
     const { rowCount } = await this.pool.query(
       `SELECT 1 FROM profiles

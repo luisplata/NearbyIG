@@ -186,7 +186,7 @@ function readBool(record: Record<string, unknown>, field: string): boolean {
   return record[field] === true;
 }
 
-const SOURCE_TYPES: readonly SourceType[] = ['human', 'bot', 'guest'];
+const SOURCE_TYPES: readonly SourceType[] = ['human', 'guest'];
 
 function readSession(payload: unknown): LiveSession {
   const record = (payload ?? {}) as Record<string, unknown>;

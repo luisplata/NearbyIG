@@ -12,7 +12,7 @@
  *
  * `visible` es el default histórico: aparecés en el descubrimiento y en el
  * stream de los demás. `ghost` es "online pero invisible": la sesión sigue viva
- * —y viendo— pero ni el humano ni sus bots aparecen para nadie más. No es lo
+ * —y viendo— pero no aparece para nadie más. No es lo
  * mismo que `DELETE /presence`, que apaga la presencia para todos, incluido uno
  * mismo.
  */

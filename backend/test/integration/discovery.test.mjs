@@ -4,44 +4,42 @@ import {
   assertStackUp,
   clearPresence,
   deleteSessionsCreatedSince,
+  extendPresence,
   listDiscovery,
-  listProfiles,
   logout,
   openSession,
   PROFILE_FIELDS,
   sessionIdOf,
   snapshotSessionIds,
   updatePresence,
-  waitFor,
 } from '../helpers.mjs';
 
 /**
- * `GET /discovery` — Sprint 3, S3-A.
+ * `GET /discovery` con densidad real — recalibrado en `remove-bots`.
  *
  * Lo que fija este archivo:
  *
- *  - **dos humanos en la misma región ven 5 perfiles**: 1 humano ajeno + 2 bots
- *    propios + 2 bots del otro. El negocio del plan (§4, §5) sólo cierra si el
- *    observador ve sus propios bots; el perfil propio sigue excluido;
- *  - **los bots no repiten la identidad del dueño**: cada bot presta nombre,
- *    iniciales, foto, estado, bio, intención, género y verificación de otro
- *    perfil del catálogo de la región, elegido de forma determinista. El
- *    `profileId` y el slot siguen siendo los del dueño, y la cara no cambia
- *    entre dos lecturas seguidas;
+ *  - **dos humanos vivos en la misma región se ven mutuamente**: cada uno ve
+ *    exactamente una fila, la del otro. El propio perfil sigue excluido;
+ *  - **un humano solo ve `results: []`**: sin bots de relleno, la densidad es la
+ *    que hay, y el vacío es una respuesta válida (el caso 0 ↔ 200 ya tiene su
+ *    propio archivo en `discovery-density.test.mjs`, acá se mide el salto de 1
+ *    a 2 personas);
  *  - `distanceM`/`bearingDeg` se miden **desde el observador** (no desde el ancla
  *    de la zona) y salen redondeados, enteros y dentro del rango del contrato;
  *  - filtros: radio, intención, género, verificado y online, uno por uno y
  *    combinados, más los 422 de validación;
- *  - exclusiones: ghost (sin presencia viva no se ve y no ve), bloqueados (sin
- *    tabla hasta S5) y otra región;
- *  - cap de 6 bots por observador con los propios adentro y el corte
- *    determinista; y el `maxItems: 10` de `DiscoveryResult` como tope de página;
+ *  - exclusiones: ghost (sin presencia viva no se ve y no ve), otra región y el
+ *    propio perfil;
+ *  - densidad completa de una región: 5 humanos vivos ⇒ cada uno ve 4 filas.
+ *    Con 10 slots por región el tope de página (`maxItems: 10`) no es alcanzable
+ *    por humanos, así que lo que se fija es la paridad N−1, no un corte;
  *  - ninguna coordenada en la respuesta.
  *
  * Geometría de los escenarios: puntos reales dentro del polígono `cdmx`
  * (`contract/catalog/zones.json`), no `demoZoneKey`. Con zona demo los dos
- * humanos caen en el ancla y la distancia sería 0 para todos: el test de orden y
- * el de "frame del observador" necesitan puntos distintos.
+ * humanos caen en el ancla y la distancia sería 0: el test de orden y el de
+ * "frame del observador" necesitan puntos distintos.
  */
 
 /** Ancla de `cdmx` (`ST_PointOnSurface`) y dos puntos dentro del polígono. */
@@ -73,20 +71,10 @@ async function renew(entries) {
   }
 }
 
-/** Espera a que el ticker siembre los bots: hasta entonces la página es corta. */
-async function waitForRows(token, expected, filters = {}) {
-  return waitFor(
-    async () => {
-      const page = await rows(token, filters);
-      return page.length === expected ? page : null;
-    },
-    { label: `${expected} perfiles en discovery` },
-  );
-}
-
+/** Cursor de eventos propio del escenario, para no mirar el log compartido. */
 const ids = (page) => page.map((row) => row.profileId);
 
-describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
+describe('discovery: dos humanos, medidas, filtros, región y ghost', () => {
   let snapshot = [];
   let observer;
   let neighbour;
@@ -102,6 +90,9 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
     neighbour = { ...neighbourSession.body, sessionId: sessionIdOf(neighbourSession.body.token) };
     assert.equal((await updatePresence(observer.token, at(ANCHOR))).status, 200);
     assert.equal((await updatePresence(neighbour.token, at(NEAR))).status, 200);
+    // El TTL del contrato es de 12 s: se estira para que la suite no dependa de
+    // la duración de sus propios tests (la semántica de lectura no cambia).
+    await extendPresence([observer.sessionId, neighbour.sessionId], 600);
   });
 
   /** El escenario base: el observador en el ancla y el vecino en `NEAR`. */
@@ -113,39 +104,23 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
     await deleteSessionsCreatedSince(snapshot);
   });
 
-  test('dos humanos en la misma región ven 5 perfiles: 1 humano + 4 bots', async () => {
-    await renewScene();
-    const page = await waitForRows(observer.token, 5);
+  test('dos humanos en la misma región: cada uno ve una fila, la del otro', async () => {
+    const page = await rows(observer.token);
+    assert.equal(page.length, 1, `se esperaba una sola contraparte: ${ids(page).join(' ')}`);
 
-    const humans = page.filter((row) => row.sourceType === 'human');
-    const bots = page.filter((row) => row.sourceType === 'bot');
-    assert.equal(humans.length, 1, `un solo humano ajeno: ${ids(page).join(' ')}`);
-    assert.equal(bots.length, 4, `cuatro bots (2 propios + 2 ajenos): ${ids(page).join(' ')}`);
-
-    // El otro humano sí, el propio no.
-    assert.equal(humans[0].profileId, neighbour.profileId);
+    const [other] = page;
+    assert.equal(other.profileId, neighbour.profileId, 'el único humano visible no es el vecino');
+    assert.equal(other.sourceType, 'human');
+    assert.equal(other.regionKey, 'mx');
     assert.ok(!ids(page).includes(observer.profileId), 'el observador aparece en su propio descubrimiento');
 
-    // Sus 2 bots sí: es lo que hace que "2 humanos ⇒ 5" cierre.
-    const ownBots = [`${observer.profileId}-b1`, `${observer.profileId}-b2`];
-    for (const botId of ownBots) {
-      assert.ok(ids(page).includes(botId), `falta el bot propio ${botId}`);
-    }
-    assert.deepEqual(
-      bots.map((row) => row.profileId).filter((id) => id.startsWith(neighbour.profileId)).sort(),
-      [`${neighbour.profileId}-b1`, `${neighbour.profileId}-b2`],
-    );
-
     // La fila es `ProfileSummary`: 17 campos, ni uno más ni uno menos.
-    for (const row of page) {
-      assert.deepEqual(Object.keys(row).sort(), PROFILE_FIELDS, `${row.profileId}: campos de ProfileSummary`);
-      assert.equal(row.regionKey, 'mx');
-      assert.equal(row.online, true, 'lo visible está online por construcción');
-      assert.ok(row.demoSlot !== null, 'un humano o un bot siempre ocupa slot');
-      assert.equal(row.inUse, true, 'la fila existe porque hay una sesión viva en ese slot');
-      assert.ok(Number.isInteger(row.distanceM) && row.distanceM >= 200 && row.distanceM <= 5000);
-      assert.ok(Number.isInteger(row.bearingDeg) && row.bearingDeg >= 0 && row.bearingDeg <= 359);
-    }
+    assert.deepEqual(Object.keys(other).sort(), PROFILE_FIELDS, 'campos de ProfileSummary');
+    assert.equal(other.online, true, 'lo visible está online por construcción');
+    assert.ok(other.demoSlot !== null, 'un humano visible ocupa slot');
+    assert.equal(other.inUse, true, 'la fila existe porque hay una sesión viva en ese slot');
+    assert.ok(Number.isInteger(other.distanceM) && other.distanceM >= 200 && other.distanceM <= 5000);
+    assert.ok(Number.isInteger(other.bearingDeg) && other.bearingDeg >= 0 && other.bearingDeg <= 359);
 
     // Ni una coordenada en la respuesta.
     assert.doesNotMatch(
@@ -154,81 +129,22 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
       'la respuesta lleva geometría',
     );
 
-    // Orden ascendente por distancia, desempatado por `profileId`.
-    const sorted = [...page].sort(
-      (left, right) => left.distanceM - right.distanceM || left.profileId.localeCompare(right.profileId),
-    );
-    assert.deepEqual(ids(page), ids(sorted), 'la página no está ordenada por distancia');
-
-    // El otro humano ve lo mismo desde su lado: 1 + 2 propios + 2 ajenos.
-    await renewScene();
-    const mirror = await waitForRows(neighbour.token, 5);
-    assert.equal(mirror.filter((row) => row.sourceType === 'human').length, 1);
-    assert.ok(ids(mirror).includes(observer.profileId));
-    assert.ok(!ids(mirror).includes(neighbour.profileId));
-  });
-
-  test('los bots prestan identidad: ni la del dueño ni la del gemelo, y es estable', async () => {
-    await renewScene();
-    const page = await waitForRows(observer.token, 5);
-    // El catálogo es la única fuente de identidad: el dueño del observador no
-    // está en su propia página, así que su fila se busca acá.
-    const catalog = (await listProfiles(observer.token, 'mx')).body.profiles;
-    const catalogById = Object.fromEntries(catalog.map((row) => [row.profileId, row]));
-
-    for (const owner of [observer, neighbour]) {
-      const botIds = [`${owner.profileId}-b1`, `${owner.profileId}-b2`];
-      const [first, second] = botIds.map((botId) => page.find((row) => row.profileId === botId));
-      assert.ok(first && second, `faltan los bots de ${owner.profileId}`);
-      const human = catalogById[owner.profileId];
-      assert.ok(human, `el catálogo no tiene al dueño ${owner.profileId}`);
-
-      // El bug que esto corrige: el radar mostraba a la misma persona tres veces.
-      for (const bot of [first, second]) {
-        assert.notEqual(bot.nickname, human.nickname, `${bot.profileId} repite el nombre de su dueño`);
-        assert.notEqual(bot.photoId, human.photoId, `${bot.profileId} repite la foto de su dueño`);
-      }
-      // Y los dos bots del mismo dueño tampoco son el mismo perfil.
-      assert.notEqual(first.nickname, second.nickname, `${owner.profileId}: los dos bots comparten nombre`);
-      assert.notEqual(first.photoId, second.photoId, `${owner.profileId}: los dos bots comparten foto`);
-
-      // La identidad prestada es la de un perfil real del catálogo de la región,
-      // y viaja entera: nombre, iniciales, foto, estado, bio, intención, género y
-      // verificación del donante, no una mezcla con la fila del dueño.
-      for (const bot of [first, second]) {
-        const donor = catalog.find((row) => row.nickname === bot.nickname && row.photoId === bot.photoId);
-        assert.ok(donor, `${bot.profileId}: "${bot.nickname}"/${bot.photoId} no está en el catálogo`);
-        for (const field of ['initials', 'statusKey', 'bioKey', 'instagramHandle', 'intention', 'gender', 'verified']) {
-          assert.equal(bot[field], donor[field], `${bot.profileId}: ${field} no es el del donante`);
-        }
-      }
-
-      // Lo que sigue siendo del dueño: la identidad estable y el slot.
-      for (const bot of [first, second]) {
-        assert.equal(bot.demoSlot, human.demoSlot, `${bot.profileId}: el slot dejó de ser el del dueño`);
-        assert.equal(bot.sourceType, 'bot');
-      }
-    }
-
-    // Determinismo: dos lecturas seguidas del mismo instante, misma cara.
-    const again = await rows(observer.token);
-    for (const bot of page.filter((row) => row.sourceType === 'bot')) {
-      const mirror = again.find((row) => row.profileId === bot.profileId);
-      assert.equal(mirror.nickname, bot.nickname, `${bot.profileId} cambió de nombre entre lecturas`);
-      assert.equal(mirror.photoId, bot.photoId, `${bot.profileId} cambió de foto entre lecturas`);
-    }
+    // El otro humano ve exactamente lo simétrico.
+    const mirror = await rows(neighbour.token);
+    assert.equal(mirror.length, 1, `el vecino ve ${mirror.length} filas`);
+    assert.equal(mirror[0].profileId, observer.profileId, 'el vecino no ve al observador');
+    assert.ok(!ids(mirror).includes(neighbour.profileId), 'el vecino se ve a sí mismo');
   });
 
   test('distanceM/bearingDeg son relativos al observador, no al ancla de la zona', async () => {
     await renewScene();
-    const page = await waitForRows(observer.token, 5);
+    const page = await rows(observer.token);
     const other = page.find((row) => row.profileId === neighbour.profileId);
     assert.ok(other, 'el otro humano no está en la página');
 
     // ANCHOR→NEAR son ~945 m al sudeste. Contra el ancla daría 0 (los dos
-    // humanos están en la zona demo del mismo polígono), que es exactamente la
-    // deuda que S3-B dejó abierta: el número tiene que medirse desde el
-    // observador.
+    // humanos están en el mismo polígono), que es exactamente la deuda que S3-B
+    // dejó abierta: el número tiene que medirse desde el observador.
     assert.ok(
       other.distanceM > 900 && other.distanceM < 1_000,
       `distanceM=${other.distanceM}: no se midió desde el observador`,
@@ -240,7 +156,7 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
 
     // Y es simétrico: el vecino mide el mismo par de puntos desde su lado.
     await renewScene();
-    const mirror = await waitForRows(neighbour.token, 5);
+    const mirror = await rows(neighbour.token);
     const back = mirror.find((row) => row.profileId === observer.profileId);
     assert.ok(back);
     assert.ok(Math.abs(back.distanceM - other.distanceM) <= 1, 'ida y vuelta no miden lo mismo');
@@ -250,30 +166,17 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
     await renewScene();
     // El vecino está a 945 m del observador: un radio de 900 lo deja afuera y
     // uno de 1000 lo incluye, así que el filtro es la distancia medida.
-    //
-    // Desde que los bots orbitan a su propio dueño (y no al ancla de la zona),
-    // los bots del vecino pueden caer cerca del observador: el borde del radio
-    // se fija sobre un sujeto con distancia conocida, no sobre "no hay bots".
     const tight = await rows(observer.token, { radiusM: 900 });
-    assert.ok(!ids(tight).includes(neighbour.profileId), 'radiusM=900 no filtró al vecino de 945 m');
+    assert.deepEqual(tight, [], 'radiusM=900 no filtró al vecino de 945 m');
 
-    const page = await waitFor(
-      async () => {
-        const now = await rows(observer.token, { radiusM: 1000 });
-        const other = now.find((row) => row.profileId === neighbour.profileId);
-        return other === undefined ? null : now;
-      },
-      { label: 'el vecino de 945 m dentro del radio de 1000 m' },
-    );
-    assert.equal(
-      page.find((row) => row.profileId === neighbour.profileId).distanceM,
-      945,
-      'la distancia proyectada no es la medida',
-    );
-    assert.ok(page.every((row) => row.distanceM <= 1000), 'el radio devolvió una fila más lejana');
+    const wide = await rows(observer.token, { radiusM: 1000 });
+    const other = wide.find((row) => row.profileId === neighbour.profileId);
+    assert.ok(other, 'el vecino de 945 m no entró en el radio de 1000 m');
+    assert.equal(other.distanceM, 945, 'la distancia proyectada no es la medida');
+    assert.ok(wide.every((row) => row.distanceM <= 1000), 'el radio devolvió una fila más lejana');
 
     // El default cubre la región entera.
-    assert.equal((await waitForRows(observer.token, 5)).length, 5);
+    assert.equal((await rows(observer.token)).length, 1);
   });
 
   test('zona demo sin GPS: el radar conserva el vector autorado del catálogo', async () => {
@@ -282,7 +185,7 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
     // ancla, toda la región aparecería a 200 m y el radar sería un punto.
     assert.equal((await updatePresence(observer.token, { demoZoneKey: 'cdmx' })).status, 200);
     assert.equal((await updatePresence(neighbour.token, { demoZoneKey: 'cdmx' })).status, 200);
-    const page = await waitForRows(observer.token, 5);
+    const page = await rows(observer.token);
 
     const other = page.find((row) => row.profileId === neighbour.profileId);
     assert.ok(other, 'el otro humano no está en la página');
@@ -296,112 +199,82 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
     // El frame sigue siendo el observador: si el observador se mueve, la medida
     // del mismo perfil cambia (con un frame de ancla no cambiaría).
     assert.equal((await updatePresence(observer.token, at(FAR))).status, 200);
-    const moved = await waitFor(
-      async () => {
-        const rowsNow = await rows(observer.token);
-        const row = rowsNow.find((entry) => entry.profileId === neighbour.profileId);
-        return row !== undefined && row.distanceM > 2_000 ? row : null;
-      },
-      { label: 'la medida del vecino desde el punto nuevo' },
-    );
-    assert.notEqual(moved.distanceM, 480, 'la distancia no dependió del observador');
+    const moved = (await rows(observer.token)).find((row) => row.profileId === neighbour.profileId);
+    assert.ok(moved, 'el vecino desapareció al mover al observador');
+    assert.ok(moved.distanceM > 2_000, `distanceM=${moved.distanceM}: no se midió desde el punto nuevo`);
 
     await renewScene();
   });
 
   test('filtros: intención, género, verificado y online, uno por uno y combinados', async () => {
     await renewScene();
-    const all = await waitForRows(observer.token, 5);
-    const byId = Object.fromEntries(all.map((row) => [row.profileId, row]));
+    const all = await rows(observer.token);
+    assert.equal(all.length, 1, 'el escenario necesita exactamente una contraparte');
+    const [other] = all;
+    assert.equal(other.profileId, neighbour.profileId);
 
-    // El humano ajeno es friendship/male/no verificado, pero **los bots ya no
-    // heredan su fila**: prestan la del perfil donante, así que la expectativa
-    // de cada filtro se deriva de la página (5 filas, sin tope) y no de "los
-    // bots del vecino son friendship/male". El filtro sigue siendo la
-    // intersección con el atributo proyectado.
-    const expected = (field, value) =>
-      all
-        .filter((row) => row[field] === value)
-        .map((row) => row.profileId)
-        .sort();
+    // La expectativa de cada filtro se deriva de la fila proyectada, no de una
+    // tabla de atributos escrita a mano: el filtro es la intersección con el
+    // atributo que el server proyecta.
+    const keeps = async (filters) => ids(await rows(observer.token, filters));
 
-    const friendship = await rows(observer.token, { intention: 'friendship' });
     assert.deepEqual(
-      ids(friendship).sort(),
-      expected('intention', 'friendship'),
-      'intention=friendship no filtró',
+      await keeps({ intention: other.intention }),
+      [other.profileId],
+      `intention=${other.intention} no trajo al vecino`,
     );
-    assert.ok(friendship.every((row) => row.intention === 'friendship'));
-
-    const activities = await rows(observer.token, { intention: 'activities' });
-    assert.deepEqual(
-      ids(activities).sort(),
-      expected('intention', 'activities'),
-      'intention=activities no filtró',
-    );
-
-    const male = await rows(observer.token, { gender: 'male' });
-    assert.deepEqual(ids(male).sort(), expected('gender', 'male'), 'gender=male no filtró');
-    assert.ok(male.every((row) => row.gender === 'male'));
-
-    const verified = await rows(observer.token, { verified: true });
-    assert.deepEqual(ids(verified).sort(), expected('verified', true), 'verified=true no filtró');
-    assert.ok(verified.every((row) => row.verified === true));
-
-    // El filtro no mira la fila del dueño de los bots: el humano ajeno entra (o
-    // no) por su propio atributo, igual que cualquier bot por el del donante.
-    assert.equal(
-      ids(friendship).includes(neighbour.profileId),
-      byId[neighbour.profileId].intention === 'friendship',
-      'intention=friendship no coincide con la fila del vecino',
-    );
-
-    // `false` no filtra: el contrato dice "sólo cuando es `true`".
-    assert.equal((await rows(observer.token, { verified: false })).length, 5, 'verified=false filtró');
-    assert.equal((await rows(observer.token, { online: true })).length, 5, 'online=true filtró de más');
-    assert.equal((await rows(observer.token, { online: false })).length, 5, 'online=false filtró');
-
-    // Combinado: dos filtros que se suman y uno que no filtra.
-    const combined = await rows(observer.token, {
-      intention: 'friendship',
-      gender: 'male',
-      verified: true,
-      online: true,
-    });
-    const both = all.filter(
-      (row) => row.intention === 'friendship' && row.gender === 'male' && row.verified,
+    const otherIntention = ['networking', 'friendship', 'activities'].find(
+      (intention) => intention !== other.intention,
     );
     assert.deepEqual(
-      ids(combined).sort(),
-      both.map((row) => row.profileId).sort(),
-      'la combinación no es intersección',
+      await keeps({ intention: otherIntention }),
+      [],
+      `intention=${otherIntention} no filtró`,
     );
 
-    const combined2 = await rows(observer.token, {
-      intention: 'friendship',
-      gender: 'male',
-      verified: false,
-      radiusM: 1000,
-    });
-    // Con los bots alrededor de su dueño, algunos del vecino pueden entrar en
-    // los 1000 m: lo que se fija es la intersección (toda fila cumple los
-    // filtros y el vecino sigue estando), no un conteo que dependía del ancla.
-    assert.ok(
-      combined2.every(
-        (row) => row.intention === 'friendship' && row.gender === 'male' && row.distanceM <= 1000,
-      ),
-      'combinado: radio + intención + género no es una intersección',
+    assert.deepEqual(
+      await keeps({ gender: other.gender }),
+      [other.profileId],
+      `gender=${other.gender} no trajo al vecino`,
     );
-    assert.ok(ids(combined2).includes(neighbour.profileId), 'el combinado perdió al vecino');
+    const otherGender = ['female', 'male', 'nonbinary'].find((gender) => gender !== other.gender);
+    assert.deepEqual(await keeps({ gender: otherGender }), [], `gender=${otherGender} no filtró`);
 
-    // Y un filtro que excluye todo sin ser un error.
-    const none = await rows(observer.token, { intention: 'networking', verified: true, radiusM: 200 });
-    assert.deepEqual(none, [], 'una combinación imposible no devuelve página vacía');
-    assert.equal(byId[neighbour.profileId].gender, 'male');
+    // `verified` filtra sólo cuando es `true`: el caso contrario es "sin filtro".
+    assert.deepEqual(
+      await keeps({ verified: true }),
+      other.verified ? [other.profileId] : [],
+      'verified=true no coincide con el atributo proyectado',
+    );
+    assert.deepEqual(await keeps({ verified: false }), [other.profileId], 'verified=false filtró');
+    assert.deepEqual(await keeps({ online: true }), [other.profileId], 'online=true filtró de más');
+    assert.deepEqual(await keeps({ online: false }), [other.profileId], 'online=false filtró');
+
+    // Combinado: los filtros que el vecino cumple lo dejan, los que no, lo sacan.
+    assert.deepEqual(
+      await keeps({
+        intention: other.intention,
+        gender: other.gender,
+        verified: other.verified,
+        online: true,
+      }),
+      [other.profileId],
+      'la combinación que el vecino cumple no lo trajo',
+    );
+    assert.deepEqual(
+      await keeps({ intention: otherIntention, gender: other.gender }),
+      [],
+      'la combinación imposible no devuelve página vacía',
+    );
+    // Con radio de 200 m nadie está: la intersección incluye la distancia.
+    assert.deepEqual(
+      await keeps({ radiusM: 200, intention: other.intention }),
+      [],
+      'el radio no entró en la intersección',
+    );
   });
 
   test('validación: radio, enums, flags y parámetros repetidos son 422', async () => {
-    await renew([{ token: observer.token }]);
     for (const [filters, label] of [
       [{ radiusM: 199 }, 'radio por debajo'],
       [{ radiusM: 5001 }, 'radio por encima'],
@@ -427,7 +300,7 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
     // El filtro vacío (`?radiusM=`) es el default, no 422.
     const blank = await listDiscovery(observer.token, { radiusM: '' });
     assert.equal(blank.status, 200, JSON.stringify(blank.body));
-    assert.ok(blank.body.results.length > 0, 'un parámetro vacío dejó la página sin filas');
+    assert.equal(blank.body.results.length, 1, 'un parámetro vacío dejó la página sin filas');
   });
 
   test('aislamiento por región: mx y co no se ven ni se cruzan', async () => {
@@ -441,43 +314,33 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
       { token: coObserver.token, point: CO_ANCHOR },
       { token: coSubject.token, point: CO_NEAR },
     ]);
+    await extendPresence([sessionIdOf(coObserver.token), sessionIdOf(coSubject.token)], 600);
 
     await renewScene();
-    const mxPage = await waitForRows(observer.token, 5);
-    await renewScene();
-    const coPage = await waitForRows(coObserver.token, 5);
+    const mxPage = await rows(observer.token);
+    const coPage = await rows(coObserver.token);
 
     assert.ok(mxPage.every((row) => row.regionKey === 'mx'), 'mx ve perfiles de otra región');
     assert.ok(coPage.every((row) => row.regionKey === 'co'), 'co ve perfiles de otra región');
     assert.ok(!ids(mxPage).some((id) => id.startsWith('co-')), 'mx ve co');
     assert.ok(!ids(coPage).some((id) => id.startsWith('mx-')), 'co ve mx');
-    // La misma regla de negocio en co: 1 humano + 2 propios + 2 ajenos.
-    assert.equal(coPage.filter((row) => row.sourceType === 'human').length, 1);
-    assert.deepEqual(
-      ids(coPage).filter((id) => id.startsWith('co-')).length,
-      coPage.length,
-      'co mezcló regiones',
-    );
+    // La misma regla de negocio en co: 1 contraparte, la del sujeto de co.
+    assert.deepEqual(ids(coPage), [coSubject.profileId], 'co no ve a su par');
 
     await logout(coObserver.token);
     await logout(coSubject.token);
   });
 
-  test('ghost: sin presencia viva el perfil y sus bots desaparecen en el acto', async () => {
+  test('ghost: sin presencia viva el perfil desaparece en el acto y no ve a nadie', async () => {
     await renewScene();
-    const before = await waitForRows(observer.token, 5);
-    assert.ok(ids(before).includes(neighbour.profileId));
+    const before = await rows(observer.token);
+    assert.deepEqual(ids(before), [neighbour.profileId]);
 
     assert.equal((await clearPresence(neighbour.token)).status, 204);
 
-    // Al otro le quedan sus propios 2 bots: el ghost es del vecino, no de él.
-    await renew([{ token: observer.token }]);
-    const after = await waitForRows(observer.token, 2);
-    assert.deepEqual(
-      ids(after).sort(),
-      [`${observer.profileId}-b1`, `${observer.profileId}-b2`].sort(),
-      'el ghost del vecino dejó sus perfiles a la vista',
-    );
+    // Sin relleno sintético no queda nada: una persona sola es una página vacía,
+    // no un error ni una lista de perfiles propios.
+    assert.deepEqual(await rows(observer.token), [], 'el ghost del vecino dejó filas a la vista');
 
     // Y el que entró en ghost no descubre a nadie: invisible ⇒ ciego.
     assert.deepEqual(await rows(neighbour.token), [], 'un ghost ve a los demás');
@@ -485,15 +348,14 @@ describe('discovery: 5 perfiles, medidas, filtros, región y ghost', () => {
     // La sesión sigue viva (ghost es pausa de presencia, no logout).
     assert.equal((await listDiscovery(neighbour.token)).status, 200);
 
-    // Al volver, vuelve el 5.
+    // Al volver, vuelve la fila.
     assert.equal((await updatePresence(neighbour.token, at(NEAR))).status, 200);
-    await renew([{ token: observer.token }]);
-    const back = await waitForRows(observer.token, 5);
-    assert.ok(ids(back).includes(neighbour.profileId), 'el perfil no volvió al reaparecer');
+    const back = await rows(observer.token);
+    assert.deepEqual(ids(back), [neighbour.profileId], 'el perfil no volvió al reaparecer');
   });
 });
 
-describe('discovery: cap de 6 bots y tope de página', () => {
+describe('discovery: densidad de una región completa', () => {
   let snapshot = [];
   /** 5 humanos vivos en mx: el observador y 4 más. */
   let humans = [];
@@ -515,6 +377,10 @@ describe('discovery: cap de 6 bots y tope de página', () => {
       assert.equal((await updatePresence(human.token, at(human.spot))).status, 200);
       humans.push(human);
     }
+    await extendPresence(
+      humans.map((human) => human.sessionId),
+      600,
+    );
   });
 
   after(async () => {
@@ -522,43 +388,37 @@ describe('discovery: cap de 6 bots y tope de página', () => {
     await deleteSessionsCreatedSince(snapshot);
   });
 
-  test('5 humanos: 10 bots en la región, 6 visibles, los propios adentro y 10 filas', async () => {
-    const renewAll = async () => {
-      for (const human of humans) {
-        const response = await updatePresence(human.token, at(human.spot));
-        assert.equal(response.status, 200, JSON.stringify(response.body));
-      }
-    };
-    await renewAll();
+  test('5 humanos vivos: cada uno ve las otras 4 personas y nada más', async () => {
     const observer = humans[0];
-
-    const page = await waitForRows(observer.token, 10);
-    const bots = page.filter((row) => row.sourceType === 'bot');
     const others = humans.slice(1);
 
-    assert.equal(bots.length, 6, `el cap de 6 bots no se respetó (${bots.length})`);
-    assert.equal(page.length, 10, 'el tope de página del contrato es 10');
-    assert.equal(page.filter((row) => row.sourceType === 'human').length, 4);
+    const page = await rows(observer.token);
+    assert.equal(page.length, 4, `se esperaban 4 contrapartes (${page.length})`);
+    assert.deepEqual(
+      ids(page).sort(),
+      others.map((human) => human.profileId).sort(),
+      'la página no es el resto de la región',
+    );
+    assert.ok(page.every((row) => row.sourceType === 'human'), 'hay filas que no son humanos');
+    assert.ok(!ids(page).includes(observer.profileId), 'el observador se ve a sí mismo');
 
-    // Los propios siempre entran (son los primeros del orden del cap).
-    for (const ownBot of [`${observer.profileId}-b1`, `${observer.profileId}-b2`]) {
-      assert.ok(ids(page).includes(ownBot), `el cap dejó afuera ${ownBot}`);
-    }
-
-    // El corte es determinista: 2 propios + los 4 primeros ajenos por id.
-    const expected = [
-      `${observer.profileId}-b1`,
-      `${observer.profileId}-b2`,
-      ...others
-        .flatMap((human) => [`${human.profileId}-b1`, `${human.profileId}-b2`])
-        .sort()
-        .slice(0, 4),
-    ].sort();
-    assert.deepEqual(bots.map((row) => row.profileId).sort(), expected, 'el cap no es determinista');
+    // Sin tope de página alcanzado: 10 slots por región dejan 9 contrapartes
+    // como máximo, así que lo que se fija es la paridad N−1 y el orden por
+    // distancia, no un corte.
+    const sorted = [...page].sort(
+      (left, right) => left.distanceM - right.distanceM || left.profileId.localeCompare(right.profileId),
+    );
+    assert.deepEqual(ids(page), ids(sorted), 'la página no está ordenada por distancia');
 
     // Dos lecturas seguidas del mismo instante devuelven el mismo conjunto.
-    await renewAll();
     const again = await rows(observer.token);
     assert.deepEqual(ids(again), ids(page), 'dos lecturas del mismo instante difieren');
+
+    // Y el espejo: cada uno de los otros ve exactamente 4, con el observador.
+    for (const other of others) {
+      const mirror = await rows(other.token);
+      assert.equal(mirror.length, 4, `${other.profileId} ve ${mirror.length} filas`);
+      assert.ok(ids(mirror).includes(observer.profileId), `${other.profileId} no ve al observador`);
+    }
   });
 });
