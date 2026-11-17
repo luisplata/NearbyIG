@@ -16,7 +16,7 @@
 export const safetyCopy = {
   // Fantasma real (el banner del dataset sigue con `settings.ghostOn`).
   ghostLiveOn:
-    'Fantasma: estás invisible. Tu perfil y tus bots no aparecen para los demás; vos sí los ves.',
+    'Fantasma: estás invisible. Tu perfil no aparece para los demás; vos sí los ves.',
   ghostLiveOff: 'Visible: tu perfil vuelve a aparecer en el descubrimiento de los demás.',
   ghostError: 'No se pudo cambiar la visibilidad ({code}).',
   ghostPending: 'Cambiando visibilidad…',
@@ -25,7 +25,6 @@ export const safetyCopy = {
   block: 'Bloquear',
   blocked: 'Bloqueado',
   report: 'Reportar',
-  blockBotOwner: 'Es un bot: el bloqueo se aplicó a su dueño ({owner}).',
   blockError: 'No se pudo bloquear ({code}).',
   unblockError: 'No se pudo desbloquear ({code}).',
   blockListTitle: 'Bloqueados',

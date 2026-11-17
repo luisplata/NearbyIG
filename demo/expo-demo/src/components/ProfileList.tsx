@@ -1,22 +1,23 @@
 import { ScrollView, StyleSheet } from 'react-native';
 
-import { fmt } from '../generated/copy';
 import { avatarState } from '../state/selectors';
 import type { DemoState, UiProfile } from '../state/types';
 import { space } from '../theme/theme';
 
-import { EmptyState } from './EmptyState';
 import { ProfileCard } from './ProfileCard';
 
 /**
  * Lista de descubrimiento: ordenada por distancia ascendente (F-2) y con el
  * mismo conjunto filtrado que radar y mapa.
+ *
+ * **Sin estado vacío propio.** Cuando no hay filas, `DiscoveryScreen` no monta
+ * la lista: decide entre el vacío de filtros y el de densidad con
+ * `discoveryLayout`, así el CTA "Limpiar filtros" no puede aparecer sin filtros.
  */
 export function ProfileList({
   state,
   profiles,
   onOpen,
-  onClearFilters,
   onBlock,
   onReport,
   chatFor,
@@ -26,7 +27,6 @@ export function ProfileList({
   state: DemoState;
   profiles: UiProfile[];
   onOpen: (profile: UiProfile) => void;
-  onClearFilters: () => void;
   onBlock?: (profile: UiProfile) => void;
   onReport?: (profile: UiProfile) => void;
   /** Match del perfil en la bandeja vigente, o `null`. Sin esto no hay globo. */
@@ -38,16 +38,6 @@ export function ProfileList({
    */
   onScrollTopChange?: (atTop: boolean) => void;
 }) {
-  if (profiles.length === 0) {
-    return (
-      <EmptyState
-        message={fmt('empty.filters')}
-        actionLabel={fmt('empty.filtersCta')}
-        onAction={onClearFilters}
-      />
-    );
-  }
-
   return (
     <ScrollView
       contentContainerStyle={styles.content}

@@ -29,7 +29,6 @@ export const pingsCopy = {
   send: 'Enviar ping',
   sending: 'Enviando…',
   sendPending: 'Ping enviado. Esperando respuesta.',
-  sendBotNote: 'Un bot acepta solo: el match ya está creado.',
   guestNote: 'Sesión de invitado: no hay un perfil propio con el que enviar pings.',
 
   notifLive: 'Ping de {name}',

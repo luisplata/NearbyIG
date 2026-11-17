@@ -2,17 +2,12 @@
  * Copy de preferencias y del perfil propio.
  *
  * Mismo motivo que `liveCopy` / `mapCopy` / `pingsCopy`: el catálogo compartido
- * alimenta el `datasetId` del artefacto congelado. El toggle de bots y la
- * restauración de preferencias son de la app Expo, no del artefacto mock.
+ * alimenta el `datasetId` del artefacto congelado. La restauración de
+ * preferencias es de la app Expo, no del artefacto mock.
  */
 export const prefsCopy = {
-  botsLabel: 'Incluir bots',
-  botsOn: 'Bots incluidos',
-  botsOff: 'Sin bots',
-  botsCount: '{count} bots en la zona',
-
   reset: 'Restablecer preferencias',
-  resetHint: 'Vuelve radio, filtros y bots a los valores de fábrica. No cambia tu zona ni tu sesión.',
+  resetHint: 'Vuelve radio y filtros a los valores de fábrica. No cambia tu zona ni tu sesión.',
 
   soundsLabel: 'Sonidos',
   soundsHint: 'Un tono corto para ping, match y mensaje. Se activan con el primer toque en la pantalla.',

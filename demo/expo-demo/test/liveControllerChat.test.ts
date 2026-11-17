@@ -19,8 +19,8 @@ const ROW = (profileId: string, overrides: Record<string, unknown> = {}) => ({
   profileId,
   regionKey: 'mx',
   demoSlot: null,
-  sourceType: profileId.includes('-b') ? 'bot' : 'human',
-  nickname: profileId.includes('-b') ? 'Fran' : 'Nico',
+  sourceType: 'human',
+  nickname: profileId === 'mx-p03' ? 'Fran' : 'Nico',
   initials: 'NI',
   intention: 'friendship',
   gender: 'male',
@@ -36,13 +36,13 @@ const ROW = (profileId: string, overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const PEER_BOT = {
-  profileId: 'mx-p02-b1',
+const PEER_FRAN = {
+  profileId: 'mx-p03',
   nickname: 'Fran',
   initials: 'FR',
   intention: 'friendship',
   photoId: 'ph02',
-  sourceType: 'bot',
+  sourceType: 'human',
 };
 
 const PEER_HUMAN = {
@@ -56,40 +56,40 @@ const PEER_HUMAN = {
 
 type MatchRowState = {
   id: string;
-  peer: typeof PEER_BOT;
+  peer: typeof PEER_FRAN;
   createdAt: string;
   unreadCount: number;
   messages: LiveMessage[];
 };
 
 /**
- * Backend de mentira del chat: dos matches (uno con bot y uno humano), página
- * real con cursor y `read` que apaga el `unreadCount`. No reimplementa la lógica
- * del controller: es el mínimo para ejercer apertura, envío, reconciliación,
- * paginación y la respuesta del bot.
+ * Backend de mentira del chat: dos matches (dos humanos), página real con cursor
+ * y `read` que apaga el `unreadCount`. No reimplementa la lógica del controller:
+ * es el mínimo para ejercer apertura, envío, reconciliación, paginación y la
+ * respuesta del otro lado.
  */
 function makeChatServer(options: { pageSize?: number } = {}) {
   const pageSize = options.pageSize ?? 50;
   const matches: MatchRowState[] = [
     {
-      id: 'match-bot',
-      peer: PEER_BOT,
+      id: 'match-fran',
+      peer: PEER_FRAN,
       createdAt: '2026-11-13T16:00:00.000Z',
       unreadCount: 2,
       messages: [
         {
-          id: 'msg-b1',
-          matchId: 'match-bot',
-          senderProfileId: 'mx-p02-b1',
-          clientMessageId: 'cm-b1',
+          id: 'msg-p02',
+          matchId: 'match-fran',
+          senderProfileId: 'mx-p02',
+          clientMessageId: 'cm-p02',
           body: 'hola, soy Fran',
           createdAt: '2026-11-13T15:59:00.000Z',
         },
         {
-          id: 'msg-b2',
-          matchId: 'match-bot',
-          senderProfileId: 'mx-p02-b1',
-          clientMessageId: 'cm-b2',
+          id: 'msg-fran-2',
+          matchId: 'match-fran',
+          senderProfileId: 'mx-p02',
+          clientMessageId: 'cm-fran-2',
           body: '¿qué tal?',
           createdAt: '2026-11-13T15:59:30.000Z',
         },
@@ -150,10 +150,10 @@ function makeChatServer(options: { pageSize?: number } = {}) {
       });
     }
     if (method === 'GET' && path === '/api/demo/profiles') {
-      return ok(200, { profiles: [ROW('mx-p02'), ROW('mx-p02-b1'), ROW(SESSION.profileId)] });
+      return ok(200, { profiles: [ROW('mx-p02'), ROW('mx-p02'), ROW(SESSION.profileId)] });
     }
     if (method === 'GET' && path === '/api/discovery') {
-      return ok(200, { results: [ROW('mx-p02'), ROW('mx-p02-b1')] });
+      return ok(200, { results: [ROW('mx-p02'), ROW('mx-p02')] });
     }
     if (method === 'GET' && path === '/api/me') {
       return { ok: false, status: 404, text: async () => '{"code":"NOT_FOUND"}' };
@@ -229,15 +229,15 @@ function makeChatServer(options: { pageSize?: number } = {}) {
     clearSendFailure: () => {
       failSend = null;
     },
-    /** El bot contesta: se agrega su mensaje y el evento es lo que lo hace visible. */
-    botReplies: (matchId: string, body: string): LiveMessage => {
+    /** El otro lado contesta: se agrega su mensaje y el evento lo hace visible. */
+    incomingMessage: (matchId: string, body: string): LiveMessage => {
       const match = matches.find((candidate) => candidate.id === matchId)!;
       seq += 1;
       const message: LiveMessage = {
-        id: `msg-bot-${seq}`,
+        id: `msg-fran-${seq}`,
         matchId,
         senderProfileId: match.peer.profileId,
-        clientMessageId: `cm-bot-${seq}`,
+        clientMessageId: `cm-fran-${seq}`,
         body,
         createdAt: new Date(2026, 10, 13, 18, seq - 99).toISOString(),
       };
@@ -324,11 +324,11 @@ describe('chat real en el controller', () => {
       expect(controller.getState().matches).toHaveLength(2);
     });
 
-    const [bot, human] = controller.getState().matches;
-    expect(bot.match.id).toBe('match-bot');
-    expect(bot.peer.sourceType).toBe('bot');
-    expect(bot.lastMessage?.body).toBe('¿qué tal?');
-    expect(bot.unreadCount).toBe(2);
+    const [fran, human] = controller.getState().matches;
+    expect(fran.match.id).toBe('match-fran');
+    expect(fran.peer.sourceType).toBe('human');
+    expect(fran.lastMessage?.body).toBe('¿qué tal?');
+    expect(fran.unreadCount).toBe(2);
     expect(human.lastMessage).toBeNull();
     await controller.stop();
   });
@@ -339,22 +339,22 @@ describe('chat real en el controller', () => {
     await controller.start();
     stream.instances[0].open();
 
-    const result = await controller.openChat('match-bot');
+    const result = await controller.openChat('match-fran');
     expect(result).toEqual({ ok: true, code: null });
 
     const chat = controller.getState().chat;
-    expect(chat?.matchId).toBe('match-bot');
+    expect(chat?.matchId).toBe('match-fran');
     expect(chat?.peer?.nickname).toBe('Fran');
     expect(chat?.messages.map((message) => message.body)).toEqual([
       'hola, soy Fran',
       '¿qué tal?',
     ]);
     expect(chat?.loading).toBe(false);
-    // El historial del bot no es mío: `mine` sale de la sesión, no del remitente.
+    // El historial ajeno no es mío: `mine` sale de la sesión, no del remitente.
     expect(chat?.messages.every((message) => !message.mine)).toBe(true);
 
-    expect(server.reads).toEqual(['match-bot']);
-    const row = controller.getState().matches.find((item) => item.match.id === 'match-bot');
+    expect(server.reads).toEqual(['match-fran']);
+    const row = controller.getState().matches.find((item) => item.match.id === 'match-fran');
     expect(row?.unreadCount).toBe(0);
     await controller.stop();
   });
@@ -444,22 +444,22 @@ describe('chat real en el controller', () => {
     await controller.stop();
   });
 
-  it('el bot responde solo: el evento message.created trae su mensaje', async () => {
+  it('el otro lado responde: el evento message.created trae su mensaje', async () => {
     const server = makeChatServer();
     const { controller, stream } = makeController(server);
     await controller.start();
     stream.instances[0].open();
-    await controller.openChat('match-bot');
-    await controller.sendChatMessage('match-bot', 'todo bien');
+    await controller.openChat('match-fran');
+    await controller.sendChatMessage('match-fran', 'todo bien');
 
-    const reply = server.botReplies('match-bot', 'mensaje fijo del bot');
+    const reply = server.incomingMessage('match-fran', 'respuesta de Fran');
     stream.instances[0].emit(
       'message.created',
-      event(120, 'message.created', { matchId: 'match-bot', messageId: reply.id }),
+      event(120, 'message.created', { matchId: 'match-fran', messageId: reply.id }),
     );
 
     await vi.waitFor(() => {
-      expect(controller.getState().chat?.messages.at(-1)?.body).toBe('mensaje fijo del bot');
+      expect(controller.getState().chat?.messages.at(-1)?.body).toBe('respuesta de Fran');
     });
     const messages = controller.getState().chat!.messages;
     expect(messages).toHaveLength(4);
@@ -497,20 +497,20 @@ describe('chat real en el controller', () => {
     stream.instances[0].open();
 
     // 11 mensajes: el tope de 10 páginas deja uno pendiente y "cargar más" sirve.
-    const target = server.match('match-bot');
+    const target = server.match('match-fran');
     for (let index = 0; index < 9; index += 1) {
       const minute = String(index).padStart(2, '0');
       target.messages.push({
         id: `msg-extra-${index}`,
-        matchId: 'match-bot',
-        senderProfileId: 'mx-p02-b1',
+        matchId: 'match-fran',
+        senderProfileId: 'mx-p03',
         clientMessageId: `cm-extra-${index}`,
         body: `extra ${index}`,
         createdAt: `2026-11-13T15:${minute}:00.000Z`,
       });
     }
 
-    await controller.openChat('match-bot');
+    await controller.openChat('match-fran');
     expect(controller.getState().chat?.messages).toHaveLength(10);
     expect(controller.getState().chat?.hasMore).toBe(true);
 

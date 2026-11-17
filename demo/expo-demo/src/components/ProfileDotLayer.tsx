@@ -11,7 +11,7 @@ import { colors } from '../theme/theme';
  * Capa tappable de puntos: 44×44 px por perfil, etiqueta con nombre y distancia
  * y posición derivada de la proyección compartida del contrato.
  *
- * **Interpolación sólo en render.** En el modo live los bots saltan cada 5 s
+ * **Interpolación sólo en render.** En el modo live los perfiles saltan cada 5 s
  * (un tramo de waypoint): la distancia y el rumbo llegan ya calculados por el
  * server. El único lugar donde se interpola es acá, con una transición CSS de
  * `left`/`top` sobre la posición normalizada — el estado nunca guarda posiciones

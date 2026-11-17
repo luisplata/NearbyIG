@@ -137,12 +137,12 @@ function makeController(
   });
 }
 
-const movedEvent = (seq: number, distanceM: number) =>
+const presenceEvent = (seq: number, online: boolean) =>
   JSON.stringify({
     id: `mx:${String(seq).padStart(12, '0')}`,
-    type: 'profile.moved',
+    type: 'profile.presence',
     occurredAt: '2026-11-13T09:00:00.000Z',
-    payload: { profileId: 'mx-p01', distanceM, bearingDeg: 90 },
+    payload: { profileId: 'mx-p01', online },
   });
 
 afterEach(() => {
@@ -191,12 +191,12 @@ describe('watchdog del transporte', () => {
 
     for (let seq = 1; seq <= 6; seq += 1) {
       await vi.advanceTimersByTimeAsync(10_000);
-      stream.instances[0].emit('profile.moved', movedEvent(seq, 300 + seq));
+      stream.instances[0].emit('profile.presence', presenceEvent(seq, seq % 2 === 1));
     }
 
     expect(controller.getState().status).toBe('live');
     expect(controller.getState().transport).toBe('sse');
-    expect(controller.getState().discovery[0].distanceM).toBe(306);
+    expect(controller.getState().lastSeq).toBe(6);
     expect(stream.instances[0].closed).toBe(false);
     await controller.stop();
   });
@@ -243,7 +243,7 @@ describe('watchdog del transporte', () => {
 
     for (let seq = 1; seq <= 3; seq += 1) {
       await vi.advanceTimersByTimeAsync(5_000);
-      stream.instances[0].emit('profile.moved', movedEvent(seq, 500 + seq));
+      stream.instances[0].emit('profile.presence', presenceEvent(seq, seq % 2 === 1));
     }
 
     expect(controller.getState().transport).toBe('sse');
@@ -264,8 +264,8 @@ describe('watchdog del transporte', () => {
 
     // El EventSource viejo todavía puede disparar un listener: el controller lo
     // ignora porque ya no es `source`.
-    stream.instances[0].emit('profile.moved', movedEvent(99, 4_900));
-    expect(controller.getState().discovery[0].distanceM).toBe(240);
+    stream.instances[0].emit('profile.presence', presenceEvent(99, false));
+    expect(controller.getState().discovery[0].online).toBe(true);
     expect(controller.getState().lastSeq).toBe(0);
     await controller.stop();
   });

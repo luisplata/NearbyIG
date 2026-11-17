@@ -244,7 +244,6 @@ function MatchCard({
   onOpen: () => void;
 }) {
   const time = formatPingTime(row.previewAt ?? row.createdAt);
-  const isBot = row.peer.sourceType === 'bot';
   const preview =
     row.preview === null
       ? chatText('matchNoMessages')
@@ -266,7 +265,6 @@ function MatchCard({
             <Text numberOfLines={1} style={[text.bodyLarge, styles.name]}>
               {row.peer.nickname}
             </Text>
-            {isBot ? <Chip label={chatText('matchBotTag')} /> : null}
           </View>
           <Text numberOfLines={1} style={[text.small, { color: colors.muted }]}>
             {preview}

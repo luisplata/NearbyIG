@@ -27,16 +27,16 @@ const message = (overrides: Partial<LiveMessage> = {}): LiveMessage => ({
 });
 
 const peer = {
-  profileId: 'mx-p02-b1',
+  profileId: 'mx-p02',
   nickname: 'Fran',
   initials: 'FR',
   intention: 'friendship',
   photoId: 'ph02',
-  sourceType: 'bot' as const,
+  sourceType: 'human' as const,
 };
 
 const item = (overrides: Partial<LiveMatchListItem> = {}): LiveMatchListItem => ({
-  match: { id: 'match-1', profileIds: [SELF, 'mx-p02-b1'], createdAt: '2026-11-13T16:00:00.000Z' },
+  match: { id: 'match-1', profileIds: [SELF, 'mx-p02'], createdAt: '2026-11-13T16:00:00.000Z' },
   peer,
   lastMessage: null,
   unreadCount: 0,
@@ -57,7 +57,7 @@ describe('bandeja de matches', () => {
     expect(mine?.preview).toBe('te espero');
     expect(mine?.previewMine).toBe(true);
     const theirs = toMatchRow(
-      item({ lastMessage: message({ senderProfileId: 'mx-p02-b1', body: 'voy' }) }),
+      item({ lastMessage: message({ senderProfileId: 'mx-p02', body: 'voy' }) }),
       SELF,
     );
     expect(theirs?.previewMine).toBe(false);
@@ -88,7 +88,7 @@ describe('bandeja de matches', () => {
 describe('mensajes', () => {
   it('el emisor propio se reconoce por la sesión', () => {
     expect(toChatMessage(message(), SELF).mine).toBe(true);
-    expect(toChatMessage(message({ senderProfileId: 'mx-p02-b1' }), SELF).mine).toBe(false);
+    expect(toChatMessage(message({ senderProfileId: 'mx-p02' }), SELF).mine).toBe(false);
     expect(toChatMessage(message(), null).mine).toBe(false);
   });
 

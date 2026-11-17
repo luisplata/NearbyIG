@@ -7,7 +7,7 @@ import type { DiscoveryFilters } from '../state/types';
  * Preferencias del usuario que sobreviven a una recarga.
  *
  * **Qué guarda.** Sólo decisiones de UI que el usuario tomó a mano: radio,
- * intenciones, género, verificados, en línea, el toggle de bots y el de sonidos.
+ * intenciones, género, verificados, en línea y el toggle de sonidos.
  * La zona ya tiene su propia clave (`nearbyig.demoZone`) y la sesión es efímera
  * por contrato: el token no se persiste, así que recargar abre una sesión nueva.
  *
@@ -27,11 +27,9 @@ export type Preferences = {
   gender: Gender | null;
   verifiedOnly: boolean;
   onlineOnly: boolean;
-  includeBots: boolean;
   /**
    * Sonidos de la demo. Es una preferencia de UI más (no estado del reducer) y
-   * vive en el mismo JSON: apagarla tiene que sobrevivir a la recarga igual que
-   * el toggle de bots.
+   * vive en el mismo JSON: apagarla tiene que sobrevivir a la recarga.
    */
   soundEnabled: boolean;
 };
@@ -43,7 +41,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   gender: null,
   verifiedOnly: false,
   onlineOnly: false,
-  includeBots: true,
   soundEnabled: true,
 };
 
@@ -106,7 +103,6 @@ export function parsePreferences(raw: string | null | undefined): Preferences | 
     gender: readGender(parsed['gender']),
     verifiedOnly: readFlag(parsed['verifiedOnly'], DEFAULT_PREFERENCES.verifiedOnly),
     onlineOnly: readFlag(parsed['onlineOnly'], DEFAULT_PREFERENCES.onlineOnly),
-    includeBots: readFlag(parsed['includeBots'], DEFAULT_PREFERENCES.includeBots),
     soundEnabled: readFlag(parsed['soundEnabled'], DEFAULT_PREFERENCES.soundEnabled),
   };
 }
@@ -133,7 +129,6 @@ export function serializePreferences(prefs: Preferences): string {
     gender: normalized.gender,
     verifiedOnly: normalized.verifiedOnly,
     onlineOnly: normalized.onlineOnly,
-    includeBots: normalized.includeBots,
     soundEnabled: normalized.soundEnabled,
   });
 }
@@ -144,7 +139,6 @@ export function serializePreferences(prefs: Preferences): string {
  */
 export function preferencesOf(
   filters: DiscoveryFilters,
-  includeBots: boolean,
   soundEnabled: boolean = DEFAULT_PREFERENCES.soundEnabled,
 ): Preferences {
   return {
@@ -153,7 +147,6 @@ export function preferencesOf(
     gender: filters.gender,
     verifiedOnly: filters.verifiedOnly,
     onlineOnly: filters.onlineOnly,
-    includeBots,
     soundEnabled,
   };
 }
@@ -168,7 +161,8 @@ export function samePreferences(a: Preferences, b: Preferences): boolean {
  * Se derivan de los defaults, no del estado actual, porque la hidratación corre
  * una sola vez al montar. Cada intención guardada se prende con su TOGGLE (el
  * reducer las ordena y valida), y los booleanos sólo si difieren del default.
- * `includeBots` no es acción: el store lo aplica con `setIncludeBots`.
+ * Una clave heredada del build anterior (el viejo toggle de población
+ * sintética) se ignora al leer y desaparece del JSON en la primera escritura.
  */
 export function restoreActions(prefs: Preferences): DemoAction[] {
   const actions: DemoAction[] = [];
@@ -194,8 +188,7 @@ export function restoreActions(prefs: Preferences): DemoAction[] {
  * Acciones del botón "Restablecer": radio de fábrica y filtros limpios.
  *
  * No toca la zona (`nearbyig.demoZone`) ni la sesión: son decisiones distintas y
- * restablecer filtros no tiene por qué mover al usuario de ciudad. El toggle de
- * bots lo resetea el provider con `setIncludeBots`.
+ * restablecer filtros no tiene por qué mover al usuario de ciudad.
  */
 export function resetActions(): DemoAction[] {
   return [

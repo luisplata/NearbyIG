@@ -87,7 +87,7 @@ function makeServer(routeOverrides: Record<string, Route> = {}) {
     }),
     'GET /api/discovery': () => ({
       status: 200,
-      body: JSON.stringify({ results: [PROFILE(), PROFILE({ profileId: 'mx-p01-b1', distanceM: 900 })] }),
+      body: JSON.stringify({ results: [PROFILE(), PROFILE({ profileId: 'mx-p02', distanceM: 900 })] }),
     }),
     'GET /api/events/poll': () => ({
       status: 200,
@@ -186,12 +186,12 @@ function makeController(
   return { controller, catalogs, persistedZones };
 }
 
-const movedEvent = (seq: number, profileId: string, distanceM: number) =>
+const presenceEvent = (seq: number, profileId: string, online: boolean) =>
   JSON.stringify({
     id: `mx:${String(seq).padStart(12, '0')}`,
-    type: 'profile.moved',
+    type: 'profile.presence',
     occurredAt: '2026-11-13T09:00:00.000Z',
-    payload: { profileId, distanceM, bearingDeg: 90 },
+    payload: { profileId, online },
   });
 
 afterEach(() => {
@@ -222,7 +222,7 @@ describe('arranque de la sesión', () => {
     expect(controller.getState().transport).toBe('sse');
     expect(catalogs.at(-1)?.profiles?.map((profile) => profile.id)).toEqual([
       'mx-p01',
-      'mx-p01-b1',
+      'mx-p02',
     ]);
     expect(catalogs.at(-1)?.source).toBe('live');
   });
@@ -274,7 +274,7 @@ describe('transporte', () => {
         status: 200,
         body: JSON.stringify({
           events: [
-            JSON.parse(movedEvent(3, 'mx-p01', 700)),
+            JSON.parse(presenceEvent(3, 'mx-p01', false)),
           ],
           nextCursor: 'mx:000000000003',
           hasMore: false,
@@ -294,7 +294,7 @@ describe('transporte', () => {
     expect(controller.getState().transport).toBe('polling');
 
     await vi.advanceTimersByTimeAsync(60);
-    expect(controller.getState().discovery[0].distanceM).toBe(700);
+    expect(controller.getState().discovery[0].online).toBe(false);
     expect(controller.getState().lastSeq).toBe(3);
   });
 
@@ -306,8 +306,8 @@ describe('transporte', () => {
 
     await controller.start();
     stream.instances[0].open();
-    stream.instances[0].emit('profile.moved', movedEvent(4, 'mx-p01', 1100));
-    expect(controller.getState().discovery[0].distanceM).toBe(1100);
+    stream.instances[0].emit('profile.presence', presenceEvent(4, 'mx-p01', false));
+    expect(controller.getState().discovery[0].online).toBe(false);
     expect(stream.instances[0].closed).toBe(false);
 
     stream.instances[0].fail();
@@ -350,13 +350,13 @@ describe('eventos', () => {
     const stub = stream.instances[0];
     stub.open();
 
-    stub.emit('profile.moved', movedEvent(7, 'mx-p01', 900));
-    stub.emit('profile.moved', movedEvent(7, 'mx-p01', 1500));
-    expect(controller.getState().discovery[0].distanceM).toBe(900);
+    stub.emit('profile.presence', presenceEvent(7, 'mx-p01', false));
+    stub.emit('profile.presence', presenceEvent(7, 'mx-p01', true));
+    expect(controller.getState().discovery[0].online).toBe(false);
     expect(controller.getState().lastSeq).toBe(7);
 
-    stub.emit('profile.moved', movedEvent(8, 'mx-p01-b1', 1300));
-    expect(controller.getState().discovery[1].distanceM).toBe(1300);
+    stub.emit('profile.presence', presenceEvent(8, 'mx-p02', false));
+    expect(controller.getState().discovery[1].online).toBe(false);
   });
 
   it('un evento de un perfil desconocido pide una foto nueva', async () => {
@@ -368,7 +368,7 @@ describe('eventos', () => {
     stream.instances[0].open();
     const before = server.count('GET /api/discovery');
 
-    stream.instances[0].emit('profile.moved', movedEvent(9, 'mx-p99-b1', 800));
+    stream.instances[0].emit('profile.presence', presenceEvent(9, 'mx-p99', false));
     await vi.advanceTimersByTimeAsync(20);
     expect(server.count('GET /api/discovery')).toBe(before + 1);
   });
@@ -381,7 +381,7 @@ describe('eventos', () => {
     stream.instances[0].open();
     const before = controller.getState().lastSeq;
 
-    stream.instances[0].emit('profile.moved', 'no soy json');
+    stream.instances[0].emit('profile.presence', 'no soy json');
     expect(controller.getState().lastSeq).toBe(before);
   });
 });

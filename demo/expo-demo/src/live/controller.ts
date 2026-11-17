@@ -1,6 +1,6 @@
 import type { DemoSource, DiscoveryFilters, UiProfile } from '../state/types';
 
-import { toUiProfiles, botIdsOf } from './adapter';
+import { toUiProfiles } from './adapter';
 import {
   createLiveApi,
   LiveApiError,
@@ -110,9 +110,9 @@ export type LiveActionResult = { ok: boolean; code: string | null };
 
 /**
  * Resultado de una acción de ping. `status` es lo que el server dejó: `pending`
- * para un humano, `accepted` con `matchId` cuando el destino es un bot (acepta
- * solo). `code` es el `Problem.code` cuando falla (`PING_DUPLICATE`,
- * `PING_EXPIRED`, `PING_RESOLVED`, …).
+ * al crearlo, `accepted` con `matchId` cuando el otro lado lo acepta. `code` es
+ * el `Problem.code` cuando falla (`PING_DUPLICATE`, `PING_EXPIRED`,
+ * `PING_RESOLVED`, …).
  */
 export type PingResult = {
   ok: boolean;
@@ -122,8 +122,8 @@ export type PingResult = {
 };
 
 /**
- * Resultado de bloquear. `profileId` es el canonizado que devolvió el server:
- * bloquear un bot devuelve a su dueño, y la UI lo usa para decir qué pasó.
+ * Resultado de bloquear. `profileId` es el que el server guardó (debería ser el
+ * mismo que se pidió; se devuelve para no asumirlo).
  */
 export type BlockResult = {
   ok: boolean;
@@ -192,11 +192,7 @@ export type LiveControllerPorts = {
    */
   log?: (message: string) => void;
   /** Catálogo para la UI. `null` significa "volvé al dataset del build". */
-  onCatalog?: (
-    profiles: readonly UiProfile[] | null,
-    source: DemoSource,
-    botIds: readonly string[],
-  ) => void;
+  onCatalog?: (profiles: readonly UiProfile[] | null, source: DemoSource) => void;
   heartbeatMs?: number;
   pollMs?: number;
   reseedMs?: number;
@@ -238,13 +234,13 @@ export type LiveController = {
   rejectPing(pingId: string): Promise<PingResult>;
   /**
    * Cambia la visibilidad propia. En `ghost` la sesión sigue online y viendo,
-   * pero el humano y sus bots desaparecen del descubrimiento ajeno. Persiste la
-   * elección vía `onVisibilityChange`; los latidos posteriores no la repiten.
+   * pero el humano desaparece del descubrimiento ajeno. Persiste la elección vía
+   * `onVisibilityChange`; los latidos posteriores no la repiten.
    */
   setVisibility(visibility: Visibility): Promise<LiveActionResult>;
   /** `GET /blocks`: la lista propia, con el otro proyectado. */
   refreshBlocks(): Promise<void>;
-  /** `POST /blocks`: idempotente, canoniza bots al dueño. */
+  /** `POST /blocks`: idempotente. */
   block(profileId: string): Promise<BlockResult>;
   /** `DELETE /blocks/{profileId}`: idempotente en el resultado. */
   unblock(profileId: string): Promise<BlockResult>;
@@ -397,11 +393,11 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   };
 
   const emitCatalog = (): void => {
-    ports.onCatalog?.(toUiProfiles(state.discovery), 'live', botIdsOf(state.discovery));
+    ports.onCatalog?.(toUiProfiles(state.discovery), 'live');
   };
 
   const emitDataset = (): void => {
-    ports.onCatalog?.(null, 'dataset', []);
+    ports.onCatalog?.(null, 'dataset');
   };
 
   const log = ports.log ?? ((): void => undefined);
@@ -750,7 +746,6 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       blocks: [],
       blocksAt: null,
       blockError: null,
-      blockAliases: {},
       reported: [],
       reportError: null,
       notifications: [],
@@ -797,7 +792,6 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
       blocks: [],
       blocksAt: null,
       blockError: null,
-      blockAliases: {},
       reported: [],
       reportError: null,
       notifications: [],
@@ -853,7 +847,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     if (events.some((event) => event.type === 'match.created')) {
       void refreshMatches();
     }
-    // Un mensaje nuevo del otro lado —el bot incluido— se ve solo si la
+    // Un mensaje nuevo del otro lado se ve solo si la
     // conversación está abierta. Se relee la página y se reconcilia por
     // `clientMessageId`, así no se duplica lo que el usuario acaba de mandar. La
     // bandeja se refresca siempre: el preview y el `unreadCount` cambian igual.
@@ -1295,9 +1289,9 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
   };
 
   /**
-   * Relee la conversación y reconcilia. Es el camino del bot: cuando llega
-   * `message.created` (por SSE o por polling) la respuesta aparece sola, sin que
-   * el usuario toque nada y sin perder el scroll ni duplicar lo que ya mandó.
+   * Relee la conversación y reconcilia. Cuando llega `message.created` (por SSE
+   * o por polling) el mensaje del otro lado aparece solo, sin que el usuario
+   * toque nada y sin perder el scroll ni duplicar lo que ya mandó.
    */
   const refreshChat = async (): Promise<void> => {
     const chat = state.chat;
@@ -1442,16 +1436,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     }
     try {
       const blocks = await api.listBlocks();
-      const canonical = new Set(blocks.map((item) => item.block.profileId));
-      // Un alias sólo vale mientras su dueño siga bloqueado: si se desbloqueó
-      // desde otra pestaña, la próxima foto lo descarta.
-      const aliases: Record<string, string> = {};
-      for (const [requested, owner] of Object.entries(state.blockAliases)) {
-        if (canonical.has(owner)) {
-          aliases[requested] = owner;
-        }
-      }
-      set({ blocks, blocksAt: Date.now(), blockError: null, blockAliases: aliases });
+      set({ blocks, blocksAt: Date.now(), blockError: null });
     } catch (error) {
       log(`[block] lista sin respuesta status=${error instanceof LiveApiError ? error.status : 'network'}`);
     }
@@ -1463,11 +1448,7 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
     }
     try {
       const created = await api.createBlock(profileId);
-      const aliases =
-        created.profileId === profileId
-          ? state.blockAliases
-          : { ...state.blockAliases, [profileId]: created.profileId };
-      set({ blockAliases: aliases, blockError: null });
+      set({ blockError: null });
       // El bloqueo cambia discovery, la bandeja y la lista: se refrescan juntos.
       await Promise.all([refreshBlocks(), refreshDiscovery(), refreshPings()]);
       return { ...ACTION_OK, profileId: created.profileId };
@@ -1898,8 +1879,8 @@ export function createLiveController(ports: LiveControllerPorts): LiveController
         set({ pingError: null });
         await refreshPings();
         if (ping.status === 'accepted') {
-          // El bot aceptó solo: sin esta foto la bandeja de matches todavía no
-          // tiene el match y la UI no puede ofrecer "Abrir chat" en el acto.
+          // Sin esta foto la bandeja de matches todavía no tiene el match y la
+          // UI no puede ofrecer "Abrir chat" en el acto.
           await refreshMatches();
         }
         return { ok: true, code: null, status: ping.status, matchId: ping.matchId };

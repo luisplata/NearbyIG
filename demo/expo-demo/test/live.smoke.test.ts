@@ -235,8 +235,7 @@ describe.skipIf(!enabled)('smoke live contra el backend', () => {
     expect(sender.controller.getState().session?.sourceType).toBe('human');
     await waitFor(() => sender.controller.getState().discovery.length > 0, 20_000, 'discovery del emisor');
 
-    // Segunda sesión: una humana con presencia viva. Sus bots existen mientras
-    // tanto (es la misma regla que `/discovery`).
+    // Segunda sesión: una humana con presencia viva.
     const peer = fresh();
     expect(await peer.controller.start()).toBe(true);
     expect(peer.controller.getState().session?.sourceType).toBe('human');
@@ -248,35 +247,22 @@ describe.skipIf(!enabled)('smoke live contra el backend', () => {
     expect(peerId).not.toBe('');
     expect(peerId).not.toBe(senderId);
 
-    // 1. Un bot acepta solo: el 201 vuelve `accepted` con matchId. Los bots se
-    // concilian en el tick del mundo después de la presencia, así que el primer
-    // intento puede ser 404 PROFILE_NOT_FOUND: se reintenta hasta que aparezca.
-    let botPing = await sender.controller.sendPing(`${peerId}-b1`);
-    const botStarted = Date.now();
-    while (!botPing.ok && botPing.code === 'PROFILE_NOT_FOUND' && Date.now() - botStarted < 25_000) {
-      await sleep(1_000);
-      botPing = await sender.controller.sendPing(`${peerId}-b1`);
-    }
-    expect(botPing.ok, `bot ping: ${JSON.stringify({ code: botPing.code, senderId, peerId })}`).toBe(true);
-    expect(botPing.status).toBe('accepted');
-    expect(botPing.matchId).toBeTruthy();
-    expect(sender.controller.getState().pingError).toBeNull();
-
-    // 2. Un humano queda pendiente y aparece en enviados.
+    // 1. El ping sale pendiente (v0.6 no tiene aceptación automática) y aparece
+    // en enviados.
     const humanPing = await sender.controller.sendPing(peerId);
     expect(humanPing.ok).toBe(true);
     expect(humanPing.status).toBe('pending');
     const sent = toPingRows(sender.controller.getState().sentPings, 'sent');
     expect(pingForPeer(sent, peerId)?.status).toBe('pending');
 
-    // 3. El destinatario ve el ping en su inbox (el badge es `pendingCount`).
+    // 2. El destinatario ve el ping en su inbox (el badge es `pendingCount`).
     await peer.controller.refreshPings();
     const inbox = toPingRows(peer.controller.getState().pings, 'inbox');
     const incoming = inbox.find((row) => row.peer.profileId === senderId);
     expect(incoming).toBeDefined();
     expect(pendingCount(inbox)).toBeGreaterThanOrEqual(1);
 
-    // 4. Aceptar crea el match y la fila queda `accepted` con su matchId.
+    // 3. Aceptar crea el match y la fila queda `accepted` con su matchId.
     const match = await peer.controller.acceptPing(incoming?.id ?? '');
     expect(match.ok).toBe(true);
     expect(match.matchId).toBeTruthy();

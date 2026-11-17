@@ -44,10 +44,8 @@ describe('evento del contrato → sonido', () => {
     expect(cueForEvent(own, SELF)).toBeNull();
   });
 
-  it('los eventos de movimiento y presencia no suenan', () => {
-    expect(cueForEvent(event('mx:000000000005', 'profile.moved'), SELF)).toBeNull();
+  it('la presencia no suena', () => {
     expect(cueForEvent(event('mx:000000000006', 'profile.presence'), SELF)).toBeNull();
-    expect(cueForEvent(event('mx:000000000007', 'typing.started'), SELF)).toBeNull();
   });
 
   it('un lote devuelve un sonido por evento nuevo y descarta el reenvío', () => {

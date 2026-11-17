@@ -6,7 +6,7 @@ import { fixtures } from '../generated/fixtures';
 import { toSelfView } from '../live/adapter';
 import { useLive } from '../live/LiveProvider';
 import { liveText } from '../live/liveCopy';
-import { prefsCopy, prefsText } from '../live/prefsCopy';
+import { prefsCopy } from '../live/prefsCopy';
 import { safetyCopy, safetyText } from '../live/safetyCopy';
 import { useGhost } from '../live/useGhost';
 import { useDemo } from '../state/DemoProvider';
@@ -31,7 +31,7 @@ import { ToggleRow } from '../components/ToggleRow';
  * operation todavía no existe) y una nota aclara el fallback. Sin API se ve el
  * `self` del build, que es lo que la demo siempre mostró.
  *
- * **Preferencias.** Radio, filtros y bots se guardan solos (los persiste
+ * **Preferencias.** Radio y filtros se guardan solos (los persiste
  * `PreferencesProvider`); "Restablecer preferencias" los vuelve a fábrica sin
  * tocar la zona ni la sesión. "Reiniciar demo" sigue siendo el reset completo
  * del guion.
@@ -146,15 +146,6 @@ export function SettingsScreen() {
         <Text style={[text.small, styles.error]}>
           {safetyText('ghostError', { code: ghost.error })}
         </Text>
-      )}
-
-      {prefs.botCount === 0 ? null : (
-        <ToggleRow
-          label={prefsCopy.botsLabel}
-          value={prefs.includeBots}
-          subtitle={prefsText('botsCount', { count: String(prefs.botCount) })}
-          onChange={prefs.setIncludeBots}
-        />
       )}
 
       {/* Sonidos: apagado, el motor no crea `AudioContext` ni toca el player. */}

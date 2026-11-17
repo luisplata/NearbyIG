@@ -57,8 +57,6 @@ export function cloneState(state: DemoState): DemoState {
     replyCursor: { ...state.replyCursor },
     catalog: state.catalog,
     source: state.source,
-    includeBots: state.includeBots,
-    botIds: state.botIds,
   };
 }
 
@@ -72,7 +70,6 @@ export function cloneState(state: DemoState): DemoState {
 export function initialState(
   catalog: readonly UiProfile[] = fixtures.profiles,
   source: DemoSource = 'dataset',
-  botIds: readonly string[] = [],
 ): DemoState {
   return {
     view: 'list',
@@ -105,8 +102,6 @@ export function initialState(
     replyCursor: {},
     catalog,
     source,
-    includeBots: true,
-    botIds,
   };
 }
 
@@ -495,7 +490,7 @@ export function reduce(state: DemoState, action: DemoAction): ReduceResult {
     }
 
     case 'RESET':
-      return { state: initialState(state.catalog, state.source, state.botIds), effects: [] };
+      return { state: initialState(state.catalog, state.source), effects: [] };
   }
 }
 

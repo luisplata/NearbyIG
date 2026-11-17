@@ -252,16 +252,16 @@ describe('cliente de chat', () => {
           {
             match: {
               id: MESSAGE.matchId,
-              profileIds: ['mx-p02-b1', 'mx-p05'],
+              profileIds: ['mx-p02', 'mx-p05'],
               createdAt: '2026-11-13T16:00:00.000Z',
             },
             peer: {
-              profileId: 'mx-p02-b1',
+              profileId: 'mx-p02',
               nickname: 'Fran',
               initials: 'FR',
               intention: 'friendship',
               photoId: 'ph02',
-              sourceType: 'bot',
+              sourceType: 'guest',
             },
             lastMessage: MESSAGE,
             unreadCount: 3,
@@ -273,7 +273,7 @@ describe('cliente de chat', () => {
     const matches = await api.listMatches();
     expect(calls[0].url).toBe('/api/matches');
     expect(matches).toHaveLength(1);
-    expect(matches[0].peer.sourceType).toBe('bot');
+    expect(matches[0].peer.sourceType).toBe('guest');
     expect(matches[0].lastMessage?.body).toBe('hola');
     expect(matches[0].unreadCount).toBe(3);
   });

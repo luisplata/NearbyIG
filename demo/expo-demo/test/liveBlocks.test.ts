@@ -18,13 +18,12 @@ const SESSION = {
 };
 
 function row(profileId: string, overrides: Record<string, unknown> = {}) {
-  const bot = /-b\d$/.test(profileId);
   return {
     profileId,
     regionKey: 'mx',
     demoSlot: null,
-    sourceType: bot ? 'bot' : 'human',
-    nickname: bot ? 'Bot de Mica' : 'Nico',
+    sourceType: 'human',
+    nickname: profileId === 'mx-p03' ? 'Fran' : 'Nico',
     initials: 'NI',
     intention: 'friendship',
     gender: 'male',
@@ -41,25 +40,18 @@ function row(profileId: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** Id canónico de un perfil: un bot pertenece a su dueño (`mx-p02-b1 → mx-p02`). */
-function ownerOf(profileId: string): string {
-  return profileId.replace(/-b\d$/, '');
-}
-
 /**
- * Backend de mentira con bloqueos y reportes del contrato v0.5: canoniza bots,
- * excluye el par de discovery y es idempotente. El objetivo es ejercer los
- * caminos reales del controller, no reimplementar el server.
+ * Backend de mentira con bloqueos y reportes del contrato v0.6: excluye el par
+ * de discovery y es idempotente. El objetivo es ejercer los caminos reales del
+ * controller, no reimplementar el server.
  */
 function makeServer() {
   const blocks = new Map<string, string>();
   const reports: { profileId: string; reason: string }[] = [];
-  const all = [row('mx-p02'), row('mx-p02-b1', { distanceM: 900 }), row('mx-p03'), row(SESSION.profileId, { demoSlot: 9 })];
+  const all = [row('mx-p02'), row('mx-p03', { distanceM: 900 }), row(SESSION.profileId, { demoSlot: 9 })];
 
   const visible = () =>
-    all.filter(
-      (item) => item.profileId !== SESSION.profileId && !blocks.has(ownerOf(item.profileId)),
-    );
+    all.filter((item) => item.profileId !== SESSION.profileId && !blocks.has(item.profileId));
 
   const listBlocks = () => ({
     blocks: [...blocks.entries()].map(([profileId, createdAt]) => ({
@@ -104,11 +96,10 @@ function makeServer() {
       if (requested === SESSION.profileId) {
         return { status: 422, body: '{"code":"VALIDATION_FAILED"}' };
       }
-      const canonical = ownerOf(requested);
-      if (!blocks.has(canonical)) {
-        blocks.set(canonical, '2026-11-13T17:48:37.874Z');
+      if (!blocks.has(requested)) {
+        blocks.set(requested, '2026-11-13T17:48:37.874Z');
       }
-      return { status: 201, body: JSON.stringify({ profileId: canonical, createdAt: blocks.get(canonical) }) };
+      return { status: 201, body: JSON.stringify({ profileId: requested, createdAt: blocks.get(requested) }) };
     },
     'POST /api/reports': (_url, body) => {
       const parsed = JSON.parse(String(body)) as { profileId: string; reason: string };
@@ -128,7 +119,7 @@ function makeServer() {
     const base = url.split('?')[0];
     const deleteMatch = /^\/api\/blocks\/(.+)$/.exec(base);
     if (method === 'DELETE' && deleteMatch !== null) {
-      blocks.delete(ownerOf(decodeURIComponent(deleteMatch[1]!)));
+      blocks.delete(decodeURIComponent(deleteMatch[1]!));
       return { ok: true, status: 204, text: async () => '' };
     }
     const route = routes[`${method} ${base}`];
@@ -160,12 +151,12 @@ function makeController(server: ReturnType<typeof makeServer>) {
 }
 
 describe('cliente de bloqueos y reportes', () => {
-  it('POST /blocks devuelve el canonizado y GET /blocks proyecta el peer', async () => {
+  it('POST /blocks devuelve el mismo perfil y GET /blocks proyecta el peer', async () => {
     const server = makeServer();
     const api = createLiveApi({ baseUrl: '/api', fetchImpl: server.fetchImpl as never });
     api.setToken(SESSION.token);
 
-    const created = await api.createBlock('mx-p02-b1');
+    const created = await api.createBlock('mx-p02');
     expect(created.profileId).toBe('mx-p02');
 
     const blocks = await api.listBlocks();
@@ -236,11 +227,10 @@ describe('adapter de bloqueos', () => {
     expect(rows.map((row) => row.profileId)).toEqual(['mx-p03', 'mx-p02']);
   });
 
-  it('un alias de bot cuenta como bloqueado sin repetir la regla de nombres', () => {
+  it('un bloqueado se reconoce por su id, sin reglas de nombres', () => {
     const rows = toBlockRows(items);
-    expect(isBlockedPeer(rows, {}, 'mx-p02')).toBe(true);
-    expect(isBlockedPeer(rows, { 'mx-p02-b1': 'mx-p02' }, 'mx-p02-b1')).toBe(true);
-    expect(isBlockedPeer(rows, { 'mx-p09-b1': 'mx-p09' }, 'mx-p09-b1')).toBe(false);
+    expect(isBlockedPeer(rows, 'mx-p02')).toBe(true);
+    expect(isBlockedPeer(rows, 'mx-p09')).toBe(false);
   });
 
   it('los códigos de error de la familia tienen copy propio', () => {
@@ -252,35 +242,33 @@ describe('adapter de bloqueos', () => {
 });
 
 describe('bloquear y reportar en el controller', () => {
-  it('bloquear un bot canoniza al dueño, deja el alias y lo saca de discovery', async () => {
+  it('bloquear un par lo saca de discovery y queda en la lista', async () => {
     const server = makeServer();
     const controller = makeController(server);
     await controller.start();
-    expect(controller.getState().discovery.map((item) => item.profileId)).toContain('mx-p02-b1');
+    expect(controller.getState().discovery.map((item) => item.profileId)).toContain('mx-p02');
 
-    const result = await controller.block('mx-p02-b1');
+    const result = await controller.block('mx-p02');
     expect(result).toEqual({ ok: true, code: null, profileId: 'mx-p02' });
 
     const state = controller.getState();
-    expect(state.blockAliases['mx-p02-b1']).toBe('mx-p02');
     expect(state.blocks.map((item) => item.block.profileId)).toEqual(['mx-p02']);
     expect(state.discovery.map((item) => item.profileId)).toEqual(['mx-p03']);
     expect(state.blockError).toBeNull();
     await controller.stop();
   });
 
-  it('desbloquear devuelve el par a discovery y limpia el alias', async () => {
+  it('desbloquear devuelve el par a discovery', async () => {
     const server = makeServer();
     const controller = makeController(server);
     await controller.start();
-    await controller.block('mx-p02-b1');
-    const back = await controller.unblock('mx-p02-b1');
+    await controller.block('mx-p02');
+    const back = await controller.unblock('mx-p02');
 
     expect(back.ok).toBe(true);
     const state = controller.getState();
     expect(state.blocks).toEqual([]);
-    expect(state.blockAliases).toEqual({});
-    expect(state.discovery.map((item) => item.profileId)).toContain('mx-p02-b1');
+    expect(state.discovery.map((item) => item.profileId)).toContain('mx-p02');
     await controller.stop();
   });
 

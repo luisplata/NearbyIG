@@ -38,7 +38,7 @@ export const API_STORAGE_KEY = 'nearbyig.api';
 export const ZONE_STORAGE_KEY = 'nearbyig.demoZone';
 
 /**
- * Clave de las preferencias del usuario: radio, filtros y toggle de bots.
+ * Clave de las preferencias del usuario: radio, filtros y sonidos.
  *
  * Guarda **sólo** decisiones de UI (números de radio, enums del catálogo y
  * booleanos). No hay coordenadas ni identidad de sesión: el punto del GPS sigue
