@@ -33,7 +33,7 @@ import {
   type PingResult,
   type SendMessageResult,
 } from './controller';
-import { requestBrowserPoint } from './geolocation';
+import { requestPoint } from './requestPoint';
 import { toBlockRows, type BlockRow } from './safety';
 import { toMatchRows, type MatchRow } from './chat';
 import { toNotificationRows, type NotificationRow } from './notifications';
@@ -193,7 +193,10 @@ export function LiveProvider({
       onZoneChange: writeStoredZone,
       onVisibilityChange: writeStoredVisibility,
       createEventSource: createEventSource ?? defaultEventSource,
-      requestPoint: requestBrowserPoint,
+      // Sin extensión a propósito: Metro resuelve `requestPoint.native.ts` en
+      // android/ios y `requestPoint.ts` en web (design A2). El paquete nativo
+      // queda inalcanzable desde el bundle publicado por construcción.
+      requestPoint,
       // El usuario puede copiar estos logs cuando algo no cuadra. Sin coordenadas.
       log: (message) => console.info(message),
       onCatalog: (profiles, source) => {

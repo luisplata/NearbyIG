@@ -15,10 +15,12 @@ import { DEMO_CENTER } from '../src/map/basemap';
  * que acepta coordenadas), así que el invariante cambió de "cero geolocalización"
  * a "una sola puerta, un solo destino":
  *
- * - la ubicación se pide en un único módulo (`live/geolocation.ts`) y no hay
- *   canal continuo de posiciones (`watchPosition`): el seguimiento del modo GPS
- *   es una lectura puntual cada 10 s y sólo se manda al server si el punto se
- *   movió 10 m o más;
+ * - la ubicación se pide en una única puerta (`live/geolocation.ts`) con **un
+ *   adapter por plataforma**: el navegador en web y `expo-location` en el
+ *   binario (`live/requestPoint.native.ts`, el único que nombra el paquete). No
+ *   hay canal continuo de posiciones (`watchPosition`): el seguimiento del modo
+ *   GPS es una lectura puntual cada 10 s y sólo se manda al server si el punto
+ *   se movió 10 m o más;
  * - el punto no se guarda en ningún storage ni en una cookie: el navegador lo
  *   conserva en memoria el tiempo que dura la sesión, y el server lo descarta al
  *   proyectar región y zona;
@@ -46,8 +48,16 @@ const FILES = walk(SRC).map((absolute) => ({
   text: readFileSync(absolute, 'utf8'),
 }));
 
-/** Único módulo autorizado a hablar con la API de geolocalización del navegador. */
-const GEOLOCATION_MODULE = 'live/geolocation.ts';
+/**
+ * Únicos módulos autorizados a hablar con una API de geolocalización: la puerta
+ * compartida y el adapter nativo. El adapter **tiene** que estar: la API del
+ * device se llama `getCurrentPositionAsync` y ninguna forma de invocarla evita
+ * escribir el identificador. El invariante que se sostiene (y se testea abajo)
+ * es que sean dos, uno por plataforma, y que el paquete nativo no salga de acá.
+ */
+const GEOLOCATION_MODULES = ['live/geolocation.ts', 'live/requestPoint.native.ts'];
+/** Único adapter nativo: si otro módulo importa `expo-location`, se rompió el seam. */
+const NATIVE_ADAPTER = 'live/requestPoint.native.ts';
 /** Único módulo autorizado a tocar storage: guarda la base de la API, no el punto. */
 const STORAGE_MODULE = 'live/config.ts';
 /** Módulos donde se configuran URLs absolutas de verdad (mapa y override). */
@@ -58,16 +68,27 @@ describe('privacidad de la ubicación', () => {
     expect(FILES.length).toBeGreaterThan(20);
   });
 
-  it('la ubicación sólo se pide en un módulo', () => {
+  it('la ubicación sólo se pide en la puerta y su adapter nativo', () => {
     const offenders = FILES.filter((file) =>
       /navigator\.geolocation|getCurrentPosition|permissions\.query/i.test(file.text),
     )
       .map((file) => file.path)
-      .filter((path) => path !== GEOLOCATION_MODULE);
+      .filter((path) => !GEOLOCATION_MODULES.includes(path));
     expect(offenders).toEqual([]);
   });
 
+  it('expo-location sólo lo nombra el adapter nativo', () => {
+    // Metro elige `.native.ts` en android/ios y `.ts` en web: si el paquete
+    // aparece en otro módulo, el bundle web puede alcanzarlo y el seam se cayó.
+    const importers = FILES.filter((file) => /['"]expo-location['"]/.test(file.text)).map(
+      (file) => file.path,
+    );
+    expect(importers).toEqual([NATIVE_ADAPTER]);
+  });
+
   it('no hay seguimiento continuo de la ubicación', () => {
+    // El patrón caza también `watchPositionAsync` y `clearWatchAsync` del paquete
+    // nativo: la negación de la izquierda es lo único que se declara prohibido.
     for (const file of FILES) {
       expect(file.text, file.path).not.toMatch(/watchPosition|clearWatch/i);
     }

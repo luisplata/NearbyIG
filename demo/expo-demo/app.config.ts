@@ -75,5 +75,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         backgroundColor: '#09090B',
       },
     ],
+    /**
+     * Permiso de ubicación del binario. El texto es lo que el sistema muestra en
+     * el diálogo (iOS `NSLocationWhenInUseUsageDescription`, Android el aviso de
+     * ubicación en primer plano): dice las tres cosas que importan —cuándo se
+     * usa, para qué, y que no se guarda—, porque quien lo lee está decidiendo en
+     * ese momento si confía en la app.
+     *
+     * En web este plugin no hace nada: ahí el permiso lo pide el navegador.
+     */
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Nearby Social Club usa tu ubicación sólo mientras usás la demo, para mostrar tu punto en el radar. No se guarda ni se comparte.',
+      },
+    ],
   ],
 });
