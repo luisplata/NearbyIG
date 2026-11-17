@@ -94,7 +94,7 @@ info:
     `x-contract-id` es el hash corto (12 hex de SHA-256) del documento canónico
     con este mismo campo reemplazado por `pending`, para que el hash no dependa
     de sí mismo. `contract:validate` lo recalcula y falla si no coincide.
-  x-contract-id: '3b0703ed2d53'
+  x-contract-id: 'bbdd239893ca'
 
 servers:
   - url: http://localhost:3000

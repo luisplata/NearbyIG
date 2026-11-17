@@ -3,7 +3,7 @@
  *
  * Source: contract/openapi.yaml
  * Generator: openapi-typescript 7.13.0 (pinned exact in package.json)
- * Contract: x-contract-id 3b0703ed2d53
+ * Contract: x-contract-id bbdd239893ca
  *
  * Type-only client: no runtime code and no imports. Regenerate with
  * `npm run contract:generate`. The drift gate is `npm run contract:generate:check`.
@@ -370,10 +370,10 @@ export interface paths {
          *     fila con su estado. `201`, no `200`: el ping es un recurso nuevo con
          *     identidad propia.
          *
-         *     **Destinatario.** Tiene que existir en la región de la sesión y tener
-         *     presencia viva. Un `profileId` de otra región, uno inexistente y uno sin
-         *     presencia son todos `404 PROFILE_NOT_FOUND`: el ping no cruza regiones y un
-         *     perfil sin presencia no está en el descubrimiento.
+         *     **Destinatario.** Tiene que existir en el catálogo de la región de la
+         *     sesión (`source_type: human`). La presencia **no** es requisito: un ping a
+         *     alguien que no está en línea queda `pending` igual. Un `profileId`
+         *     inexistente o de otra región es `404 PROFILE_NOT_FOUND`.
          *
          *     **Uno pendiente por par dirigido.** `A → B` y `B → A` son dos pings
          *     distintos, pero `A → B` no puede tener dos pendientes a la vez: el segundo

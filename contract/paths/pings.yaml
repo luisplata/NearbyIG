@@ -13,7 +13,6 @@
 # |---|---|---|
 # | ping a sí mismo | 422 VALIDATION_FAILED | El body está bien; el pedido no |
 # | destino de otra región o inexistente | 404 PROFILE_NOT_FOUND | Un ping no cruza regiones |
-# | destino sin presencia viva | 404 PROFILE_NOT_FOUND | Sin presencia el perfil no está |
 # | par ya tiene un ping pendiente | 409 PING_DUPLICATE | Un pendiente por par dirigido |
 # | el pendiente del par ya venció | 410 PING_EXPIRED | El anterior se cerró; reintentar crea uno nuevo |
 # | cuota de envíos agotada | 429 RATE_LIMITED | El body no se corrige, se espera |
@@ -37,10 +36,10 @@ pings:
       fila con su estado. `201`, no `200`: el ping es un recurso nuevo con
       identidad propia.
 
-      **Destinatario.** Tiene que existir en la región de la sesión y tener
-      presencia viva. Un `profileId` de otra región, uno inexistente y uno sin
-      presencia son todos `404 PROFILE_NOT_FOUND`: el ping no cruza regiones y un
-      perfil sin presencia no está en el descubrimiento.
+      **Destinatario.** Tiene que existir en el catálogo de la región de la
+      sesión (`source_type: human`). La presencia **no** es requisito: un ping a
+      alguien que no está en línea queda `pending` igual. Un `profileId`
+      inexistente o de otra región es `404 PROFILE_NOT_FOUND`.
 
       **Uno pendiente por par dirigido.** `A → B` y `B → A` son dos pings
       distintos, pero `A → B` no puede tener dos pendientes a la vez: el segundo
