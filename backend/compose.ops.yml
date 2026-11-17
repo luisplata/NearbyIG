@@ -1,0 +1,55 @@
+# Overlay de OBSERVABILIDAD. Se suma al base (y opcionalmente al dev):
+#
+#   docker compose -f compose.yml -f compose.dev.yml -f compose.ops.yml up -d
+#
+# Agrega UN solo servicio: Dozzle, un visor de logs en vivo de todos los
+# contenedores del daemon. No hay base, ni agente, ni métricas: para la demo
+# alcanza con leer `docker logs` desde el navegador.
+#
+#   http://localhost:9999
+#
+# Por qué el socket va en sólo lectura: Dozzle lee los logs a través de la API
+# de Docker. Con `:ro` el contenedor no puede crear, borrar ni reiniciar nada
+# aunque la UI o un bug lo intentara; las acciones quedan deshabilitadas además
+# por `DOZZLE_ENABLE_ACTIONS=false`.
+#
+# Apagarlo sin tocar la API ni la base:
+#
+#   docker compose -f compose.yml -f compose.dev.yml -f compose.ops.yml stop dozzle
+#   docker compose -f compose.yml -f compose.dev.yml -f compose.ops.yml rm -sf dozzle
+#
+# Sólo local: el puerto se publica en todas las interfaces por simplicidad del
+# compose, igual que la API en desarrollo. No lo expongas a internet.
+services:
+  dozzle:
+    # Versión fijada y verificada con `docker manifest inspect` (existe el
+    # manifiesto linux/amd64). No es `latest` a propósito: el visor de logs no
+    # es el lugar donde queremos un cambio de imagen inesperado.
+    image: amir20/dozzle:v9.0.3
+    ports:
+      - '${DOZZLE_PORT:-9999}:8080'
+    volumes:
+      # Docker Desktop (Windows/macOS, contenedores Linux) y Docker Engine
+      # exponen el socket en la misma ruta. Sólo lectura.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # La UI muestra logs, no opera contenedores. Sin acciones no hay forma de
+      # reiniciar o borrar nada desde el navegador.
+      DOZZLE_ENABLE_ACTIONS: 'false'
+      # Sin telemetría saliente: la demo corre en una laptop y no necesitamos
+      # que Dozzle cuente visitas.
+      DOZZLE_NO_ANALYTICS: 'true'
+    read_only: true
+    # Dozzle no necesita escribir en disco (no hay auth ni base local), pero
+    # Go suele usar /tmp: se lo damos como tmpfs para no romper con read_only.
+    tmpfs:
+      - /tmp
+    mem_limit: 128m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '2'
+    restart: unless-stopped

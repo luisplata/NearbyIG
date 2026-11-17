@@ -26,6 +26,7 @@
     "contract:generate:check": "node contract/scripts/generate-client.mjs --check",
     "contract:typecheck": "tsc -p contract/tsconfig.json",
     "contract:gates": "node contract/scripts/gates.mjs",
+    "ops:status": "node backend/scripts/ops-status.mjs",
     "contract:check": "npm run contract:validate && npm run contract:generate:check && npm run contract:seed:check && npm run contract:event-log:check && npm run contract:test && npm run contract:typecheck && git diff --exit-code"
   },
   "devDependencies": {

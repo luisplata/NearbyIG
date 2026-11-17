@@ -910,6 +910,7 @@ persona).
 | `compose.yml` | producción/local: target `runtime`, usuario `node` (uid 1000), sin bind mounts |
 | `compose.dev.yml` | overlay: target `development`, bind mount del código, `start:dev`, puerto 9229, Postgres publicado |
 | `compose.prod.yml` | overlay de producción: base administrada por `DATABASE_URL`, `db` detrás del perfil `local-db`, API sólo en loopback, secretos obligatorios |
+| `compose.ops.yml` | overlay de observabilidad: Dozzle en `http://localhost:9999`, socket Docker en sólo lectura |
 | `Dockerfile` | multi-stage (`deps` → `build` → `runtime-deps` → `runtime`, y `development`), `HEALTHCHECK` sobre `/health/ready` |
 | `Dockerfile.dockerignore` | el contexto es la raíz del repo (hace falta `contract/`), así que se excluye todo lo demás |
 | `.env.production.example` | variables de producción documentadas, sin secretos reales |
@@ -919,6 +920,65 @@ los únicos versionados. En producción la API no arranca sin `DATABASE_URL`, si
 un `JWT_SECRET` de 32+ caracteres y sin `CORS_ALLOWED_ORIGINS`
 (`src/config/env.ts` y `compose.prod.yml` fallan en el boot, no en la primera
 request). Deploy completo: [`docs/runbook-demo.md`](../docs/runbook-demo.md).
+
+## Observabilidad mínima (demo)
+
+Dos cosas y nada más: **ver logs** y **saber si la demo está sana**. Sin
+Prometheus, sin Grafana, sin agente.
+
+### Dozzle: logs en vivo en el navegador
+
+`compose.ops.yml` agrega un solo contenedor (`amir20/dozzle:v9.0.3`) que lee los
+logs de todos los contenedores del daemon y los muestra en
+**`http://localhost:9999`**.
+
+```bash
+# levantar todo con logs en vivo
+docker compose -f compose.yml -f compose.dev.yml -f compose.ops.yml up -d
+
+# apagar sólo el visor (API y base siguen arriba)
+docker compose -f compose.yml -f compose.dev.yml -f compose.ops.yml stop dozzle
+
+# sacarlo del stack y liberar el puerto
+docker compose -f compose.yml -f compose.dev.yml -f compose.ops.yml rm -sf dozzle
+```
+
+| Detalle | Valor |
+|---|---|
+| Imagen | `amir20/dozzle:v9.0.3` (fijada; verificada con `docker manifest inspect`) |
+| Puerto | `9999:8080` (`DOZZLE_PORT` lo cambia) |
+| Socket | `/var/run/docker.sock:/var/run/docker.sock:ro` — sólo lectura |
+| Acciones | apagadas (`DOZZLE_ENABLE_ACTIONS=false`): la UI no reinicia ni borra nada |
+| Rootfs | `read_only: true` + `tmpfs: /tmp` (Dozzle no escribe en disco) |
+| Límites | 128 MB de memoria, `no-new-privileges` |
+| Auth | **no tiene**: quien abra el puerto ve logs. Es local, no lo publiques |
+
+### `npm run ops:status`: un comando, toda la foto
+
+Desde la **raíz** del repo (el script vive en `backend/scripts/ops-status.mjs`):
+
+```bash
+npm run ops:status
+```
+
+Imprime contenedores (estado + health), `/health` y `/health/ready` con latencia,
+conteos de la base, las últimas 20 líneas con `error|warn|exception` del log de
+la API y el estado del túnel `cloudflared` (con la URL `trycloudflare` si
+aparece en un log).
+
+| Salida | Significado |
+|---|---|
+| código `0` | todo verde: contenedores arriba y healthy, health 200/200 |
+| código `1` | algo caído: health distinto de 200, contenedor ausente o no-healthy |
+
+Es un **snapshot**: si corre mientras un contenedor está en `health: starting`
+(primeros ~10 s después de un `up`/`start`), sale 1 hasta que el healthcheck
+pasa. Sirve igual para CI y para el chequeo rápido antes de una demo.
+
+Variables: `API_BASE_URL` (default `http://localhost:3000`), `DOZZLE_PORT`
+(default `9999`), `CLOUDFLARED_LOG` (ruta a un log para extraer la URL). Todos
+los comandos externos tienen timeout de 10 s; sin `grep`, `rm` ni rutas Unix
+hardcodeadas — corre en Windows y en Linux/macOS.
 
 ## Hardening (S7)
 
