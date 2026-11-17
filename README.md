@@ -56,7 +56,7 @@ Sitio vivo:
 | `https://luisplata.github.io/NearbyIG/` | landing con datasetId y el enlace a la demo |
 | `https://luisplata.github.io/NearbyIG/expo/` | demo Expo web |
 
-Dataset publicado: `ds-f88cad85` (schema 2). Las tres páginas comparten el mismo contrato.
+Dataset publicado: `ds-bd430de1` (schema 2). Las tres páginas comparten el mismo contrato.
 
 La demo arranca en la **lista**. Tiene cuatro tabs (Lista → Radar → Pings → Perfil) y un
 radar compuesto sobre un basemap real de referencia (OpenFreeMap, un solo host, sin key,

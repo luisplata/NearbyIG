@@ -58,6 +58,10 @@ test('la landing no promete paridad total', () => {
   }
   assert.match(copy['landing.expo.tag'], /demo activa/i);
   assert.match(copy['landing.subtitle'], /Expo/);
+  // El subtítulo nombra la demo real y su basemap real: "de referencia" describe
+  // un mapa ilustrado que ya no es el de la demo publicada. Esta aserción se
+  // borró en su momento en vez de corregir el copy; vuelve como contrato.
+  assert.doesNotMatch(copy['landing.subtitle'], /referencia/i);
 });
 
 test('el header Expo muestra marca y slogan sin el chip DEMO', () => {

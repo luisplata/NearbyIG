@@ -108,7 +108,7 @@ export const copy = {
   "landing.footer": "Demo no funcional de Nearby Social Club. Datos ficticios, sin backend, auth, push ni geolocalización real.",
   "landing.openExpo": "Abrir la demo Expo",
   "landing.simIntro": "La demo activa no tiene servidor propio: el estado corre en el navegador y el único pedido externo son los tiles del basemap.",
-  "landing.subtitle": "La demo publicada corre en Expo: lista cercana y radar sobre un basemap de referencia, con el estado que congelan los digests del contrato.",
+  "landing.subtitle": "La demo publicada corre en Expo: lista cercana y radar ilustrado sobre un basemap real de OpenFreeMap, con el estado que congelan los digests del contrato.",
   "landing.title": "Nearby Social Club, demo interactiva",
   "map.label.biblioteca": "Biblioteca",
   "map.label.mercado": "Mercado",
