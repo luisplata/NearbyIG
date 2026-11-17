@@ -13,7 +13,7 @@
  * Los targets que todavía no existen se informan como `skipped`, no son un error.
  *
  * Flags:
- *   --target <all|flutter|expo|landing>
+ *   --target <all|expo|landing>
  *   --no-raster        usa los PNG ya commiteados
  *   --check            no escribe: falla si algo quedó desactualizado (drift)
  */
@@ -42,7 +42,6 @@ const targetArg = (() => {
 })();
 
 const TARGETS = {
-  flutter: { root: join(ROOT, 'demo', 'flutter-demo'), label: 'demo/flutter-demo' },
   expo: { root: join(ROOT, 'demo', 'expo-demo'), label: 'demo/expo-demo' },
   landing: { root: join(ROOT, 'demo', 'landing'), label: 'demo/landing' },
 };
@@ -61,8 +60,8 @@ const FONT_ASSETS = [
 
 /**
  * Sólo la app nativa los consume: el icono de 1024 (iOS y splash) y el
- * foreground del icono adaptativo de Android. Flutter y la landing siguen con
- * 192/512: ningún bundle web los importa, así que el artefacto no engorda.
+ * foreground del icono adaptativo de Android. La landing sigue con 192/512:
+ * ningún bundle web los importa, así que el artefacto no engorda.
  */
 const NATIVE_BRAND_ASSETS = [
   { source: join(SHARED, 'assets/brand/icon-1024.png'), target: 'assets/brand/icon-1024.png' },
@@ -74,13 +73,11 @@ const NATIVE_BRAND_ASSETS = [
 
 /** La landing necesita el icono (favicon) y las fuentes para no pedir nada externo. */
 const TARGET_ASSETS = {
-  flutter: [...BRAND_ASSETS, ...FONT_ASSETS],
   expo: [...BRAND_ASSETS, ...FONT_ASSETS, ...NATIVE_BRAND_ASSETS],
   landing: [...BRAND_ASSETS, ...FONT_ASSETS],
 };
 
 const TARGET_GOLDEN = {
-  flutter: true,
   expo: true,
   landing: false,
 };

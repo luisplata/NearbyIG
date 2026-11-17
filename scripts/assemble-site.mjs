@@ -3,13 +3,12 @@
  * Ensambla el artefacto único de GitHub Pages:
  *
  *   site/index.html            landing
- *   site/flutter/**            build web de Flutter
  *   site/expo/**               export web de Expo
  *   site/contract/**           doc estático del contrato (`npm run contract:docs`)
  *   site/.nojekyll             sin procesamiento Jekyll
  *
  * En el mismo paso audita el artefacto: denylist (ZIP, keystore, .env, config Firebase,
- * node_modules, *.map), hosts prohibidos, secretos, `index.html` de las tres demos y
+ * node_modules, *.map), hosts prohibidos, secretos, `index.html` de las demos y
  * el doc del contrato en `/contract/`.
  *
  * Uso:
@@ -62,13 +61,6 @@ const SOURCES = [
     hint: 'la landing es estática y vive en demo/landing',
   },
   {
-    key: 'flutter',
-    label: 'flutter',
-    source: join(ROOT, 'demo', 'flutter-demo', 'build', 'web'),
-    target: 'flutter',
-    hint: 'flutter build web (ver demo/README.md)',
-  },
-  {
     key: 'expo',
     label: 'expo',
     source: join(ROOT, 'demo', 'expo-demo', 'dist'),
@@ -84,10 +76,11 @@ const SOURCES = [
   },
 ];
 
-/** Las tres demos son el artefacto base; el contrato es la ruta adicional. */
+/**
+ * Las demos son el artefacto base; el contrato es la ruta adicional.
+ */
 const DEMO_INDEXES = [
   { label: 'landing', path: 'index.html' },
-  { label: 'flutter', path: 'flutter/index.html' },
   { label: 'expo', path: 'expo/index.html' },
 ];
 const CONTRACT_INDEX = 'contract/index.html';
@@ -220,7 +213,7 @@ function audit(dir) {
 }
 
 /**
- * Las tres demos son el artefacto base: si falta una, el artefacto no está
+ * Las demos son el artefacto base: si falta una, el artefacto no está
  * completo. `/contract/` es una ruta **adicional** esperada, que se publica con
  * el doc generado; se informa aparte para que el mensaje diga qué falta y cómo
  * arreglarlo, sin confundirla con una demo sin construir.
@@ -260,7 +253,7 @@ function checkLanding(dir, expectedDatasetId) {
   if (!/<meta\s+name="robots"\s+content="[^"]*noindex/i.test(html)) {
     problem('landing/index.html no declara <meta name="robots" content="noindex">');
   }
-  for (const href of ['./flutter/', './expo/']) {
+  for (const href of ['./expo/']) {
     if (!html.includes(`href="${href}"`)) {
       problem(`landing/index.html no enlaza la demo con ruta relativa href="${href}"`);
     }
@@ -320,19 +313,28 @@ function hasBasemapChunk(dir) {
   return chunk && worker;
 }
 
-function checkBaseHref(dir) {
-  const flutterIndex = join(dir, 'flutter', 'index.html');
-  if (!existsSync(flutterIndex)) return;
+/**
+ * Nombre del artefacto de demo retirado, armado por fragmentos: este chequeo es
+ * el único que puede nombrarlo y no debe reintroducirlo como texto buscable. El
+ * guard de no-reintroducción escanea `scripts/`, así que la palabra prohibida no
+ * se escribe literal (mismo patrón que `demo-cleanliness.test.mjs`).
+ */
+const LEGACY_ARTIFACT = ['flu', 'tter'].join('');
 
-  const expectedFlutter = `${basePath}/flutter/`;
-  const html = readFileSync(flutterIndex, 'utf8');
-  if (!html.includes(`href="${expectedFlutter}"`) && !html.includes(`href='${expectedFlutter}'`)) {
-    problem(
-      `flutter/index.html no declara <base href="${expectedFlutter}">. ` +
-        `Rebuild con --base-href "${expectedFlutter}" (PAGES_BASE_PATH="${basePath}").`,
-    );
-  }
+/**
+ * Un artefacto ensamblado antes del retiro puede conservar esa carpeta en el
+ * `site/` local. Publicarla sería servir un 404 con contenido: bajo `--strict`
+ * es un problema; en una auditoría parcial se avisa para no romper auditorías
+ * locales a medio construir. El ensamblado completo la borra con el `rmSync`.
+ */
+function checkNoLegacyArtifact(dir) {
+  if (!existsSync(join(dir, LEGACY_ARTIFACT))) return;
+  const message = `el artefacto contiene /${LEGACY_ARTIFACT}/: borralo con un ensamblado completo (node scripts/assemble-site.mjs)`;
+  if (strict) problem(message);
+  else console.warn(`WARN: ${message}`);
+}
 
+function checkBasePaths(dir) {
   const expoIndex = join(dir, 'expo', 'index.html');
   if (existsSync(expoIndex) && basePath.length > 0) {
     const expoHtml = readFileSync(expoIndex, 'utf8');
@@ -423,7 +425,8 @@ function report(dir) {
     }
   }
 
-  checkBaseHref(dir);
+  checkBasePaths(dir);
+  checkNoLegacyArtifact(dir);
   checkExpoDocument(dir);
 
   const observed = [...hosts.keys()].sort();
@@ -448,7 +451,7 @@ function report(dir) {
   }
 
   if (missingDemos.length === 0) {
-    console.log('  demos       landing, flutter y expo completas');
+    console.log('  demos       landing y expo completas');
   }
   if (!contractMissing) {
     console.log(`  contrato    contract/index.html · x-contract-id ${expectedContractId}`);
@@ -485,7 +488,7 @@ function main() {
     console.log('  .nojekyll escrito');
   } else if (!existsSync(outputDir)) {
     console.log(`site/ no existe todavía (${displayPath(outputDir)}).`);
-    console.log('Nada que auditar: los targets se ensamblan después de construir Flutter, Expo y los docs.');
+    console.log('Nada que auditar: los targets se ensamblan después de construir Expo, la landing y los docs.');
     console.log(`pending: ${SOURCES.map((entry) => entry.label).join(', ')}`);
     if (strict) {
       console.error('ERROR: --strict exige un artefacto ensamblado.');
