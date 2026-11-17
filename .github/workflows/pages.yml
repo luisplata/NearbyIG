@@ -162,6 +162,11 @@ jobs:
         env:
           # Expo exige barra inicial y prohíbe la final.
           EXPO_BASE_URL: ${{ steps.pages.outputs.base_path }}/expo
+          # Endpoint del backend para el build. Se define como variable del repo
+          # (`NEARBYIG_API_URL`) porque un túnel cambia de URL: actualizás la
+          # variable y re-corrés el workflow, sin tocar código. Vacío ⇒ live
+          # deshabilitado y el artefacto queda como el mock.
+          EXPO_PUBLIC_API_URL: ${{ vars.NEARBYIG_API_URL }}
         run: npx expo export --platform web --output-dir dist --clear
 
       - name: Flutter build
