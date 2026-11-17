@@ -17,8 +17,8 @@ import type {
 const timers = fixtures.timers;
 
 /**
- * Copia explícita del estado (equivalente a `DemoState.copy()` en Dart). No se
- * usa `structuredClone`: el reducer debe comportarse igual en Hermes y en web.
+ * Copia explícita del estado. No se usa `structuredClone`: el reducer no puede
+ * depender de cuán nuevo sea el runtime que lo ejecuta.
  */
 export function cloneState(state: DemoState): DemoState {
   const filters: DiscoveryFilters = {

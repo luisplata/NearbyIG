@@ -4,9 +4,9 @@ import type { Gender, Intention } from '../generated/fixtures';
 import type { DemoEffectKind, DemoView, DemoOverlay } from './types';
 
 /**
- * Las 27 acciones del contrato (state-machine.md §2). Mismo union que
- * `DemoActionType` de la app Flutter; `actionFromJson` replica su `fromJson`
- * para que el golden de paridad use exactamente el mismo mapeo.
+ * Las 27 acciones del contrato (state-machine.md §2). `actionFromJson` mapea el
+ * JSON de `golden/steps.json` a este union, así que el golden reproduce
+ * exactamente las acciones que describe el contrato.
  */
 export type DemoAction =
   | { type: 'SET_VIEW'; view: DemoView }

@@ -4,7 +4,7 @@
  *
  * **Por qué acá y no en `demo/shared/copy.json`.** Mismo motivo que `liveCopy`,
  * `pingsCopy` y `prefsCopy`: el catálogo compartido alimenta el `datasetId` del
- * artefacto congelado (Flutter + golden). Estos textos son del flujo live, que
+ * artefacto publicado (dataset y golden). Estos textos son del flujo live, que
  * no existe en ese artefacto.
  *
  * Lo que **sí** se reutiliza por `fmt()` es lo que ya estaba: `settings.ghost`

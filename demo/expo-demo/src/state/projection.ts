@@ -3,9 +3,9 @@ import { fixtures } from '../generated/fixtures';
 import type { ChatMessage, DemoNotification, DemoState } from './types';
 
 /**
- * Proyección normada del estado (state-machine.md §8). Espejo de
- * `lib/state/projection.dart`: líneas `clave=valor`, sin depender del orden de
- * claves de un JSON, para que Dart y TS produzcan el mismo digest.
+ * Proyección normada del estado (state-machine.md §8): líneas `clave=valor`,
+ * sin depender del orden de claves de un JSON, para que el digest dependa sólo
+ * del estado y no de cómo lo serialice cada runtime.
  *
  * Reglas de serialización:
  * - `null` → `-`; booleanos → `1` / `0`.

@@ -1,6 +1,7 @@
 /**
  * Distancia según el contrato: `< 1000` → `"N m"`; si no → `"X,Y km"` con una
- * decimal y coma decimal (sin `Intl`, igual que la app Flutter).
+ * decimal y coma decimal. Sin `Intl`: el formato no puede depender del locale
+ * del navegador ni del device.
  */
 export function formatDistance(distanceM: number): string {
   if (distanceM < 1000) {

@@ -66,8 +66,11 @@ function applySteps(): { state: DemoState; byNumber: Map<number, string> } {
 }
 
 /**
- * Byte-idéntico a `JsonEncoder.withIndent("  ")` de Dart: UTF-8 sin BOM, LF, dos
- * espacios y salto final. El orden de las claves es el del literal de abajo.
+ * Formato del golden: UTF-8 sin BOM, LF, dos espacios de indentación y salto
+ * final. Es `JSON.stringify(value, null, 2)` tal cual, sin formatter de por
+ * medio: cualquier otra herramienta podría mover bytes y el fixture es
+ * byte-comparado. El orden de las claves es el del literal que arma
+ * `recompute()`.
  */
 function serializeGolden(file: GoldenFile): string {
   return JSON.stringify(file, null, 2) + '\n';
