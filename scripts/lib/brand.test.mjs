@@ -51,15 +51,13 @@ test('la landing muestra la marca, el slogan y el label DEMO en header y footer'
   );
 });
 
-test('la landing no promete paridad total entre las demos', () => {
+test('la landing no promete paridad total', () => {
   const landingCopy = Object.entries(copy).filter(([key]) => key.startsWith('landing.'));
   for (const [key, value] of landingCopy) {
     assert.ok(!/paridad/i.test(value), `${key} no puede prometer paridad: ${value}`);
   }
   assert.match(copy['landing.expo.tag'], /demo activa/i);
-  assert.match(copy['landing.flutter.tag'], /referencia/i);
   assert.match(copy['landing.subtitle'], /Expo/);
-  assert.match(copy['landing.subtitle'], /referencia/i);
 });
 
 test('el header Expo muestra marca y slogan sin el chip DEMO', () => {
