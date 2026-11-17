@@ -583,24 +583,6 @@ export async function eventRowsIn(regionKey) {
 }
 
 /**
- * Filas de `bots` de una región, **sin** centro ni posición: el test mira
- * identidad, zona y métricas, nunca la geometría privada.
- */
-export async function botRows(regionKey) {
-  return withDb(async (client) => {
-    const { rows } = await client.query(
-      `SELECT bot_profile_id, owner_profile_id, bot_index, zone_key,
-              waypoint_index, distance_m, bearing_deg
-         FROM bots
-        WHERE region_key = $1
-        ORDER BY bot_profile_id`,
-      [regionKey],
-    );
-    return rows;
-  });
-}
-
-/**
  * Vence el tramo de todos los bots de una región: en el próximo tick el mundo
  * avanza un waypoint sin esperar los 5 s reales. Es el equivalente de
  * `expirePresence` para el ticker.

@@ -3,12 +3,10 @@ import { after, before, describe, test } from 'node:test';
 import {
   api,
   assertStackUp,
-  botRows,
   clearPresence,
   createStreamTicket,
   deleteSessionsCreatedSince,
   eventRowsIn,
-  expireBotLegs,
   extendPresence,
   logout,
   maxEventSeq,
@@ -20,10 +18,11 @@ import {
   snapshotSessionIds,
   updatePresence,
   waitFor,
+  withDb,
 } from '../helpers.mjs';
 
 /**
- * `GET /events` y `GET /events/poll` — Sprint 2, S2-B.
+ * `GET /events` y `GET /events/poll` — recalibrado en `remove-bots`.
  *
  * Lo que fija este archivo:
  *
@@ -36,6 +35,9 @@ import {
  *    mismo orden, mismo envelope; el dedupe es `seq <= lastSeen`;
  *  - `profile.presence` se emite en la transición (a online y a offline), no en
  *    cada `PUT`;
+ *  - el vocabulario del log es cerrado —`profile.moved` no puede existir— y un
+ *    evento que la proyección del observador no incluye se descarta **sin
+ *    cortar** el stream;
  *  - ningún payload lleva coordenadas y el stream sólo entrega la región de la
  *    sesión.
  */
@@ -44,6 +46,8 @@ const MX_ZONE = { demoZoneKey: 'cdmx' };
 const CO_ZONE = { demoZoneKey: 'bogota' };
 const ENVELOPE_FIELDS = ['id', 'occurredAt', 'payload', 'type'];
 const RFC3339_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+/** Los dos tipos que el server emite (`EventType`), y el CHECK de `events`. */
+const SERVER_TYPES = ['profile.presence', 'message.created'];
 
 /** Pagina desde `cursor` (exclusivo) hasta pasar `untilSeq`, sin repetidos. */
 async function pollUntil(token, cursor, untilSeq) {
@@ -62,6 +66,26 @@ async function pollUntil(token, cursor, untilSeq) {
   throw new Error('pollUntil: demasiadas páginas');
 }
 
+/**
+ * Inserta una fila en el log **como la escribiría el server**: sube `event_seq`
+ * y usa el `seq` que corresponde. Sirve para provocar el caso que el flujo
+ * normal no produce (un `message.created` de un match ajeno al observador).
+ */
+async function injectEvent(regionKey, type, payload) {
+  return withDb(async (client) => {
+    const { rows } = await client.query(
+      'UPDATE event_seq SET last_seq = last_seq + 1 WHERE region_key = $1 RETURNING last_seq',
+      [regionKey],
+    );
+    const seq = Number(rows[0].last_seq);
+    await client.query(
+      'INSERT INTO events (region_key, seq, event_type, payload) VALUES ($1, $2, $3, $4::jsonb)',
+      [regionKey, seq, type, JSON.stringify(payload)],
+    );
+    return `${regionKey}:${String(seq).padStart(12, '0')}`;
+  });
+}
+
 describe('events: ticket, cursor, polling y SSE', () => {
   let snapshot = [];
   let observer;
@@ -76,16 +100,13 @@ describe('events: ticket, cursor, polling y SSE', () => {
     assert.equal(neighbourSession.status, 201, JSON.stringify(neighbourSession.body));
     observer = { ...observerSession.body, sessionId: sessionIdOf(observerSession.body.token) };
     neighbour = { ...neighbourSession.body, sessionId: sessionIdOf(neighbourSession.body.token) };
+
+    // El log del escenario se llena con la única transición que existe: la de
+    // presencia. Sin ticker del mundo no hay `profile.moved` que esperar ni
+    // movimiento que empujar.
     assert.equal((await updatePresence(observer.token, MX_ZONE)).status, 200);
     assert.equal((await updatePresence(neighbour.token, MX_ZONE)).status, 200);
-
-    // Un tick del mundo asegura bots y movimiento: sin eventos no hay paridad
-    // que comparar.
-    await waitFor(
-      () => eventRowsIn('mx').then((rows) => rows.some((row) => row.type === 'profile.moved')),
-      { label: 'el primer profile.moved del ticker' },
-    );
-    await extendPresence([observer.sessionId, neighbour.sessionId]);
+    await extendPresence([observer.sessionId, neighbour.sessionId], 600);
   });
 
   after(async () => {
@@ -123,7 +144,7 @@ describe('events: ticket, cursor, polling y SSE', () => {
 
     for (const frame of stream.frames) {
       assert.match(frame.id, /^mx:[0-9]{12}$/);
-      assert.ok(['profile.moved', 'profile.presence'].includes(frame.type), frame.type);
+      assert.ok(SERVER_TYPES.includes(frame.type), frame.type);
       assert.deepEqual(Object.keys(frame.data).sort(), ENVELOPE_FIELDS);
       assert.equal(frame.data.id, frame.id);
       assert.equal(frame.data.type, frame.type);
@@ -162,17 +183,14 @@ describe('events: ticket, cursor, polling y SSE', () => {
       assert.match(event.occurredAt, RFC3339_MS);
       assert.ok(seqOfId(event.id) > previous, `${event.id}: el orden no es por seq`);
       previous = seqOfId(event.id);
+      assert.ok(SERVER_TYPES.includes(event.type), `${event.type}: tipo fuera del vocabulario`);
       assert.doesNotMatch(JSON.stringify(event), /"(?:lat|lng|lon|latitude|longitude)"/i);
 
-      if (event.type === 'profile.moved') {
-        assert.deepEqual(Object.keys(event.payload).sort(), ['bearingDeg', 'distanceM', 'profileId']);
-        assert.ok(Number.isInteger(event.payload.distanceM));
-        assert.ok(event.payload.distanceM >= 200 && event.payload.distanceM <= 5000);
-        assert.ok(Number.isInteger(event.payload.bearingDeg));
-        assert.ok(event.payload.bearingDeg >= 0 && event.payload.bearingDeg <= 359);
-      } else {
+      if (event.type === 'profile.presence') {
         assert.deepEqual(Object.keys(event.payload).sort(), ['online', 'profileId']);
         assert.equal(typeof event.payload.online, 'boolean');
+      } else {
+        assert.deepEqual(Object.keys(event.payload).sort(), ['matchId', 'messageId', 'senderProfileId']);
       }
     }
 
@@ -202,26 +220,30 @@ describe('events: ticket, cursor, polling y SSE', () => {
   });
 
   test('paridad SSE↔polling: mismo cursor ⇒ mismo id, orden y envelope', async () => {
-    await extendPresence([observer.sessionId, neighbour.sessionId]);
-    // Un empujón del mundo antes de congelar el borde: hay al menos un
-    // `profile.moved` fresco de cada bot visible.
-    await expireBotLegs('mx');
+    // El empujón es determinista: una sesión nueva entra online y se va. Son dos
+    // `profile.presence` que el observador ve, sin depender de un ticker.
+    const subject = await openSession({ regionKey: 'mx', demoSlot: 5 });
+    assert.equal(subject.status, 201, JSON.stringify(subject.body));
+
+    const cursor = `mx:${String(await maxEventSeq('mx')).padStart(12, '0')}`;
+    assert.equal((await updatePresence(subject.body.token, MX_ZONE)).status, 200);
+    assert.equal((await clearPresence(subject.body.token)).status, 204);
     await waitFor(
       async () => {
-        const page = await pollEvents(observer.token, { limit: 100 });
-        return page.body.events.filter((event) => event.type === 'profile.moved').length >= 2
-          ? page.body
-          : null;
+        const page = await pollEvents(observer.token, { cursor, limit: 100 });
+        return page.body.events.length >= 2 ? page.body : null;
       },
-      { label: 'los profile.moved del empujón' },
+      { label: 'las dos transiciones de presencia' },
     );
 
     const maxSeq = await maxEventSeq('mx');
-    const first = await pollEvents(observer.token, { limit: 2 });
-    const cursor = first.body.events[0].id;
-
     const polled = await pollUntil(observer.token, cursor, maxSeq);
     assert.ok(polled.events.length >= 2, `pocos eventos para comparar (${polled.events.length})`);
+    assert.equal(
+      polled.events.filter((event) => event.payload.profileId === subject.body.profileId).length,
+      2,
+      'no llegaron las dos transiciones del sujeto',
+    );
 
     const issued = await createStreamTicket(observer.token);
     const stream = await openEventStream(issued.body.ticket, { lastEventId: cursor, untilSeq: maxSeq, maxMs: 8_000 });
@@ -256,6 +278,8 @@ describe('events: ticket, cursor, polling y SSE', () => {
       frames.map((frame) => frame.id),
       'reabrir el stream desde el mismo Last-Event-ID no es idempotente',
     );
+
+    await logout(subject.body.token);
   });
 
   test('profile.presence se emite en la transición, no en cada PUT', async () => {
@@ -307,6 +331,68 @@ describe('events: ticket, cursor, polling y SSE', () => {
     await logout(subject.body.token);
   });
 
+  test('el vocabulario es cerrado: profile.moved no existe, ni en la base', async () => {
+    // El `CHECK` de `008_drop_bots.sql` es la última línea de defensa: aunque
+    // alguien inserte por SQL, un tipo que el contrato ya no tiene no entra.
+    const nextSeq = (await maxEventSeq('mx')) + 1;
+    await assert.rejects(
+      () =>
+        withDb((client) =>
+          client.query(
+            `INSERT INTO events (region_key, seq, event_type, payload)
+             VALUES ('mx', $1, 'profile.moved', '{}'::jsonb)`,
+            [nextSeq],
+          ),
+        ),
+      (error) => error.code === '23514',
+      'la base aceptó un tipo de evento que el contrato ya no tiene',
+    );
+
+    // Y el log vivo tampoco lo tiene: ninguna fila, en ninguna región.
+    for (const row of await eventRowsIn('mx')) {
+      assert.ok(SERVER_TYPES.includes(row.type), `${row.type} quedó en el log de mx`);
+    }
+  });
+
+  test('un evento fuera de la proyección se descarta sin cortar el stream', async () => {
+    const subject = await openSession({ regionKey: 'mx', demoSlot: 5 });
+    assert.equal(subject.status, 201, JSON.stringify(subject.body));
+    const subjectId = sessionIdOf(subject.body.token);
+    const cursor = `mx:${String(await maxEventSeq('mx')).padStart(12, '0')}`;
+
+    // Un `message.created` de un match que el observador no es parte: es un
+    // evento válido del vocabulario que su proyección no le debe.
+    const hidden = await injectEvent('mx', 'message.created', {
+      matchId: '00000000-0000-4000-8000-000000000000',
+      messageId: '11111111-1111-4111-8111-111111111111',
+      senderProfileId: 'mx-p01',
+    });
+
+    // Después del descartado llega uno visible: el stream no se corta.
+    assert.equal((await updatePresence(subject.body.token, MX_ZONE)).status, 200);
+    const page = await waitFor(
+      async () => {
+        const response = await pollEvents(observer.token, { cursor, limit: 100 });
+        return response.body.events.some(
+          (event) => event.type === 'profile.presence' && event.payload.profileId === subject.body.profileId,
+        )
+          ? response.body
+          : null;
+      },
+      { label: 'el evento visible posterior al descartado' },
+    );
+
+    const ids = page.events.map((event) => event.id);
+    assert.ok(!ids.includes(hidden), 'el chat de un match ajeno llegó al stream del observador');
+    assert.ok(
+      page.events.some((event) => seqOfId(event.id) > seqOfId(hidden)),
+      'el descarte cortó el stream: no llegó nada posterior',
+    );
+
+    await clearPresence(subject.body.token);
+    await logout(subject.body.token);
+  });
+
   test('aislamiento por región: el stream de co no entrega nada de mx', async () => {
     const coObserver = await openSession({ regionKey: 'co', demoSlot: 4 });
     const coSubject = await openSession({ regionKey: 'co', demoSlot: 5 });
@@ -314,35 +400,33 @@ describe('events: ticket, cursor, polling y SSE', () => {
     assert.equal(coSubject.status, 201, JSON.stringify(coSubject.body));
     assert.equal((await updatePresence(coObserver.body.token, CO_ZONE)).status, 200);
     assert.equal((await updatePresence(coSubject.body.token, CO_ZONE)).status, 200);
-    await extendPresence([sessionIdOf(coObserver.body.token), sessionIdOf(coSubject.body.token)]);
-    await waitFor(
-      () =>
-        botRows('co').then((rows) =>
-          rows.some((row) => row.owner_profile_id === coSubject.body.profileId),
-        ),
-      { label: 'los bots de co' },
-    );
-    await expireBotLegs('co');
+    await extendPresence([sessionIdOf(coObserver.body.token), sessionIdOf(coSubject.body.token)], 600);
 
     const response = await waitFor(
       async () => {
         const page = await pollEvents(coObserver.body.token, { limit: 100 });
         assert.equal(page.status, 200, JSON.stringify(page.body));
-        return page.body.events.length > 0 ? page.body : null;
+        return page.body.events.some((event) => event.payload.profileId === coSubject.body.profileId)
+          ? page.body
+          : null;
       },
-      { label: 'eventos de co' },
+      { label: 'la presencia del sujeto de co' },
     );
 
     for (const event of response.events) {
       assert.match(event.id, /^co:[0-9]{12}$/, `${event.id}: prefijo ajeno en el stream de co`);
-      assert.ok(!event.payload.profileId.startsWith('mx-'), `${event.payload.profileId}: perfil de mx en co`);
+      if (event.payload.profileId !== undefined) {
+        assert.ok(!event.payload.profileId.startsWith('mx-'), `${event.payload.profileId}: perfil de mx en co`);
+      }
     }
 
     // El stream de mx tampoco lleva eventos de co.
     const mxPage = await pollEvents(observer.token, { limit: 100 });
     for (const event of mxPage.body.events) {
       assert.match(event.id, /^mx:[0-9]{12}$/);
-      assert.ok(!event.payload.profileId.startsWith('co-'), `${event.payload.profileId}: perfil de co en mx`);
+      if (event.payload.profileId !== undefined) {
+        assert.ok(!event.payload.profileId.startsWith('co-'), `${event.payload.profileId}: perfil de co en mx`);
+      }
     }
 
     await logout(coObserver.body.token);
