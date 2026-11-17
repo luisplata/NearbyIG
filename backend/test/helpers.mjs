@@ -407,7 +407,7 @@ export async function createBlock(token, body) {
   return api('/blocks', { method: 'POST', token, body });
 }
 
-/** `DELETE /blocks/{profileId}`. El id se manda tal cual (bots y vacíos incluidos). */
+/** `DELETE /blocks/{profileId}`. El id se manda tal cual (vacíos incluidos). */
 export async function deleteBlock(token, profileId) {
   return api(`/blocks/${encodeURIComponent(profileId)}`, { method: 'DELETE', token });
 }
@@ -582,20 +582,6 @@ export async function eventRowsIn(regionKey) {
   });
 }
 
-/**
- * Vence el tramo de todos los bots de una región: en el próximo tick el mundo
- * avanza un waypoint sin esperar los 5 s reales. Es el equivalente de
- * `expirePresence` para el ticker.
- */
-export async function expireBotLegs(regionKey) {
-  await withDb((client) =>
-    client.query(
-      `UPDATE bots SET leg_started_at = now() - interval '1 hour' WHERE region_key = $1`,
-      [regionKey],
-    ),
-  );
-}
-
 /** Distancia del punto privado de una sesión al centroide de su zona. */
 export async function presenceToCentroidM(sessionId) {
   return withDb(async (client) => {
@@ -610,7 +596,6 @@ export async function presenceToCentroidM(sessionId) {
   });
 }
 
-/** Espera activa de una condición async, con timeout: el ticker es asíncrono. */
 /**
  * Espera a que una condición se cumpla, sondeando.
  *
@@ -767,8 +752,7 @@ export async function expirePresence(sessionId) {
  * Empuja el vencimiento de las presencias del escenario.
  *
  * El TTL de 12 s es del contrato y se prueba en `presence.test.mjs`; acá sirve
- * para que un test del mundo (bots, eventos) no dependa de la duración de la
- * suite. No cambia la semántica de lectura: `expires_at > now()` sigue siendo la
+ * para que un test del log de eventos no dependa de la duración de la suite. No cambia la semántica de lectura: `expires_at > now()` sigue siendo la
  * única autoridad y el reloj se mueve igual, sólo que más tarde.
  */
 export async function extendPresence(sessionIds, seconds = 120) {

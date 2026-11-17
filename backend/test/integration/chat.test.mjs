@@ -20,8 +20,6 @@ import {
   sessionIdOf,
   snapshotSessionIds,
   updatePresence,
-  waitFor,
-  withDb,
 } from '../helpers.mjs';
 
 /**
@@ -33,11 +31,11 @@ import {
  *    otro, `lastMessage: null` y `unreadCount: 0`;
  *  - `A` manda dos mensajes, `B` los lee paginados con cursor, `B` marca leído y
  *    su `unreadCount` baja a 0;
- *  - reintentar el mismo `clientMessageId` **no** duplica;
+ *  - reintentar el mismo `clientMessageId` **no** duplica el mensaje ni emite un
+ *    segundo `message.created`;
  *  - el cursor pagina de verdad (dos páginas, sin repetir ni perder filas);
- *  - un ping a un bot → match → mensaje → el bot contesta con texto fijo, el
- *    `message.created` y el `typing.started` llegan por el stream, y dos
- *    respuestas seguidas del bot no repiten texto;
+ *  - el peer **humano** responde y su `message.created` llega al stream del otro
+ *    lado, con el envelope del contrato y sin el texto del mensaje;
  *  - errores: match ajeno (403), inexistente (404), `matchId` malformado, body
  *    vacío, campo de más y `clientMessageId` ausente (422), sin token (401);
  *  - el aislamiento del stream: un tercero que no es parte del match no recibe
@@ -89,14 +87,14 @@ describe('chat de un match', () => {
     a = { token: first.body.token, profileId: first.body.profileId, sessionId: sessionIdOf(first.body.token) };
     b = { token: second.body.token, profileId: second.body.profileId, sessionId: sessionIdOf(second.body.token) };
     c = { token: third.body.token, profileId: third.body.profileId, sessionId: sessionIdOf(third.body.token) };
-    scenarioProfiles = [a.profileId, b.profileId, c.profileId, `${b.profileId}-b1`, `${b.profileId}-b2`];
+    scenarioProfiles = [a.profileId, b.profileId, c.profileId];
 
     // Un run abortado puede dejar pings/matches del escenario: se limpian para
     // que el conteo de matches no arrastre basura de otra corrida.
     await deletePingsOf(REGION, scenarioProfiles);
 
-    // Un punto real dentro de CDMX: sin presencia no hay bots que pinguear y el
-    // bot solo existe con dueño vivo.
+    // Presencia viva de B: el escenario es el flujo real de la demo (una
+    // persona conectada, no un ping contra un perfil sin sesión).
     const presence = await updatePresence(b.token, { demoZoneKey: 'cdmx' });
     assert.equal(presence.status, 200, JSON.stringify(presence.body));
     await extendPresence([a.sessionId, b.sessionId, c.sessionId], 240);
@@ -194,6 +192,45 @@ describe('chat de un match', () => {
     assert.equal(third.status, 201);
     assert.equal(only(matchesOf((await listMatches(b.token)).body), matchId)[0].unreadCount, 1);
     assert.equal((await markMatchRead(b.token, matchId)).status, 204);
+
+    // El peer humano responde: un mensaje suyo es un `message.created` que A ve
+    // por el stream. El cursor se congela antes de la respuesta.
+    const cursor = `${REGION}:${String(await maxEventSeq(REGION)).padStart(12, '0')}`;
+    const reply = await sendMessage(b.token, matchId, {
+      clientMessageId: 'cm-reply',
+      body: 'todo llega, gracias',
+    });
+    assert.equal(reply.status, 201, JSON.stringify(reply.body));
+    assert.equal(reply.body.senderProfileId, b.profileId);
+
+    const stream = await pollEvents(a.token, { cursor, limit: 100 });
+    assert.equal(stream.status, 200, JSON.stringify(stream.body));
+    const created = stream.body.events.filter((event) => event.type === 'message.created');
+    assert.deepEqual(
+      created.map((event) => event.payload.messageId),
+      [reply.body.id],
+      'el stream de A no trae exactamente el mensaje de B',
+    );
+    for (const event of created) {
+      assert.deepEqual(Object.keys(event.payload).sort(), ['matchId', 'messageId', 'senderProfileId']);
+      assert.equal(event.payload.matchId, matchId);
+      assert.equal(event.payload.senderProfileId, b.profileId);
+      assert.equal(JSON.stringify(event.payload).includes('body'), false, 'el evento no lleva el texto');
+    }
+    assert.doesNotMatch(JSON.stringify(stream.body), /"(?:lat|lng)"/i, 'el stream del chat lleva coordenadas');
+
+    // El tercero no es parte de esta conversación: no ve sus eventos.
+    const stranger = await pollEvents(c.token, { cursor, limit: 100 });
+    assert.equal(stranger.status, 200, JSON.stringify(stranger.body));
+    assert.deepEqual(
+      stranger.body.events.filter((event) => event.type === 'message.created'),
+      [],
+      'el chat de un match se filtró a un tercero',
+    );
+
+    // Y B ya tiene el mensaje leído para A: el badge de A sube por la respuesta.
+    assert.equal(only(matchesOf((await listMatches(a.token)).body), matchId)[0].unreadCount, 1);
+    assert.equal((await markMatchRead(a.token, matchId)).status, 204);
   });
 
   test('el mismo clientMessageId no duplica el mensaje', async () => {
@@ -287,92 +324,5 @@ describe('chat de un match', () => {
     const anonymous = await listMatches(undefined);
     assert.equal(anonymous.status, 401);
     assert.equal((await getMe(undefined)).status, 401);
-  });
-
-  test('un bot responde con texto fijo, llega por SSE y no repite el texto anterior', async () => {
-    const botId = await waitFor(
-      async () => {
-        const { rows } = await withDb((client) =>
-          client.query(
-            `SELECT bot_profile_id
-               FROM bots
-              WHERE region_key = $1 AND owner_profile_id = $2
-              ORDER BY bot_profile_id`,
-            [REGION, b.profileId],
-          ),
-        );
-        return rows.length === 2 ? rows[0].bot_profile_id : null;
-      },
-      { label: `los 2 bots de ${b.profileId}` },
-    );
-    await extendPresence([b.sessionId], 240);
-
-    const ping = await createPing(a.token, { targetProfileId: botId });
-    assert.equal(ping.status, 201, JSON.stringify(ping.body));
-    assert.equal(ping.body.status, 'accepted', 'el bot acepta el ping solo');
-    const botMatchId = ping.body.matchId;
-    assert.notEqual(botMatchId, null);
-
-    // Un cursor congelado en el final del log: desde acá sólo se ven los
-    // eventos de este escenario (el ticker del mundo ensucia el stream).
-    const cursor = `${REGION}:${String(await maxEventSeq(REGION)).padStart(12, '0')}`;
-
-    const sent = await sendMessage(a.token, botMatchId, { clientMessageId: 'bot-1', body: 'hola bot' });
-    assert.equal(sent.status, 201, JSON.stringify(sent.body));
-
-    const reply = await waitFor(
-      async () => {
-        const rows = await messageRowsOf(botMatchId);
-        return rows.find((row) => row.sender === botId) ?? null;
-      },
-      { timeoutMs: 12_000, label: 'la respuesta del bot' },
-    );
-    assert.equal(typeof reply.body, 'string');
-    assert.ok(reply.body.length > 0, 'el bot contesta algo');
-    assert.notEqual(reply.body, 'hola bot', 'y no repite el mensaje del humano');
-
-    // El bot no contesta dos veces lo mismo seguido.
-    await sendMessage(a.token, botMatchId, { clientMessageId: 'bot-2', body: '¿y vos?' });
-    const secondReply = await waitFor(
-      async () => {
-        const rows = (await messageRowsOf(botMatchId)).filter((row) => row.sender === botId);
-        return rows.length >= 2 ? rows[rows.length - 1] : null;
-      },
-      { timeoutMs: 12_000, label: 'la segunda respuesta del bot' },
-    );
-    assert.notEqual(secondReply.body, reply.body, 'dos respuestas seguidas nunca repiten texto');
-
-    // Un mensaje del humano → una respuesta del bot: no hay timers duplicados.
-    const botRows = (await messageRowsOf(botMatchId)).filter((row) => row.sender === botId);
-    assert.equal(botRows.length, 2, 'dos mensajes producen dos respuestas, no cuatro');
-
-    // Los dos eventos del bot están en el stream del participante. Se espera
-    // activamente: el `message.created` del bot se escribe después de la fila.
-    const page = await waitFor(
-      async () => {
-        const response = await pollEvents(a.token, { cursor });
-        const types = response.body.events.map((event) => event.type);
-        return types.includes('message.created') && types.includes('typing.started') ? response : null;
-      },
-      { timeoutMs: 12_000, label: 'los eventos del chat en el stream' },
-    );
-    const types = page.body.events.map((event) => event.type);
-    assert.ok(types.includes('message.created'), 'message.created llega por el stream');
-    assert.ok(types.includes('typing.started'), 'typing.started llega por el stream');
-    const created = page.body.events.filter((event) => event.type === 'message.created');
-    for (const event of created) {
-      assert.deepEqual(Object.keys(event.payload).sort(), ['matchId', 'messageId', 'senderProfileId']);
-      assert.equal(event.payload.matchId, botMatchId);
-      assert.equal(JSON.stringify(event.payload).includes('body'), false, 'el evento no lleva el texto');
-    }
-    assert.equal(JSON.stringify(page.body).includes('lat'), false, 'el stream del chat no lleva coordenadas');
-
-    // El tercero no es parte de esta conversación: no ve sus eventos.
-    const stranger = await pollEvents(c.token, { cursor });
-    assert.equal(stranger.status, 200);
-    const chatEvents = stranger.body.events.filter((event) =>
-      ['message.created', 'typing.started'].includes(event.type),
-    );
-    assert.deepEqual(chatEvents, [], 'el chat de un match no se filtra a un tercero');
   });
 });

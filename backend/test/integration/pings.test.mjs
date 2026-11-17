@@ -16,8 +16,6 @@ import {
   sessionIdOf,
   snapshotSessionIds,
   updatePresence,
-  waitFor,
-  withDb,
 } from '../helpers.mjs';
 
 /**
@@ -32,7 +30,8 @@ import {
  *    `Ping.matchId` en su bandeja de enviados, `B` por el `200` y su inbox);
  *  - aceptar dos veces es `409 PING_RESOLVED` y no crea un segundo match;
  *  - rechazar es `204`, no crea match y se ve como `rejected`;
- *  - un ping a un bot vuelve ya `accepted` con `matchId`: el bot acepta solo;
+ *  - un ping queda `pending` hasta que el destinatario humano lo resuelva: nadie
+ *    acepta por su cuenta;
  *  - errores: auto-ping, destino inexistente o de otra región, ping ajeno,
  *    `pingId` malformado, inexistente, vencido, y `box` inválido;
  *  - el ping vencido es `410 PING_EXPIRED` tanto al resolverlo como al volver a
@@ -71,7 +70,7 @@ describe('pings y matches', () => {
   let snapshot = [];
   let a;
   let b;
-  /** Perfiles del escenario, incluidos los dos bots de `b`. */
+  /** Perfiles del escenario. */
   let scenarioProfiles = [];
 
   before(async () => {
@@ -85,12 +84,12 @@ describe('pings y matches', () => {
 
     a = { token: first.body.token, profileId: first.body.profileId, sessionId: sessionIdOf(first.body.token) };
     b = { token: second.body.token, profileId: second.body.profileId, sessionId: sessionIdOf(second.body.token) };
-    scenarioProfiles = [a.profileId, b.profileId, `${b.profileId}-b1`, `${b.profileId}-b2`];
+    scenarioProfiles = [a.profileId, b.profileId];
     // Un run anterior que falló a mitad de camino puede dejar pings del
     // escenario: se limpian para que el conteo de matches no arrastre basura.
     await deletePingsOf(REGION, scenarioProfiles);
 
-    // Un punto real dentro de CDMX: sin presencia no hay bots que pinguear.
+    // Presencia viva de los dos: el escenario es el flujo real de la demo.
     const presence = await updatePresence(b.token, { demoZoneKey: 'cdmx' });
     assert.equal(presence.status, 200, JSON.stringify(presence.body));
     await extendPresence([b.sessionId, a.sessionId], 180);
@@ -205,37 +204,6 @@ describe('pings y matches', () => {
     const acceptedAfter = await acceptPing(b.token, created.body.id);
     assert.equal(acceptedAfter.status, 409, 'un ping rechazado no se puede aceptar después');
     assert.equal(acceptedAfter.body.code, 'PING_RESOLVED');
-  });
-
-  test('un ping a un bot vuelve aceptado: el bot acepta solo y hay match', async () => {
-    const botId = await waitFor(
-      async () => {
-        const { rows } = await withDb((client) =>
-          client.query(
-            `SELECT bot_profile_id
-               FROM bots
-              WHERE region_key = $1 AND owner_profile_id = $2
-              ORDER BY bot_profile_id`,
-            [REGION, b.profileId],
-          ),
-        );
-        return rows.length === 2 ? rows[0].bot_profile_id : null;
-      },
-      { label: `los 2 bots de ${b.profileId}` },
-    );
-    await extendPresence([b.sessionId], 180);
-
-    const created = await createPing(a.token, { targetProfileId: botId });
-    assert.equal(created.status, 201, JSON.stringify(created.body));
-    assert.equal(created.body.status, 'accepted', 'el bot acepta en la misma transacción');
-    assert.notEqual(created.body.matchId, null, 'y deja el matchId');
-    assert.equal(await matchCount(a.profileId, botId), 1);
-
-    const sent = findPing(listOf((await listPings(a.token, 'sent')).body), created.body.id);
-    assert.equal(sent.peer.profileId, botId);
-    assert.equal(sent.peer.sourceType, 'bot', 'el peer de un bot se distingue por sourceType');
-    assert.equal(typeof sent.peer.nickname, 'string', 'el bot hereda la proyección de su dueño');
-    assert.equal(sent.ping.status, 'accepted');
   });
 
   test('errores: auto-ping, destino inexistente o de otra región, ping ajeno y box inválido', async () => {
