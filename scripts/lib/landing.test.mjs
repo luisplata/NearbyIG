@@ -30,17 +30,19 @@ test('la landing toma todo el texto del catálogo de copy', () => {
   assert.equal(simItems.length, 8, 'la landing lista los 8 ítems de "Qué es simulado"');
 });
 
-test('la landing declara noindex y enlaces relativos a las demos', () => {
+test('la landing declara noindex y un enlace relativo a la demo publicada', () => {
   const html = landingFile('index.html');
 
   assert.match(html, /<html lang="es">/);
   assert.match(html, /<meta name="robots" content="noindex, nofollow" \/>/);
-  assert.ok(html.includes('href="./flutter/"'), 'falta el enlace relativo a ./flutter/');
   assert.ok(html.includes('href="./expo/"'), 'falta el enlace relativo a ./expo/');
   assert.ok(html.includes('data-dataset-id'), 'falta el placeholder del datasetId');
   assert.ok(html.includes('data-schema-version'), 'falta el placeholder del schemaVersion');
-  assert.ok(!html.includes('href="/flutter/'), 'el enlace a Flutter no puede ser absoluto');
-  assert.ok(!html.includes('href="/expo/'), 'el enlace a Expo no puede ser absoluto');
+
+  const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
+  for (const href of hrefs) {
+    assert.ok(!href.startsWith('/'), `el enlace ${href} no puede ser absoluto`);
+  }
 });
 
 test('la landing consume el datasetId del contrato vigente', () => {

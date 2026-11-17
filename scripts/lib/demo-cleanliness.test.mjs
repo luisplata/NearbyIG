@@ -25,7 +25,6 @@ const SKIPPED_DIRECTORIES = new Set([
   'node_modules',
   'build',
   'dist',
-  '.dart_tool',
   '.vitest-cache',
   '.git',
   // Salida de `expo prebuild`: código nativo generado desde app.config.ts.
@@ -39,7 +38,6 @@ const TEXT_EXTENSIONS = new Set([
   '.js',
   '.ts',
   '.tsx',
-  '.dart',
   '.html',
   '.css',
   '.yml',

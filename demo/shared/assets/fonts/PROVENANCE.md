@@ -9,7 +9,7 @@
 | Archivos | `Inter-Regular.ttf` (400), `Inter-SemiBold.ttf` (600) |
 | Origen en el release | `extras/ttf/` (instancias estáticas) |
 | Licencia | SIL Open Font License 1.1 — ver `OFL.txt` |
-| Uso | Bundle local en Flutter (CanvasKit) y Expo (RNW). Cero CDNs, cero Google Fonts en runtime |
+| Uso | Bundle local en Expo (RNW). Cero CDNs, cero Google Fonts en runtime |
 
 Los TTF se commitean verbatim (mismos bytes que el release). No se usan fuentes del
 sistema para evitar diferencias de renderizado entre apps.

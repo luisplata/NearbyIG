@@ -3,8 +3,8 @@ import { AccessibilityInfo, Platform } from 'react-native';
 
 /**
  * `prefers-reduced-motion` (web) / reduce motion (nativo). En web se consulta
- * `matchMedia` —el mismo media query que respeta la app Flutter— y se escucha
- * el cambio en vivo.
+ * `matchMedia`, que es la señal que expone el sistema operativo, y se escucha
+ * el cambio en vivo; en nativo lo resuelve `AccessibilityInfo`.
  */
 export function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);

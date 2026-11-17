@@ -30,41 +30,10 @@ export const TEXT_EXTENSIONS = [
   '.svg',
   '.xml',
   '.txt',
-  '.dart',
   '.ts',
   '.tsx',
   '.webmanifest',
 ];
-
-/**
- * Fallbacks del **loader del engine de Flutter**. No son requests de la app: el
- * build usa CanvasKit local (`canvasKitBaseUrl` en `index.html`) y la fuente Inter
- * va bundleada, así que estas cadenas sólo se materializarían si esa configuración
- * se perdiera. Se permiten únicamente las **formas exactas** que el engine embebe
- * como default y sólo dentro de los archivos de framework (ver
- * `FLUTTER_FRAMEWORK_FILE`); una URL real con ese host y un path distinto —o el
- * mismo host en cualquier otro archivo— sigue siendo un ofensor.
- */
-export const FLUTTER_LOADER_FALLBACK_PATTERNS = [
-  {
-    label: 'canvasKitBaseUrl default',
-    // Dos formas reales: el loader embebe el prefijo solo
-    // (`I("https://www.gstatic.com/flutter-canvaskit", engineRevision)`) y el
-    // engine embebe el default ya resuelto con la revisión de 40 hex. Ninguna es
-    // un pedido de la app: `canvasKitBaseUrl` apunta a `canvaskit/` local.
-    pattern: /https:\/\/www\.gstatic\.com\/flutter-canvaskit(?:\/[0-9a-f]{40}\/|(?=["'`]))/g,
-  },
-  {
-    label: 'fontFallbackBaseUrl default',
-    // Default de `fontFallbackBaseUrl`: la cadena termina ahí (`".../s/"`). Un
-    // pedido real (p. ej. `.../s/inter/v13/x.woff2`) no coincide y falla el gate.
-    pattern: /https:\/\/fonts\.gstatic\.com\/s\/(?=["'`])/g,
-  },
-];
-
-/** Archivos del engine/loader de Flutter donde viven esos fallbacks. */
-const FLUTTER_FRAMEWORK_FILE =
-  /^(?:main\.dart\.js|flutter(?:\.js|_bootstrap\.js|_service_worker\.js))$/i;
 
 /**
  * Código muerto de **Expo Go** embebido por `expo-asset` en el bundle web
@@ -100,17 +69,12 @@ export const MAPLIBRE_DEAD_CODE = {
 /**
  * Quita sólo las formas exactas conocidas cuando `relativePath` corresponde al
  * archivo donde el framework las embebe. Devuelve el texto tal cual en cualquier
- * otro caso.
+ * otro caso. Hoy sólo hay recortes de bundles de Expo: `gstatic.com` no tiene
+ * allowlist, así que cualquier aparición es un ofensor en cualquier archivo.
  */
 export function stripKnownDeadCode(relativePath, text) {
   const posix = toPosix(relativePath);
-  const base = posix.split('/').pop() ?? posix;
   let out = text;
-  if (FLUTTER_FRAMEWORK_FILE.test(base)) {
-    for (const entry of FLUTTER_LOADER_FALLBACK_PATTERNS) {
-      out = out.replace(entry.pattern, '');
-    }
-  }
   if (EXPO_GO_DEAD_CODE.path.test(posix)) {
     out = out.replace(EXPO_GO_DEAD_CODE.pattern, '');
   }

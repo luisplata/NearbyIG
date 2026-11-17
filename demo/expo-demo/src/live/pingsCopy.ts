@@ -3,7 +3,7 @@
  *
  * Vive acá y no en `demo/shared/copy.json` por la misma razón que `liveCopy` y
  * `mapCopy`: agregar claves al catálogo mueve el `datasetId` del artefacto
- * congelado (Flutter + golden). Estos textos son del flujo real de pings, que no
+ * publicado (dataset y golden). Estos textos son del flujo real de pings, que no
  * existe en el artefacto mock.
  *
  * Lo que **sí** se reutiliza del catálogo por `fmt()` es lo que ya estaba:

@@ -2,9 +2,9 @@
  * Copy del chat real.
  *
  * Vive acá y no en `demo/shared/copy.json` por la misma razón que `liveCopy`,
- * `pingsCopy` y `mapCopy`: el catálogo es la fuente del artefacto mock congelado
- * (Flutter + golden) y agregar claves mueve su `datasetId`. Estos textos son de
- * la conversación real, que no existe en ese artefacto.
+ * `pingsCopy` y `mapCopy`: el catálogo es la fuente del artefacto publicado y de
+ * su golden, y agregar claves mueve su `datasetId`. Estos textos son de la
+ * conversación real, que no existe en ese artefacto.
  *
  * Lo que sí se reutiliza por `fmt()` es lo que ya estaba: `chat.typing`,
  * `chat.blockedNotice`, `chat.self.*`, `profile.report`, `profile.block`.

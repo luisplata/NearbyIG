@@ -5,11 +5,10 @@ entregable, aunque compile y se vea bien. La fuente única de datos es `demo/sha
 las apps consumen lo generado y no duplican strings, colores, distancias ni guiones.
 
 - Marca visible: **Nearby Social Club**, con slogan **Cowork Café**. El repo, las URLs
-  (`/NearbyIG`, `/expo/`, `/flutter/`), el bundle id `com.nearbyig.app`, el slug y los
+  (`/NearbyIG`, `/expo/`, `/contract/`), el bundle id `com.nearbyig.app`, el slug y los
   identificadores técnicos no cambian.
-- Label **DEMO**: chip estático en "Acerca de" de Expo, en el header y el footer de la
-  landing y en el header de Flutter (referencia). El header de Expo no lleva chip: lleva
-  el switch de visibilidad (fantasma).
+- Label **DEMO**: chip estático en "Acerca de" de la demo y en el header y el footer de la
+  landing. El header de la demo no lleva chip: lleva el switch de visibilidad (fantasma).
 - Idioma: español (es-AR), tono del prototipo.
 - Alcance: demo no funcional. Sin backend, auth, push, OAuth, persistencia, premium ni
   referidos. Geolocalización: **una sola puerta** (`requestPoint`) y un solo destino
@@ -18,8 +17,7 @@ las apps consumen lo generado y no duplican strings, colores, distancias ni guio
   lectura puntual del device con permiso explícito (`expo-location`), sólo al tocar "Usar
   mi ubicación". Nadie guarda el punto: ni storage, ni cookie, ni historial. El radar de
   **Expo** usa un basemap real de **un único host** (`tiles.openfreemap.org`, OpenFreeMap
-  con MapLibre GL JS, sin key ni cuenta); Flutter (referencia congelada) mantiene el mapa
-  ilustrado.
+  con MapLibre GL JS, sin key ni cuenta) y mantiene la ilustración como fallback.
 
 ---
 
@@ -27,19 +25,19 @@ las apps consumen lo generado y no duplican strings, colores, distancias ni guio
 
 | Archivo | Contenido | Genera |
 |---|---|---|
-| `shared/fixtures.json` | 10 perfiles, self, timers, guion, filtros, motivos, mapa | `fixtures.dart`, `fixtures.ts` |
-| `shared/copy.json` | catálogo plano clave → string es-AR | `copy.dart`, `copy.ts` |
-| `shared/design-tokens.json` | color, tipografía, espacio, radios, sombra, breakpoints | `tokens.dart`, `tokens.ts` |
-| `shared/photos.json` | especificación de avatar procedural por `photoId` | `photo_map.dart`, `photoMap.ts` |
-| `shared/golden/steps.json` | secuencia canónica de acciones | copia a `test/golden/` de ambas apps |
+| `shared/fixtures.json` | 10 perfiles, self, timers, guion, filtros, motivos, mapa | `fixtures.ts` |
+| `shared/copy.json` | catálogo plano clave → string es-AR | `copy.ts` |
+| `shared/design-tokens.json` | color, tipografía, espacio, radios, sombra, breakpoints | `tokens.ts` |
+| `shared/photos.json` | especificación de avatar procedural por `photoId` | `photoMap.ts` |
+| `shared/golden/steps.json` | secuencia canónica de acciones | copia a `test/golden/` |
 
 `datasetId = "ds-" + sha256(canonical({fixtures, copy, designTokens, photos})).hex[0..8]`
 donde `canonical` ordena claves, no deja espacios y normaliza números. **No** es un
-campo editable: sale del contenido. Se muestra en la landing, en "Acerca de" de ambas
-apps y lo imprime `node scripts/validate-fixtures.mjs`.
+campo editable: sale del contenido. Se muestra en la landing, en "Acerca de" de la app y
+lo imprime `node scripts/validate-fixtures.mjs`.
 
-`schemaVersion` (hoy `2`) se muestra junto al datasetId. Tres valores iguales en la
-landing y en las dos apps son la prueba de que se está comparando el mismo dataset.
+`schemaVersion` (hoy `2`) se muestra junto al datasetId. Valores iguales en la
+landing y en la app son la prueba de que se está comparando el mismo dataset.
 
 Reglas duras del dataset (validadas por script):
 
@@ -52,7 +50,7 @@ Reglas duras del dataset (validadas por script):
   intenciones y géneros dentro del catálogo; timers exactos.
 - Exactamente **3 intenciones** en `filters.intentions`; cada una la usan al menos dos
   perfiles. El orden del array es el orden del catálogo y el que serializa la proyección
-  golden: cambiarlo mueve los digests de paridad.
+  golden: cambiarlo mueve los digests del golden.
 - `self` y cada perfil tienen un catálogo cerrado de claves. Un campo `interests`,
   `hobbies`, `tags` o cualquier otro desconocido es un error: los gustos son copy libre
   dentro de `status.*` y `bio.*`, no datos.
@@ -74,15 +72,15 @@ Reglas duras del dataset (validadas por script):
 - Basemap: `discovery.mapAttribution` (`© OpenFreeMap · © OpenMapTiles · datos de
   OpenStreetMap`) es la atribución visible cuando hay tiles reales; es texto plano, sin
   URL ni control. `discovery.mapNote` aclara el centro fijo y las posiciones de guion.
-  `discovery.mapLegend` ("mapa simulado") queda **sólo** para el fallback ilustrado de
-  Expo y para Flutter: el validador sigue exigiendo `/simulado/i`.
+  `discovery.mapLegend` ("mapa simulado") queda **sólo** para el fallback ilustrado: el
+  validador sigue exigiendo `/simulado/i`.
 - Posicionamiento: `about.brand` es el nombre visible (**Nearby Social Club**) y
   `landing.eyebrow` y `about.club` contienen el mismo slogan (**Cowork Café**).
   `about.positioning` explica el club. Es estilo y posicionamiento: **no** cambia el
   nombre del repo, las URLs, el bundle id, el slug, el icono ni `schemaVersion`, y no
   agrega pantallas ni acciones de club.
 - `privacy.noHistory` contiene verbatim "sin historial de rutas" y se muestra en la
-  pantalla de privacidad de ambas apps.
+  pantalla de privacidad.
 - `ig.simDisclaimer` ("Simulado: no es verificación real de Instagram") está siempre
   visible en cualquier superficie de Instagram.
 
@@ -97,7 +95,7 @@ Paleta: fondo `#09090B`, superficie `#121216`, texto `#F4F4F5`, muted `#A1A1AA`,
 `#E8B27A`, online `#22C55E`, verificado `#3B82F6`, peligro `#EF4444`.
 
 El acento cálido (`color.accentWarm`) es el único trazo del estilo café/cowork: se usa en
-el eyebrow del hero de la landing y en las frases de "Acerca de" de ambas apps. No cambia
+el eyebrow del hero de la landing y en las frases de "Acerca de". No cambia
 el tema oscuro, no introduce un tema claro y no reemplaza al acento de marca (`accent`),
 que sigue marcando pestaña activa, chip DEMO y badges.
 
@@ -167,17 +165,14 @@ install.
 
 - Estado en memoria (`view` + `overlay`). Sin router, sin deep links, sin URLs con
   estado. La URL nunca cambia; refrescar sirve el `index.html` del subdirectorio.
-- La **lista es la vista inicial** en ambas apps: al cargar, el tab activo es `Lista` y
+- La **lista es la vista inicial**: al cargar, el tab activo es `Lista` y
   los 10 perfiles aparecen ordenados por distancia ascendente.
-- **Expo** tiene cuatro tabs en este orden: **Lista → Radar → Pings → Perfil**. No hay
-  tab Mapa: Radar es una única composición con basemap real de fondo (la ilustración hace
-  de fallback), anillos, barrido de 6 s y una capa de puntos. Pings y Perfil abren
-  overlays sin cambiar la vista. El valor `map` sigue reservado en la máquina de estados:
-  si se setea, Expo renderiza la misma composición radar-sobre-mapa, nunca un cuerpo
-  sólo-mapa.
-- **Flutter** se mantiene como referencia congelada y conserva su barra de cinco tabs
-  (Lista → Radar → Mapa → Pings → Perfil). Esa diferencia de presentación es la
-  permitida en §8.
+- La barra inferior tiene cuatro tabs en este orden: **Lista → Radar → Pings → Perfil**.
+  No hay tab Mapa: Radar es una única composición con basemap real de fondo (la
+  ilustración hace de fallback), anillos, barrido de 6 s y una capa de puntos. Pings y
+  Perfil abren overlays sin cambiar la vista. El valor `map` sigue reservado en la máquina
+  de estados: si se setea, se renderiza la misma composición radar-sobre-mapa, nunca un
+  cuerpo sólo-mapa.
 - La barra inferior no tiene tabs de historial, encuentros ni visitas.
 - "Reiniciar demo" (`RESET`) vuelve al estado inicial completo — vistas, filtros, pings,
   match, chat, notificaciones, revelaciones, bloqueos, fantasma, verificación — y
@@ -185,29 +180,23 @@ install.
 - Refresh = estado inicial: sin `localStorage`, `sessionStorage`, cookies ni IndexedDB.
 - La semántica completa vive en `shared/state-machine.md`; es la norma, no una guía.
 
-## 8. Diferencias permitidas entre apps (Expo-first)
+## 8. Diferencias permitidas (web vs nativo)
+
+La demo publicada corre en web; el binario Expo corre en el device. Sólo se toleran las
+diferencias de plataforma, nunca de contrato:
 
 | Diferencia | Permitida | Por qué |
 |---|---|---|
-| Antialiasing / rasterizado de texto y bordes | Sí | CanvasKit vs navegador/DOM |
-| Scroll nativo (overscroll, barra) | Sí | Plataforma |
-| Anuncio de semántica en Flutter web | Sí | CanvasKit expone el árbol semántico cuando el usuario lo pide |
-| Animación de radar (canvas vs SVG) | Sí, misma geometría y período 6 s | Misma proyección, distinto motor |
-| Glifos: fuente MaterialIcons (Flutter) vs SVG embebido (Expo) | Sí | Mismos íconos Material, distinto empaquetado; sin fuentes de íconos remotas |
-| Carga de fuente: Inter bundleada al compilar (Flutter) vs `expo-font` con gate de render (Expo) | Sí | Expo no renderiza hasta tener la fuente para evitar FOUT |
-| Switch de ajustes/filtros | Sí | Material 3 vs control nativo de RNW |
-| Foco visible: highlight de Material vs borde `accent` explícito | Sí | Mismo criterio (foco visible), distinto mecanismo |
-| Navegación y descubrimiento: Expo con 4 tabs y radar sobre mapa; Flutter (referencia) con 5 tabs y radar/mapa separados | Sí | Presentación Expo-first descripta en §7; estado, timers, copy y datasetId siguen compartidos |
-| Mapa de fondo: Expo monta un basemap real (OpenFreeMap + MapLibre, sin key) con la ilustración como fallback; Flutter (referencia) mantiene el mapa ilustrado | Sí | La composición, la proyección de puntos, el barrido de 6 s y el dataset son los mismos; cambia el motor de dibujo del fondo y la atribución del proveedor |
+| Antialiasing, rasterizado de texto y bordes; scroll nativo (overscroll, barra) | Sí | DOM del navegador vs motor nativo |
 | Proveedor de geolocalización: web `navigator.geolocation` vs binario Expo `expo-location` | Sí | Mismo port (`requestPoint`), mismo gesto y mismo contrato de resultado (`ok`, `denied`, `unavailable`, `timeout`, `unsupported`, `insecure`); en nativo nunca hay `insecure` porque no existe `secureContext` |
 | Cualquier diferencia funcional no listada (timers, copy compartido, orden de datos, estado, datasetId) | **No** | Es un defecto del contrato |
 
-## 9. Checklist de comportamiento (15 puntos; Expo-first)
+## 9. Checklist de comportamiento (15 puntos)
 
 | # | Punto | Evidencia esperada (idéntica salvo diferencias de §8) |
 |---|---|---|
 | 1 | Perfil + 3 intenciones | Elegir "Actividades" se refleja en el perfil y en el filtro por defecto |
-| 2 | Radar sobre mapa / lista | La lista abre por defecto; en Expo, Radar compone el basemap real (o la ilustración si falla), anillos, barrido de 6 s y 10 puntos con las mismas distancias, orden asc, atribución OpenFreeMap/OpenMapTiles/OSM cuando hay tiles, leyenda "mapa simulado" en el fallback y reduced-motion estático; no hay tab Mapa. Flutter (referencia) conserva radar y mapa ilustrados separados |
+| 2 | Radar sobre mapa / lista | La lista abre por defecto; Radar compone el basemap real (o la ilustración si falla), anillos, barrido de 6 s y 10 puntos con las mismas distancias, orden asc, atribución OpenFreeMap/OpenMapTiles/OSM cuando hay tiles, leyenda "mapa simulado" en el fallback y reduced-motion estático; no hay tab Mapa |
 | 3 | Radio + 4 filtros | 500 m deja solo ≤ 500 m; combinación imposible → vacío + "Limpiar filtros" |
 | 4 | Ping | "Enviado" e inhabilitado al segundo intento; el enviado aparece en la bandeja con estado pendiente; entrante a 3.0 s; badge sube |
 | 5 | Match + chat | Aceptar → match a 2.5 s → chat; typing 1.2 s; respuesta guionada; rechazar borra el ping |
@@ -220,26 +209,28 @@ install.
 | 12 | Reset + refresh | Tras flujo completo → estado inicial (vista `lista`); refresh idéntico; sin timers vivos |
 | 13 | Responsive + a11y | 320/360/480/768/1440 px sin overflow; labels con nombre y distancia; foco visible; ≥ 44 px |
 | 14 | Red contenida | DevTools Network en Radar: **un único** host externo, `tiles.openfreemap.org` (estilo local, TileJSON, tiles, glifos; sin sprite, sin key ni cookie). La Lista y la landing no piden tiles: el primer pedido ocurre al abrir Radar |
-| 15 | Divulgación | Label DEMO en About de Expo (visible sin abrir la hoja), header y footer de la landing, y header de Flutter; hoja "Qué es simulado" con 8 ítems |
+| 15 | Divulgación | Label DEMO en About (visible sin abrir la hoja), header y footer de la landing; hoja "Qué es simulado" con 8 ítems |
 
-**Procedimiento lado a lado**: abrir landing + `/flutter/` + `/expo/` en tres pestañas,
-confirmar el mismo `schemaVersion` + `datasetId`, y recorrer 1 → 15 en ambas demos con
+**Procedimiento lado a lado**: abrir landing + `/expo/` en dos pestañas,
+confirmar el mismo `schemaVersion` + `datasetId`, y recorrer 1 → 15 con
 la misma secuencia de acciones. La secuencia canónica está en
 `shared/golden/steps.json` y su digest esperado en `shared/golden/expected.json`.
 
 ## 10. Generados y anti-drift
 
-| Generado | Ruta Flutter | Ruta Expo |
-|---|---|---|
-| tokens | `lib/generated/tokens.dart` | `src/generated/tokens.ts` |
-| fixtures | `lib/generated/fixtures.dart` | `src/generated/fixtures.ts` |
-| copy | `lib/generated/copy.dart` | `src/generated/copy.ts` |
-| photoMap | `lib/generated/photo_map.dart` | `src/generated/photoMap.ts` |
-| dataset | `lib/generated/dataset.dart` | `src/generated/dataset.ts` |
+| Generado | Ruta |
+|---|---|
+| tokens | `src/generated/tokens.ts` |
+| fixtures | `src/generated/fixtures.ts` |
+| copy | `src/generated/copy.ts` |
+| photoMap | `src/generated/photoMap.ts` |
+| dataset | `src/generated/dataset.ts` |
 
 Más `landing/generated/dataset.js`, `landing/generated/tokens.css`, las copias de
-`assets/brand`, `assets/fonts` y `test/golden/`. Todos los generados son byte-estables
-(LF, claves ordenadas, sin timestamps) y se verifican así:
+`assets/brand`, `assets/fonts` y `test/golden/`. El golden
+(`shared/golden/expected.json`) lo escribe `npm --prefix demo/expo-demo run golden:update`
+desde el reducer Expo; el sync lo copia a `test/golden/`. Todos los generados son
+byte-estables (LF, claves ordenadas, sin timestamps) y se verifican así:
 
 ```bash
 node scripts/validate-fixtures.mjs
@@ -276,8 +267,7 @@ negar todo host que no sea uno solo es inviable. Lo que sí se garantiza es que 
 - En posición **no** pedible se toleran sólo los hosts reales del artefacto, cada uno con
   su razón escrita en `BENIGN_TEXT_HOSTS` y su test: `www.w3.org` (namespace SVG),
   `github.com` y `scripts.sil.org` (licencia OFL), `necolas.github.io` (comentario del
-  reset de react-native-web), `react.dev`, `expo.dev`, `api.flutter.dev`,
-  `docs.flutter.dev`, `flutter.dev`, `pub.dev` (enlaces dentro de mensajes de error) y
+  reset de react-native-web), `react.dev`, `expo.dev` y
   `maplibre.org`, `maplibre.invalid`, `wiki.openstreetmap.org` (mensajes de MapLibre; el
   `.invalid` es una base ficticia que nunca se resuelve). El mismo host en `src=` o
   `fetch(` falla igual.
@@ -288,22 +278,13 @@ La auditoría imprime `host pedible: <host> (n)`; pre-basemap el conjunto era va
 
 Excepciones acotadas (cada una cubierta por `scripts/lib/denylist.test.mjs`):
 
-1. **Fallbacks del loader de Flutter.** `flutter.js`, `flutter_bootstrap.js`,
-   `flutter_service_worker.js` y `main.dart.js` embeben dos defaults del engine:
-   `https://www.gstatic.com/flutter-canvaskit` (el loader lo concatena con la revisión;
-   el engine ya trae la revisión de 40 hex en el path) y `https://fonts.gstatic.com/s/`
-   (la Inter va bundleada; el default sólo se usaría para glifos ausentes). CanvasKit se
-   sirve local vía `canvasKitBaseUrl`. Se ignoran **sólo esas formas exactas**: el
-   prefijo de CanvasKit tiene que estar entre comillas o seguido de `/revisión/`, y la
-   fuente tiene que terminar en la cadena. Un pedido real
-   (`https://fonts.gstatic.com/s/inter/v13/x.woff2`) no coincide y bloquea el artefacto.
-2. **Código muerto de Expo Go.** El bundle web de Expo incluye, desde `expo-asset`
+1. **Código muerto de Expo Go.** El bundle web de Expo incluye, desde `expo-asset`
    (`AssetSources.js`), `https://classic-assets.eascdn.net/~assets/${…}` dentro de
    `if (NativeModules['ExponentKernel'])`. `ExponentKernel` sólo existe en el cliente
    nativo de Expo Go: en web la rama nunca se ejecuta, así que no es un request. Se ignora
    únicamente esa forma exacta (prefijo de template literal con `${`) y sólo en
    `expo/_expo/static/js/web/*.js`; cualquier otro uso de `eascdn.net` falla.
-3. **Links de atribución y logo de MapLibre.** El chunk `maplibre-gl-*.js` embebe dos
+2. **Links de atribución y logo de MapLibre.** El chunk `maplibre-gl-*.js` embebe dos
    anchors por defecto: `customAttribution` del control de atribución y `href` del
    control de logo. La demo crea el mapa con `attributionControl: false` y
    `maplibreLogo: false`, así que ninguno se monta: son `href` de código muerto, no
@@ -340,19 +321,19 @@ mismo comando que corre el workflow antes de subir el artefacto.
 
 ## 12. Base path y rutas
 
-| Contexto | Flutter `--base-href` | `EXPO_BASE_URL` | Landing |
-|---|---|---|---|
-| Sitio de proyecto (`/NearbyIG`) | `/NearbyIG/flutter/` | `/NearbyIG/expo` | `./flutter/`, `./expo/` |
-| Sitio de usuario | `/flutter/` | `/expo` | `./flutter/`, `./expo/` |
+| Contexto | `EXPO_BASE_URL` | Landing |
+|---|---|---|
+| Sitio de proyecto (`/NearbyIG`) | `/NearbyIG/expo` | `./expo/` |
+| Sitio de usuario | `/expo` | `./expo/` |
 
-Flutter exige barra inicial y final; Expo exige barra inicial y prohíbe la final. Ni las
-apps ni la landing hardcodean el host. `/`, `/flutter/` y `/expo/` son directorios con
+Expo exige barra inicial y prohíbe la final. Ni la app ni la landing hardcodean el host.
+`/`, `/expo/` y `/contract/` son directorios con
 `index.html`: no dependen de rewrites ni de rutas profundas.
 
 ## 13. Publicación
 
 Un único workflow (`.github/workflows/pages.yml`) publica un único artefacto de Pages:
-landing en `/`, Flutter en `/flutter/`, Expo en `/expo/`. `configure-pages` resuelve el
+landing en `/`, demo en `/expo/` y el doc del contrato en `/contract/`. `configure-pages` resuelve el
 base path antes de los builds; lectura del sitio con `pages: read` a nivel workflow,
 mientras `pages: write` e `id-token: write` viven **sólo** en el job de deploy.
 Validación, drift, tests, builds y auditoría del artefacto bloquean el upload (nunca hay
@@ -363,17 +344,18 @@ Si el sitio se deshabilita, el job `build` falla en `configure-pages`, a propós
 Pasos, verificación y rollback:
 [`../docs/pages-handoff.md`](../docs/pages-handoff.md).
 
-## 14. Evidencia de verificación (paridad 15 puntos)
+## 14. Evidencia de verificación (15 puntos)
 
-Los puntos se verifican con la golden compartida (mismos digests en Dart y TS), los
-tests de cada app y la auditoría del artefacto. La columna “Visual” marca lo que exige
-un navegador real y queda pendiente hasta la revisión con DevTools + lector de pantalla.
+Los puntos se verifican con el golden de regresión del reducer Expo (digests congelados
+en `shared/golden/expected.json`), los tests de cada app y la auditoría del artefacto.
+La columna “Visual” marca lo que exige un navegador real y queda pendiente hasta la
+revisión con DevTools + lector de pantalla.
 
 | # | Automatizado | Visual |
 |---|---|---|
 | 1 | golden (`SET_SELF_INTENTION`), 3 intenciones válidas en `validate-fixtures` | cambio reflejado en perfil y filtro |
-| 2 | Flutter: radar con 10 puntos accesibles y reduced-motion estático; Expo: `discoveryBody.test.ts` mapea `radar` y `map` a la misma composición, `mapStatus.test.ts` fija idle→loading→ready|failed y `basemap.test.ts` la derivación de zoom | mismo orden/distancias en lista y radar de Expo; basemap real visible y atribución legible |
-| 3 | `selectors.test.ts` / `selectors_test.dart`: radio 500 m, filtros y vacío | CTA “Limpiar filtros” en ambas |
+| 2 | `discoveryBody.test.ts` mapea `radar` y `map` a la misma composición, `mapStatus.test.ts` fija idle→loading→ready|failed y `basemap.test.ts` la derivación de zoom | mismo orden/distancias en lista y radar; basemap real visible y atribución legible |
+| 3 | `selectors.test.ts`: radio 500 m, filtros y vacío | CTA “Limpiar filtros” |
 | 4 | golden timers + widget test de ping enviado/deshabilitado + bandeja con el enviado y su estado | ping entrante a 3.0 s en Expo |
 | 5 | golden (`ACCEPT_PING`, `SEND_MESSAGE`, `REJECT_PING`) | overlay de match a 2.5 s |
 | 6 | golden `MARK_NOTIFICATIONS_READ` + widget test “abrir el centro limpia el badge” | badge y toast de 4.0 s |
@@ -385,7 +367,7 @@ un navegador real y queda pendiente hasta la revisión con DevTools + lector de 
 | 12 | widget test de reset; `store.test.ts` cancela timers | refresh en el navegador |
 | 13 | 360×640 sin overflow; labels con nombre + distancia + badges | 320/480/768/1440 y foco con teclado |
 | 14 | denylist de hosts por posición en el artefacto (`request-hosts.test.mjs`: allowlist exacta + benignos; `gstatic`/`eascdn`/MapLibre con sus formas exactas); una sola puerta de geolocalización, sin `watchPosition` ni persistencia del punto (`privacy.test.ts`); `lang="es"` en los tres documentos | Network de Radar con un único host externo |
-| 15 | `brand.test.mjs` (marca, slogan, DEMO en landing) + `copy.test.ts`; About con label DEMO y 8 ítems | label DEMO en About, landing header/footer y header Flutter |
+| 15 | `brand.test.mjs` (marca, slogan, DEMO en landing) + `copy.test.ts`; About con label DEMO y 8 ítems | label DEMO en About y landing header/footer |
 
 Automatizado y reproducible:
 
@@ -394,7 +376,6 @@ node scripts/validate-fixtures.mjs
 node scripts/sync-demo-assets.mjs --check
 npm run test:scripts
 npm --prefix demo/expo-demo run typecheck && npm --prefix demo/expo-demo run test
-(cd demo/flutter-demo && flutter analyze && flutter test)
 PAGES_BASE_PATH="" node scripts/assemble-site.mjs --strict site
 ```
 

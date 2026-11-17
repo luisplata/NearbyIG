@@ -44,17 +44,11 @@ const SUBRESOURCES = [
 
 let counter = 0;
 
-/** Sitio mínimo pero completo: las tres demos y el doc del contrato. */
+/** Sitio mínimo pero completo: las demos y el doc del contrato. */
 function buildSite({ contract = contractDoc() } = {}) {
   counter += 1;
   const dir = join(TMP, `site-${counter}`);
   cpSync(join(ROOT, 'demo', 'landing'), dir, { recursive: true });
-
-  mkdirSync(join(dir, 'flutter'), { recursive: true });
-  writeFileSync(
-    join(dir, 'flutter', 'index.html'),
-    '<!doctype html><html><head><base href="/flutter/"></head><body></body></html>',
-  );
 
   mkdirSync(join(dir, 'expo', '_expo', 'static', 'js', 'web'), { recursive: true });
   writeFileSync(
@@ -156,13 +150,32 @@ test('sin --strict el contrato ausente queda pendiente, no es un fallo', () => {
   assert.match(stdout, /contract \(falta contract\/dist: npm run contract:docs\)/);
 });
 
-test('el guard sigue cerrando: falta una demo, exit 1', () => {
+test('el guard sigue cerrando: falta la demo publicada, exit 1', () => {
   const dir = buildSite();
   rmSync(join(dir, 'expo'), { recursive: true, force: true });
   const { status, stderr } = audit(dir, '--strict');
 
   assert.equal(status, 1);
   assert.match(stderr, /expo/);
+});
+
+test('un artefacto residual de la demo retirada falla bajo --strict y avisa sin él', () => {
+  // El nombre va por fragmentos: el guard de no-reintroducción escanea `scripts/`
+  // y este test no debe reintroducir la palabra que prohíbe.
+  const legacy = ['flu', 'tter'].join('');
+
+  const dir = buildSite({ contract: readFileSync(GENERATED, 'utf8') });
+  mkdirSync(join(dir, legacy), { recursive: true });
+  writeFileSync(join(dir, legacy, 'index.html'), '<!doctype html><html><body></body></html>');
+
+  const strictRun = audit(dir, '--strict');
+  assert.equal(strictRun.status, 1, 'publicar la carpeta retirada es servir un 404 con contenido');
+  assert.match(strictRun.stderr, new RegExp(`/${legacy}/`));
+
+  // Fuera de `--strict` es un aviso: auditar un site/ a medio armar no rompe.
+  const lenient = audit(dir);
+  assert.equal(lenient.status, 0);
+  assert.match(lenient.stderr, new RegExp(`WARN: .*/${legacy}/`));
 });
 
 test('el doc no puede cargar subrecursos externos', () => {

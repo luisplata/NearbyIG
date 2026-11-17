@@ -2,7 +2,6 @@ name: pages
 
 # Un solo workflow publica un único artefacto de Pages:
 #   /            landing
-#   /flutter/    demo Flutter web
 #   /expo/       demo Expo web
 #   /contract/   doc estático del contrato
 #
@@ -29,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Validación del contrato y de las dos apps. Corre siempre, también en PR.
+  # Validación del contrato y de la app Expo. Corre siempre, también en PR.
   # Nada se construye si esto falla.
   checks:
     name: checks
@@ -47,13 +46,6 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             demo/expo-demo/package-lock.json
-
-      - name: Setup Flutter 3.41.2
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.41.2
-          cache: true
 
       - name: Install tooling
         run: npm ci
@@ -73,20 +65,8 @@ jobs:
       - name: Expo typecheck
         run: npm --prefix demo/expo-demo run typecheck
 
-      - name: Expo tests (golden parity)
+      - name: Expo tests (golden regression)
         run: npm --prefix demo/expo-demo run test
-
-      - name: Flutter dependencies
-        working-directory: demo/flutter-demo
-        run: flutter pub get
-
-      - name: Flutter analyze
-        working-directory: demo/flutter-demo
-        run: flutter analyze
-
-      - name: Flutter tests
-        working-directory: demo/flutter-demo
-        run: flutter test
 
   # Build + ensamblado + auditoría. Sólo en main (push o dispatch), nunca en PR.
   build:
@@ -115,13 +95,6 @@ jobs:
             package-lock.json
             demo/expo-demo/package-lock.json
 
-      - name: Setup Flutter 3.41.2
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.41.2
-          cache: true
-
       # Evita dobles barras y barras finales antes de pasarlo a los builds.
       - name: Check base path
         env:
@@ -130,7 +103,7 @@ jobs:
           set -euo pipefail
           case "$BASE_PATH" in
             "")
-              echo "base_path vacío: sitio de usuario (/, /flutter/, /expo/)"
+              echo "base_path vacío: sitio de usuario (/, /expo/, /contract/)"
               ;;
             /*)
               if [ "${BASE_PATH%/}" != "$BASE_PATH" ]; then
@@ -169,16 +142,7 @@ jobs:
           EXPO_PUBLIC_API_URL: ${{ vars.NEARBYIG_API_URL }}
         run: npx expo export --platform web --output-dir dist --clear
 
-      - name: Flutter build
-        working-directory: demo/flutter-demo
-        env:
-          # Flutter exige barra inicial y final.
-          FLUTTER_BASE_HREF: ${{ steps.pages.outputs.base_path }}/flutter/
-        run: |
-          flutter pub get
-          flutter build web --release --pwa-strategy=none --base-href "$FLUTTER_BASE_HREF"
-
-      # Ensambla site/ y audita: landing + flutter + expo, /contract/, denylist,
+      # Ensambla site/ y audita: landing + expo, /contract/, denylist,
       # hosts, datasetId. Falla antes del upload si algo no cierra: nunca hay
       # deploy parcial.
       - name: Assemble and audit site

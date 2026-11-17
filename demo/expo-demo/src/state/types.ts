@@ -1,8 +1,9 @@
 import type { Gender, Intention } from '../generated/fixtures';
 
 /**
- * Tipos del estado de la demo. Espejo exacto de `lib/state/demo_state.dart` de
- * la app Flutter: misma forma, mismos enums, mismos valores por defecto.
+ * Tipos del estado de la demo: la forma canónica que serializa
+ * `state-machine.md` §8 y que compara el golden. Mismos enums, misma forma y
+ * mismos valores por defecto que el contrato.
  */
 
 export type DemoView = 'radar' | 'map' | 'list';

@@ -2,10 +2,10 @@
  * Copy del modo live.
  *
  * **Por qué acá y no en `demo/shared/copy.json`.** El catálogo es la fuente
- * única del artefacto mock y el `datasetId` sale de su contenido: agregar claves
- * mueve el hash, obliga a regenerar `copy.dart` (referencia congelada) y a
- * reescribir el `datasetId` de `test/golden/expected.json`. El modo live no
- * existe en ese artefacto, así que sus textos viven con el código que los usa.
+ * única del artefacto publicado y el `datasetId` sale de su contenido: agregar
+ * claves mueve el hash y obliga a reescribir el `datasetId` de
+ * `test/golden/expected.json`. El modo live no existe en ese artefacto, así que
+ * sus textos viven con el código que los usa.
  * Todo lo que ya está en el catálogo se reutiliza por `fmt()`: nombres de
  * intención, `status.*`, `a11y.profileDot`, títulos de pantalla.
  *

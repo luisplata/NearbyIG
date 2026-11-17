@@ -44,7 +44,7 @@ describe('copy del basemap real', () => {
     expect(note).toMatch(/guion|simulad/i);
   });
 
-  it('la leyenda ilustrada sigue diciendo "mapa simulado" (Flutter la usa)', () => {
+  it('la leyenda ilustrada sigue diciendo "mapa simulado"', () => {
     expect(copy['discovery.mapLegend']).toMatch(/simulado/i);
   });
 

@@ -300,7 +300,7 @@ cd backend && node scripts/load-test.mjs --humans=2 --duration=20
 
 ## 11. Rollback al mock
 
-El mock (`/expo/` y `/flutter/`) es el mismo artefacto de siempre y no depende
+El mock (`/expo/`) es el mismo artefacto de siempre y no depende
 de la API. Para volver atrás:
 
 1. **Rápido, sin tocar el deploy:** abrir `https://luisplata.github.io/NearbyIG/expo/`

@@ -92,8 +92,6 @@ test('checks corre validación, drift, tests y builds de verificación', () => {
     'npm --prefix demo/expo-demo ci',
     'npm --prefix demo/expo-demo run typecheck',
     'npm --prefix demo/expo-demo run test',
-    'flutter analyze',
-    'flutter test',
   ]) {
     assert.ok(checks.includes(command), `checks no ejecuta "${command}"`);
   }
@@ -107,7 +105,7 @@ test('configure-pages resuelve el base path antes de cualquier build', () => {
   assert.equal(firstUses[1], 'actions/configure-pages@v5', 'configure-pages debe ser la primera action después del checkout');
 
   const configureAt = build.indexOf('configure-pages@v5');
-  for (const marker of ['Expo export', 'Flutter build', 'assemble-site.mjs']) {
+  for (const marker of ['Expo export', 'assemble-site.mjs']) {
     assert.ok(configureAt < build.indexOf(marker), `configure-pages debe preceder a "${marker}"`);
   }
 
@@ -118,15 +116,16 @@ test('configure-pages resuelve el base path antes de cualquier build', () => {
 test('los builds consumen el base path resuelto, sin hardcodear /NearbyIG', () => {
   const build = job('build');
   assert.ok(build.includes('EXPO_BASE_URL: ${{ steps.pages.outputs.base_path }}/expo'));
-  assert.ok(build.includes('FLUTTER_BASE_HREF: ${{ steps.pages.outputs.base_path }}/flutter/'));
   assert.ok(!/\/NearbyIG/.test(source), 'el workflow no debe hardcodear el nombre del repo');
   assert.equal((build.match(/PAGES_BASE_PATH: \$\{\{ steps\.pages\.outputs\.base_path \}\}/g) ?? []).length, 1);
 });
 
-test('fija Node 22 y Flutter 3.41.2', () => {
+test('fija Node 22 y no reintroduce el toolchain retirado', () => {
   assert.equal((source.match(/node-version: 22/g) ?? []).length, 2);
-  assert.equal((source.match(/flutter-version: 3\.41\.2/g) ?? []).length, 2);
-  assert.ok(source.includes('channel: stable'));
+  // La aguja va por fragmentos (mismo patrón que `demo-cleanliness.test.mjs`): el
+  // guard de no-reintroducción escanea `scripts/` y no debe auto-detectarse.
+  const legacy = new RegExp(['flu', 'tter'].join(''), 'i');
+  assert.ok(!legacy.test(source), 'pages.yml no debe referenciar el toolchain retirado');
 });
 
 test('audita el artefacto antes de subirlo', () => {

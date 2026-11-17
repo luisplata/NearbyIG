@@ -1,15 +1,14 @@
 # State machine — norma compartida
 
-Esta es la **autoridad** del comportamiento de ambas demos. Flutter (`lib/state/`) y Expo
-(`src/state/`) implementan la misma semántica con dos lenguajes distintos. Cualquier
-divergencia entre implementaciones es un defecto; el golden (`golden/steps.json`) la
-detecta.
+Esta es la **autoridad** del comportamiento de la demo. Expo (`src/state/`) la implementa;
+los tipos, los selectores y la proyección describen la semántica completa. Cualquier
+divergencia entre lo que implementa el código y lo que dice este documento es un defecto;
+el golden (`golden/steps.json`) la detecta.
 
 El reducer es **puro**: no importa frameworks, no lee el reloj, no hace I/O. Recibe un
 estado y una acción, devuelve un estado nuevo y una lista de efectos. Los efectos los
 agenda el store, que es el único que conoce timers.
 
-    Dart:  ReduceResult reduce(DemoState state, DemoAction action)  // {state, effects}
     TS:    { state: DemoState; effects: Effect[] } reduce(state, action)
 
 ## 1. Estado
@@ -154,8 +153,8 @@ efectos son datos.
 | `toast` | `timers.toastMs` (4000) | cualquier toast nuevo | `TIMER_FIRED('toast', toastId)` |
 
 El store agenda los efectos en un `Map<string, Timer>` con clave `kind:id`. Un efecto
-nuevo con la misma clave **reemplaza** al anterior (reprograma). `RESET`, el desmontaje
-(Expo) y `dispose` (Flutter) cancelan todo el mapa. Nunca hay timers huérfanos.
+nuevo con la misma clave **reemplaza** al anterior (reprograma). `RESET` y el desmontaje
+del store cancelan todo el mapa. Nunca hay timers huérfanos.
 
 ## 5. Selectores
 
@@ -192,10 +191,9 @@ mapa. Un basemap caído no cambia la proyección ni el guion.
 
 - `RESET` devuelve exactamente `initialState()` y el store cancela timers.
 - La vista inicial es la **lista** (`view='list'`): primer arranque, `RESET` y refresh
-  aterrizan en la lista ordenada por distancia. En **Expo** la barra inferior tiene
+  aterrizan en la lista ordenada por distancia. La barra inferior tiene
   cuatro tabs —Lista → Radar → Pings → Perfil— y no expone `map`; si el estado se setea
-  a `map`, se renderiza la misma composición radar-sobre-mapa. **Flutter** conserva su
-  barra de cinco tabs (Lista → Radar → Mapa → Pings → Perfil) como referencia.
+  a `map`, se renderiza la misma composición radar-sobre-mapa.
 - Refrescar la página produce el mismo estado inicial: no hay storage, cookies,
   `localStorage`, `sessionStorage` ni URL con estado.
 - Los timers se derivan de acciones, no del reloj de pared: el reducer no llama a
@@ -203,12 +201,12 @@ mapa. Un basemap caído no cambia la proyección ni el guion.
 - La navegación es estado en memoria (`view` + `overlay`). No hay router ni rutas
   profundas; la URL nunca cambia.
 
-## 8. Paridad ejecutable (golden)
+## 8. Regresión ejecutable (golden)
 
 `golden/steps.json` es una secuencia canónica de acciones con `TIMER_FIRED` explícitos.
-Ambos test suites la reproducen con el mismo reducer y, después de cada paso, comparan
-`digest = sha256(projection(state)).hex[0..12]` contra `golden/expected.json`
-(producido por el dumper de Dart, única fuente).
+La reproduce el reducer Expo y, después de cada paso, compara
+`digest = sha256(projection(state)).hex[0..12]` contra `golden/expected.json`, que
+escribe `npm --prefix demo/expo-demo run golden:update` (única fuente).
 
 `projection(state)` es una lista **ordenada** de líneas `clave=valor`:
 
@@ -219,7 +217,7 @@ pingsSent, incomingPings, matches, revealedByMe, revealedByPeer,
 messages, typing, notifications, blocked, verification, matchCelebration, toast
 ```
 
-Reglas de serialización (idénticas en ambos lenguajes):
+Reglas de serialización:
 
 - `null` → `-`; booleanos → `1` / `0`.
 - Listas → elementos ordenados asc, separados por `,`; lista vacía → `-`.
