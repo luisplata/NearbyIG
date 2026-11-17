@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -12,17 +14,34 @@ import type { DemoEffectKind, DemoState } from '../src/state/types';
 
 type GoldenStep = { n: number; action: Record<string, unknown>; note?: string };
 type GoldenDigest = { n: number; digest: string };
+type GoldenFile = {
+  datasetId: string;
+  digestLength: number;
+  projectionVersion: number;
+  schemaVersion: number;
+  steps: GoldenDigest[];
+};
 
 function readJson<T>(name: string): T {
   return JSON.parse(readFileSync(new URL(`./golden/${name}`, import.meta.url), 'utf8')) as T;
 }
 
-const steps = readJson<{ steps: GoldenStep[] }>('steps.json').steps;
-const expected = readJson<{ datasetId: string; digestLength: number; steps: GoldenDigest[] }>(
-  'expected.json',
-);
+const stepsFile = readJson<{ projectionVersion: number; steps: GoldenStep[] }>('steps.json');
+const steps = stepsFile.steps;
+/** El fixture que consume este test: `npm run sync` copia `shared/golden/` acá. */
+let expected = readJson<GoldenFile>('expected.json');
+const goldenRaw = readFileSync(new URL('./golden/expected.json', import.meta.url), 'utf8');
 
-/** `sha256(projection)[0..12]`, igual que `digestOf` en la app Flutter. */
+/** Fuente única: el writer escribe acá, no en la copia sincronizada. */
+const sharedGolden = fileURLToPath(new URL('../../shared/golden/expected.json', import.meta.url));
+
+/** Sólo `npm run golden:update` (que exporta la variable) escribe el fixture. */
+const update = process.env.UPDATE_GOLDEN === '1';
+
+/**
+ * `sha256(projection)[0..12]` sobre la proyección canónica de `state-machine.md` §8.
+ * Es el digest que congela `expected.json` paso a paso.
+ */
 function digestOf(state: DemoState): string {
   return createHash('sha256').update(projectState(state), 'utf8').digest('hex').slice(0, DIGEST_LENGTH);
 }
@@ -46,11 +65,59 @@ function applySteps(): { state: DemoState; byNumber: Map<number, string> } {
   return { state, byNumber };
 }
 
-describe('golden de paridad', () => {
+/**
+ * Byte-idéntico a `JsonEncoder.withIndent("  ")` de Dart: UTF-8 sin BOM, LF, dos
+ * espacios y salto final. El orden de las claves es el del literal de abajo.
+ */
+function serializeGolden(file: GoldenFile): string {
+  return JSON.stringify(file, null, 2) + '\n';
+}
+
+function recompute(): GoldenFile {
+  let state = initialState();
+  const digests: GoldenDigest[] = [];
+  for (const step of steps) {
+    state = reduce(state, actionFromJson(step.action)).state;
+    digests.push({ n: step.n, digest: digestOf(state) });
+  }
+  return {
+    datasetId,
+    digestLength: DIGEST_LENGTH,
+    projectionVersion: stepsFile.projectionVersion,
+    schemaVersion,
+    steps: digests,
+  };
+}
+
+if (update) {
+  const next = recompute();
+  const bytes = serializeGolden(next);
+  mkdirSync(dirname(sharedGolden), { recursive: true });
+  writeFileSync(sharedGolden, bytes, 'utf8');
+  // Una escritura CRLF en Windows cambiaría el archivo sin mover un solo digest:
+  // se relee y se compara para que el fallo sea del writer, no del `git diff` del CI.
+  if (readFileSync(sharedGolden, 'utf8') !== bytes) {
+    throw new Error('expected.json no quedó byte-estable (¿fin de línea CRLF?)');
+  }
+  // Los asserts de abajo corren contra lo recién escrito: el run que regenera es el
+  // único lugar donde todavía se verifican las 27 acciones, los guards y el RESET.
+  expected = next;
+  console.log(`[golden] actualizado: ${sharedGolden}`);
+}
+
+describe('golden de regresión del reducer Expo', () => {
   it('expected.json pertenece al dataset sincronizado', () => {
     expect(expected.datasetId).toBe(datasetId);
     expect(schemaVersion).toBe(2);
     expect(expected.digestLength).toBe(DIGEST_LENGTH);
+    expect(expected.projectionVersion).toBe(stepsFile.projectionVersion);
+  });
+
+  it('expected.json es byte-estable: LF, dos espacios y salto final', () => {
+    // El pin de formato es independiente de la frescura del fixture: detecta un
+    // writer que cambie de indentación, de separador o de fin de línea.
+    expect(goldenRaw).not.toContain('\r');
+    expect(goldenRaw).toBe(JSON.stringify(JSON.parse(goldenRaw), null, 2) + '\n');
   });
 
   it('la secuencia ejercita las 27 acciones y los 4 timers del guion', () => {
@@ -66,7 +133,7 @@ describe('golden de paridad', () => {
     expect(actions.some((action) => action.type === 'DISMISS_TOAST')).toBe(true);
   });
 
-  it('el digest de cada paso coincide con el Dart de expected.json', () => {
+  it('el digest de cada paso coincide con expected.json', () => {
     expect(expected.steps.length).toBe(steps.length);
     let state = initialState();
     for (const step of steps) {
