@@ -263,7 +263,7 @@ hay chat, ni `GET /matches`, ni bloqueo.
 
 | Operation | Sprint | Respuesta | Qué hace |
 |---|---:|---|---|
-| `POST /pings` | 4 | 201 `Ping` | Crea el ping `A → B`. Si `B` es un bot, vuelve `accepted` con `matchId` |
+| `POST /pings` | 4 | 201 `Ping` | Crea el ping `A → B` en `pending`; el match nace cuando `B` lo acepta |
 | `GET /pings?box=inbox\|sent` | 4 | 200 `PingList` | Bandeja: `createdAt` desc, con la proyección del otro perfil |
 | `POST /pings/{pingId}/accept` | 4 | 200 `Match` | Sólo el destinatario. Un match por par |
 | `POST /pings/{pingId}/reject` | 4 | 204 | Sólo el destinatario. Sin match |
@@ -275,7 +275,7 @@ cliente:
 | Caso | Respuesta | Por qué |
 |---|---|---|
 | ping a sí mismo | 422 `VALIDATION_FAILED` | El body está bien; el pedido no |
-| destino de otra región, inexistente o bot sin dueño vivo | 404 `PROFILE_NOT_FOUND` | Un ping no cruza regiones y un bot sin presencia no está |
+| destino de otra región, inexistente o sin presencia viva | 404 `PROFILE_NOT_FOUND` | Un ping no cruza regiones y sin presencia el perfil no está |
 | ya hay un pendiente en ese par dirigido | 409 `PING_DUPLICATE` | Un pendiente por par (`A → B` y `B → A` son distintos) |
 | el pendiente del par ya venció | 410 `PING_EXPIRED` | Se cierra el viejo; reintentar crea uno nuevo |
 | cuota de envíos agotada | 429 `RATE_LIMITED` | El body no se corrige, se espera |
@@ -284,10 +284,10 @@ cliente:
 | aceptar/rechazar uno vencido | 410 `PING_EXPIRED` | Y no se crea match |
 | `pingId` que no es uuid | 422 `VALIDATION_FAILED` | Mal escrito antes de faltar |
 
-**El bot acepta solo.** Si el destinatario es un bot (`<owner>-b1`), el ping
-vuelve ya `accepted` con `matchId` en la misma transacción. No hay job que
-despierte bots a los 2 s: la demo se siente viva y el cliente no tiene un caso
-especial, porque mira el mismo `Ping`.
+**Sin aceptación automática.** Un ping vuelve `pending` y el `matchId` queda
+`null` hasta que el destinatario lo resuelva. No hay job ni rama del server que
+acepte en nombre de alguien: la demo depende de que la otra persona mire la
+pantalla, y por eso el piloto se corre con dos dispositivos reales.
 
 **Un match por par, y lo dice la base.** `matches` tiene `UNIQUE (region_key,
 profile_a_id, profile_b_id)` con el par ordenado (`a < b`): dos pings aceptados
@@ -305,8 +305,7 @@ además lo ve en `GET /matches`, que es la bandeja de conversaciones; el
 **`PingList` no es un array de `Ping`.** Cada fila es `PingListItem { ping,
 peer }`: el ping y el otro perfil (nickname, iniciales, foto, intención,
 `sourceType`). Sin eso, la bandeja obligaría al cliente a cruzar el ping contra
-`/demo/profiles`, que además no conoce a los bots. El `peer` de un bot hereda la
-proyección de su dueño, igual que en `GET /discovery`.
+`/demo/profiles`.
 
 **Tres códigos nuevos y dos que dejan de estar reservados.** `PING_DUPLICATE` y
 `PING_EXPIRED` salen de `x-reserved` porque ahora tienen operation. Se suman
@@ -358,14 +357,13 @@ es lo que el server necesite para no perder ni repetir filas cuando dos mensajes
 llegan en el mismo milisegundo, y el cliente lo devuelve tal cual. `hasMore`
 dice si quedó algo; una página vacía al final devuelve `nextCursor: null`.
 
-**El bot responde solo.** Si el otro lado de un match es un bot, el server agenda
-una respuesta a los ~2 s y emite `typing.started` en el acto. El cliente no
-simula nada y no hay timer duplicado: la espera es del server y la respuesta
-llega como `message.created` por el stream, igual que la de un humano.
+**No hay respuesta automática.** Escribir es un acto de la sesión autenticada: el
+server persiste ese mensaje y emite `message.created`. Nadie responde en nombre
+del otro lado, y no hay `typing` en el contrato desde v0.6.
 
 **Los eventos del chat son de los participantes.** `message.created` lleva
 `matchId`, no `profileId`, así que la visibilidad no puede ser la del resto del
-stream (humanos de la región + bots visibles): filtrar por región le mostraría a
+stream (los perfiles vivos de la región): filtrar por región le mostraría a
 cualquiera las conversaciones ajenas. La regla es "soy uno de los dos lados de
 ese match", y el payload no lleva el texto: el evento avisa, la conversación se
 lee por HTTP.
@@ -405,12 +403,12 @@ Reglas que el contrato fija y el server no reinterpreta:
 | invitado de relleno | 403 `PROFILE_REQUIRED` | no tiene perfil que bloquear ni reportar |
 | ping entre bloqueados (cualquier dirección) | 403 `CHAT_BLOCKED` | el 403 del par, no un 409 de estado |
 | mensaje en conversación de par bloqueado | 403 `CHAT_BLOCKED` | la historia se lee; escribir, no |
-| conversación con un bot que cambió de zona | 409 `MATCH_CLOSED` | el bot ya no está donde nació el match; se lee pero no se escribe |
+| conversación cuyo otro lado ya no está en el catálogo | 409 `MATCH_CLOSED` | se lee pero no se escribe; cambiar de zona no cierra nada |
 | `notificationIds` con forma inválida | 422 `VALIDATION_FAILED` | un id que no es uuid no se adivina |
 
 **Ghost vs. apagar la presencia.** `DELETE /presence` es "me voy": la sesión deja
 de contar para todos, incluida ella misma. `visibility: ghost` es "estoy pero no me
-veas": la sesión sigue viendo y sus bots siguen orbitando para el dueño. Por eso
+veas": la sesión sigue viendo, pero su perfil no aparece para los demás. Por eso
 `PresenceState.online` sigue en `true` en ghost: el campo dice si la presencia
 existe, no si es visible.
 
@@ -419,8 +417,8 @@ bloqueos y reportes. `CHAT_BLOCKED` y `MATCH_CLOSED` ya existían y se reusan co
 significado de v0.4 extendido. `x-reserved` sigue vacío: no hay código sin
 operation.
 
-**Bloquear un bot bloquea a su dueño.** La fila guarda al humano canónico; un bot
-no tiene identidad propia que sobreviva a la persona. Lo mismo vale para reportar.
+**El bloqueo apunta a un perfil real.** La fila guarda el `profileId` que se
+envió; no hay canonización a otro id. Lo mismo vale para reportar.
 
 **Notificaciones sin evento nuevo.** La campana no agrega tipos al stream: se
 refresca con `GET /notifications`, y el contenido se lee con la API del recurso. El
@@ -431,6 +429,41 @@ badge de pings pendientes del cliente sigue funcionando igual (ver
 descubrimiento; registra la señal con un motivo cerrado y devuelve un acuse sin
 identidad del reportado. Un `GET /reports` no existe a propósito: sería una lectura
 de PII sin diseño que la sostenga.
+
+## Sin población sintética (delta v0.6)
+
+La demo dejó de sembrar identidades sin sesión real: no hay dos perfiles
+derivados por persona, no hay ticker que los mueva y no hay aceptación ni
+respuesta automáticas. v0.6 no agrega ni quita operations; saca del contrato el
+vocabulario que sólo existía para esa población.
+
+| Pieza | Antes (v0.5) | Ahora (v0.6) |
+|---|---|---|
+| `SourceType` | `human`, `bot`, `guest` | `human`, `guest` |
+| `EventType` | 6 tipos | `profile.presence`, `ping.received`, `match.created`, `message.created` |
+| `EventPayload.oneOf` | 6 payloads | 4 payloads |
+| `sample-log.json` | 40 entradas, `profile.moved` + `profile.presence` | 40 entradas, todas `profile.presence` |
+
+**Por qué se van los dos eventos.** Un tipo de evento es una promesa de que algo
+puede emitirlo. `profile.moved` sólo lo producía el ticker que movía a los bots, y
+`typing.started` sólo lo emitía la respuesta automática del chat. Sin esos
+productores quedaban dos payloads que el server no podía generar y que el cliente
+tendría que ignorar de todos modos. La regla no cambia: el `EventType` del server
+(`profile.presence`, `message.created`) sigue siendo **más chico** que el del
+contrato, porque `ping.received` y `match.created` todavía no tienen productor.
+El cliente descarta cualquier tipo que no conozca sin cortar el stream.
+
+**Por qué el log se regenera y no se vacía.** El fixture prueba replay, dedupe y
+paridad SSE ≡ polling. Vaciar las entradas perdería eso; dejar `profile.moved`
+sería declarar un tipo que ya no existe. Se mantiene la agenda —40 entradas, 24
+`seq` de `mx` y 15 de `co`, el duplicado exacto de `mx:000000000007` y el reloj
+invertido en `mx:000000000005`— y se cambia el tipo a `profile.presence` en todas
+las filas. Las invariantes que el test congeló siguen siendo las mismas.
+
+**Qué NO cambia.** Ninguna operation, ningún DTO de request/response fuera de
+`SourceType` y los eventos, ningún código de error y ninguna regla de privacidad.
+El storage de bots y la migración que lo borra son del cambio `remove-bots`, no
+del contrato: acá sólo se declara la verdad que el server debe cumplir.
 
 ## Regiones y zonas: la geometría existe y nunca viaja
 
@@ -597,11 +630,12 @@ dos son funciones puras del mismo archivo.
 
 `contract/event/sample-log.json` es **derivado**, no escrito a mano: lo emite
 `scripts/event-log.mjs` desde `catalog/profiles.*.json`. Cada entrada referencia un
-perfil real y copia sus valores (`distanceM`/`bearingDeg`, `online`), así que editar
-un perfil sin regenerar el log rompe `contract:event-log:check` (y el test de
-bytes). El fixture conserva lo que PR3 congeló: 40 entradas, 24 `seq` de `mx` y 15
-de `co`, un duplicado exacto de `mx:000000000007` y el quinto evento de `mx` con
-`occurredAt` anterior al anterior (`17:59:50`, el reloj no ordena).
+perfil real y copia su `online`, así que editar un perfil sin regenerar el log
+rompe `contract:event-log:check` (y el test de bytes). Desde v0.6 todas las
+entradas son `profile.presence`. El fixture conserva lo que PR3 congeló: 40
+entradas, 24 `seq` de `mx` y 15 de `co`, un duplicado exacto de
+`mx:000000000007` y el quinto evento de `mx` con `occurredAt` anterior al anterior
+(`17:59:50`, el reloj no ordena).
 
 ### Cómo regenerar el log de eventos
 
@@ -615,7 +649,7 @@ Si lo que querés es más o menos volumen, la agenda está en `TRACK` dentro de
 
 ### Cómo agregar un tipo de evento
 
-1. El valor ya está en `EventType` si es uno de los seis congelados. Si no,
+1. El valor ya está en `EventType` si es uno de los cuatro declarados. Si no,
    sumalo ahí: el enum es el contrato con el cliente.
 2. Declarar `<Tipo>Payload` con `additionalProperties: false` — sin `lat`, `lng`,
    `latitude` ni `longitude`; distancia y rumbo van como `distanceM`/`bearingDeg`.

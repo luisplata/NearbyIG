@@ -20,8 +20,8 @@
  *    `RATE_LIMITED`. Ningún código reservado queda en `x-reserved`.
  *
  * Lo que este archivo **no** prueba: que el server lo haga. Eso son los tests de
- * integración de `backend/` (flujo A↔B, idempotencia, bot por SSE, `/me`). Acá
- * sólo se congela la forma que el server tiene que cumplir.
+ * integración de `backend/` (flujo A↔B, idempotencia, `message.created` por SSE,
+ * `/me`). Acá sólo se congela la forma que el server tiene que cumplir.
  */
 
 import assert from 'node:assert/strict';

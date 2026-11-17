@@ -36,14 +36,14 @@ matches:
       del otro lado y el estado de la conversación. El más reciente primero.
 
       Cada fila es `MatchListItem { match, peer, lastMessage, unreadCount }`: el
-      `peer` es el otro perfil (humano o bot, con la misma forma que la bandeja
-      de pings) y `unreadCount` cuenta los mensajes del otro lado posteriores a
-      tu última lectura. Un match recién aceptado viene con `lastMessage: null` y
+      `peer` es el otro perfil (con la misma forma que la bandeja de pings) y
+      `unreadCount` cuenta los mensajes del otro lado posteriores a tu última
+      lectura. Un match recién aceptado viene con `lastMessage: null` y
       `unreadCount: 0`.
 
-      **Sólo el perfil de la sesión.** Un match entre otro humano y un bot —aun
-      cuando el bot sea de tu propiedad— no es tuyo y no aparece: la lista es de
-      conversaciones propias, no del mundo visible.
+      **Sólo el perfil de la sesión.** Un match entre otras dos personas no es
+      tuyo y no aparece: la lista es de conversaciones propias, no del mundo
+      visible.
 
       Sin cursor: hasta los 100 matches más recientes (`maxItems`). La demo tiene
       un match por par y no necesita paginar.
@@ -136,13 +136,13 @@ matches-messages:
       o un campo de más es `422 VALIDATION_FAILED`. El server recorta los bordes
       del texto antes de guardarlo.
 
-      **Un match cerrado no acepta mensajes.** Si el otro lado ya no existe (un
-      bot cuyo dueño se fue de la demo, un perfil regenerado), la conversación
-      queda legible pero escribir es `409 MATCH_CLOSED`.
+      **Un match cerrado no acepta mensajes.** Si el otro lado ya no existe en el
+      catálogo (un perfil regenerado, una sesión que dejó de encarnar un perfil),
+      la conversación queda legible pero escribir es `409 MATCH_CLOSED`.
 
-      **El bot responde solo.** Si el otro lado es un bot, el server agenda su
-      respuesta (~2 s) y emite `typing.started` y `message.created` en el stream.
-      El cliente no simula nada: el mismo camino sirve para humano y bot.
+      **No hay respuesta automática.** Escribir es un acto de la sesión
+      autenticada: el server persiste ese mensaje y emite `message.created`. Nadie
+      escribe en nombre del otro lado.
 
       **Cuota.** Hay un tope de mensajes por ventana: superarlo es `429
       RATE_LIMITED`.

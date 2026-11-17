@@ -12,9 +12,9 @@
 # `Ping` es la fila cruda del recurso. La bandeja (`PingList`) no la devuelve
 # pelada: cada fila es `PingListItem { ping, peer }` porque la lista tiene que
 # mostrar **al otro** —nickname, foto e intención— sin que el cliente cruce el
-# ping contra `/demo/profiles` (que además no conoce a los bots). Anidar el ping
-# en vez de aplanar sus seis campos evita una segunda copia del mismo shape que
-# se desincronice cuando el ping crezca.
+# ping contra `/demo/profiles`. Anidar el ping en vez de aplanar sus seis campos
+# evita una segunda copia del mismo shape que se desincronice cuando el ping
+# crezca.
 
 PingStatus:
   type: string
@@ -52,10 +52,10 @@ PingCreate:
       type: string
       minLength: 1
       description: |
-        `profileId` del destinatario tal como lo devolvió `GET /discovery`: un
-        humano del catálogo (`mx-p01`) o un bot (`mx-p01-b1`). Un `profileId` de
-        otra región es `404 PROFILE_NOT_FOUND` (el ping no cruza regiones) y el
-        propio es `422 VALIDATION_FAILED` (no se pinguea a sí mismo).
+        `profileId` del destinatario tal como lo devolvió `GET /discovery`: una
+        persona del catálogo (`mx-p01`). Un `profileId` de otra región es `404
+        PROFILE_NOT_FOUND` (el ping no cruza regiones) y el propio es `422
+        VALIDATION_FAILED` (no se pinguea a sí mismo).
 
 Ping:
   type: object
@@ -125,16 +125,11 @@ PingPeer:
     se ve. Nada de `distanceM`/`bearingDeg` (un ping no es un resultado de
     descubrimiento y la distancia de hace horas no dice nada), nada de
     coordenadas y nada del dataset que la fila no use.
-
-    Un bot hereda la proyección de su dueño (`nickname`, `initials`, `photoId`,
-    `intention`) y se distingue por `profileId` + `sourceType: bot`, igual que en
-    `GET /discovery`: no existe un segundo catálogo de personas para rellenar la
-    demo.
   properties:
     profileId:
       type: string
       minLength: 1
-      description: El `profileId` del otro perfil (humano o bot).
+      description: El `profileId` del otro perfil.
     nickname:
       type: string
       minLength: 1

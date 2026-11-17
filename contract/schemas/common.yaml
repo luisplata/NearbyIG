@@ -18,11 +18,13 @@ SourceType:
   type: string
   enum:
     - human
-    - bot
     - guest
   description: |
     Origen del perfil o de la sesión. `guest` es la sesión de relleno que se abre
     cuando los 10 slots de una región están tomados: no tiene `demoSlot`.
+    `bot` no existe desde v0.6: no hay población sintética, así que un
+    `sourceType: bot` es `422 VALIDATION_FAILED` como cualquier valor fuera del
+    enum.
 
 Gender:
   type: string

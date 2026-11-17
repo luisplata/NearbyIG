@@ -21,12 +21,11 @@ Visibility:
     Visibilidad de la presencia. Es una **preferencia de la sesión**, no un
     estado de la conexión:
 
-    - `visible` (default): la presencia aparece en el descubrimiento de los demás
-      y sus bots se mueven para ellos.
-    - `ghost`: la sesión sigue viva y sigue viendo (a los demás y a sus propios
-      bots), pero ni el humano ni sus bots aparecen en el descubrimiento ni en el
-      stream de nadie más. Es "online pero invisible", distinto de
-      `DELETE /presence`, que apaga la presencia para todos —incluido uno mismo—.
+    - `visible` (default): la presencia aparece en el descubrimiento de los demás.
+    - `ghost`: la sesión sigue viva y sigue viendo a los demás, pero su perfil no
+      aparece en el descubrimiento ni en el stream de nadie más. Es "online pero
+      invisible", distinto de `DELETE /presence`, que apaga la presencia para
+      todos —incluido uno mismo—.
 
     Un `PUT /presence` sin `visibility` no cambia la visibilidad vigente: el
     heartbeat de posición del cliente (cada pocos segundos) no puede sacar a
@@ -132,9 +131,9 @@ PresenceState:
     Invariante: `zoneKey == null` si y sólo si `fallbackRequired == true`.
 
     `visibility` es la vigente después del `PUT`: `ghost` deja la sesión online
-    pero fuera del descubrimiento y del stream de los demás (sus bots incluidos),
-    sin apagar la sesión. `online` sigue siendo `true` en ghost: la presencia
-    existe; lo que cambia es a quién se le muestra.
+    pero fuera del descubrimiento y del stream de los demás, sin apagar la
+    sesión. `online` sigue siendo `true` en ghost: la presencia existe; lo que
+    cambia es a quién se le muestra.
   properties:
     profileId:
       type: string

@@ -38,8 +38,8 @@ ReportCreate:
     Body de `POST /reports`. Nombra a quién se reporta y por qué; el reportante
     es la sesión.
 
-    `profileId` acepta un humano del catálogo o un bot. Como en los bloqueos, un
-    bot se canoniza a su dueño: el bot no existe sin la persona.
+    `profileId` es el de un perfil real de la región: el server no canoniza ni
+    reescribe el id, porque no hay otra identidad a la que apuntar.
 
     Reportarse a sí mismo es `422 VALIDATION_FAILED`; un `profileId` inexistente
     en la región es `404 PROFILE_NOT_FOUND`.
@@ -48,7 +48,7 @@ ReportCreate:
       type: string
       minLength: 1
       description: |
-        Perfil reportado (humano o bot). Se guarda canonizado al humano.
+        Perfil reportado. Se guarda tal como se envió.
       examples:
         - mx-p07
     reason:

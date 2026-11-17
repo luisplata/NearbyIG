@@ -12,9 +12,10 @@
  * valores— para que editar un perfil sin regenerar el log rompa el gate.
  *
  * Válvula aplicada en PR3: el envelope, los 6 tipos y los payloads de S2
- * (`profile.moved`, `profile.presence`) entraron ahí; los cuatro payloads de S4/S5
- * los sumó PR6 (design D7), así que la unión ya está completa y el log sigue usando
- * sólo los dos tipos que S2 emite.
+ * (`profile.moved`, `profile.presence`) entraron ahí; los payloads de S4/S5 los
+ * sumó PR6 (design D7). v0.6 recorta la unión a los cuatro tipos que sobreviven:
+ * `profile.moved` y `typing.started` salieron con sus únicos productores, así que
+ * el log usa un solo tipo (`profile.presence`) y el enum cuenta cuatro.
  */
 
 import assert from 'node:assert/strict';
@@ -42,20 +43,16 @@ const REGIONS = ['mx', 'co'];
 
 const ENVELOPE_KEYS = ['id', 'occurredAt', 'payload', 'type'];
 const ENVELOPE_TYPES = [
-  'profile.moved',
   'profile.presence',
   'ping.received',
   'match.created',
   'message.created',
-  'typing.started',
 ];
 const PAYLOAD_SCHEMA = {
-  'profile.moved': 'ProfileMovedPayload',
   'profile.presence': 'ProfilePresencePayload',
   'ping.received': 'PingReceivedPayload',
   'match.created': 'MatchCreatedPayload',
   'message.created': 'MessageCreatedPayload',
-  'typing.started': 'TypingStartedPayload',
 };
 const COORDINATE_KEY = /^(?:lat|lng|lon|latitude|longitude)$/i;
 const RFC3339_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -127,15 +124,15 @@ test('todo evento cumple el envelope y su payload, sin coordenadas', () => {
   }
 
   const used = [...new Set(LOG.map((event) => event.type))].sort();
-  assert.deepEqual(used, ['profile.moved', 'profile.presence'], 'el log sólo usa los tipos que emite S2');
+  assert.deepEqual(used, ['profile.presence'], 'el log usa el único tipo que el server emite en cada transición');
   assert.equal(
     SPEC.components.schemas.EventPayload.oneOf.length,
     Object.keys(PAYLOAD_SCHEMA).length,
-    'la unión cubre los seis tipos del enum: S4/S5 agregan campos, no uniones',
+    'la unión cubre los cuatro tipos del enum',
   );
 });
 
-test('los seis payloads cierran y ninguno lleva coordenadas', () => {
+test('los cuatro payloads cierran y ninguno lleva coordenadas', () => {
   for (const [type, name] of Object.entries(PAYLOAD_SCHEMA)) {
     const schema = SPEC.components.schemas[name];
 
@@ -319,12 +316,6 @@ test('los valores de cada evento salen del perfil que nombran', () => {
     const profile = byId.get(event.payload.profileId);
     assert.ok(profile, `${event.id}: ${event.payload.profileId} no está en el catálogo`);
     assert.equal(event.id.startsWith(`${profile.regionKey}:`), true, `${event.id}: perfil de otra región`);
-
-    if (event.type === 'profile.moved') {
-      assert.equal(event.payload.distanceM, profile.distanceM, `${event.id}: distanceM inventado`);
-      assert.equal(event.payload.bearingDeg, profile.bearingDeg, `${event.id}: bearingDeg inventado`);
-      continue;
-    }
 
     assert.equal(event.type, 'profile.presence', `${event.id}: tipo fuera de la agenda`);
     assert.equal(event.payload.online, profile.online, `${event.id}: online inventado`);

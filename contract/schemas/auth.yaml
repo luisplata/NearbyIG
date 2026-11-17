@@ -61,7 +61,7 @@ DemoSession:
     natural para que los seeds sean idempotentes en S1.
 
     Invariante: `demoSlot == null` si y sólo si `sourceType == guest`. Un invitado
-    no ocupa slot; un humano o un bot siempre ocupa uno.
+    no ocupa slot; un perfil `human` siempre ocupa uno.
   properties:
     token:
       type: string

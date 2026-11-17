@@ -3,19 +3,20 @@
  * Deriva `contract/event/sample-log.json` del catálogo.
  *
  * El log no es un fixture suelto: es el catálogo proyectado en eventos. Cada
- * entrada referencia un perfil real de `catalog/profiles.*.json` y copia sus
- * valores (`distanceM`/`bearingDeg` para `profile.moved`, `online` para
- * `profile.presence`). Si el catálogo cambia, el log cambia; y como el archivo se
- * commitea, `events-contract.test.mjs` compara bytes y falla hasta que se
- * regenere. Ese es el `event-log.mjs` de la task 5.6 que quedó pendiente en PR3.
+ * entrada referencia un perfil real de `catalog/profiles.*.json` y copia su valor
+ * (`online` para `profile.presence`). Si el catálogo cambia, el log cambia; y como
+ * el archivo se commitea, `events-contract.test.mjs` compara bytes y falla hasta
+ * que se regenere. Ese es el `event-log.mjs` de la task 5.6 que quedó pendiente en
+ * PR3.
  *
  * El **seed fijo** es la agenda, no un PRNG:
  *  - `TRACK` fija cuántos eventos emite cada región (la asimetría es deliberada:
  *    mx y co no tienen el mismo volumen y el replay no puede asumir que empatan);
  *  - el perfil de la posición `n` es `profiles[(n - 1) % 10]`, siempre en el orden
  *    natural del seed (`regionKey`, `demoSlot`);
- *  - el tipo sale del `demoSlot` (3, 6, 9 → `profile.presence`), así que la
- *    mezcla también se deriva del dato y no de una lista escrita a mano;
+ *  - el tipo es `profile.presence` para todas las entradas desde v0.6: los otros
+ *    dos tipos que este log usaba (`profile.moved`) salieron del contrato con su
+ *    productor;
  *  - `occurredAt` arranca en una constante y avanza un segundo por evento, salvo
  *    el quinto de `mx`, que va **10 s antes**: el fixture prueba que el reloj no
  *    ordena (el orden lo da `seq`).
@@ -69,14 +70,17 @@ function profilesOf(regionKey, root) {
   return [...rows].sort((left, right) => left.demoSlot - right.demoSlot);
 }
 
-/** `profile.presence` para los slots múltiplos de 3; el resto, `profile.moved`. */
-const typeFor = (profile) => (profile.demoSlot % 3 === 0 ? 'profile.presence' : 'profile.moved');
+/**
+ * Tipo del log. Desde v0.6 es siempre `profile.presence`: el otro tipo que este
+ * fixture ejercitaba (`profile.moved`) salió del contrato con el ticker que lo
+ * emitía. El perfil sigue entrando en la cuenta para que el log cubra los 20 del
+ * catálogo.
+ */
+const typeFor = () => 'profile.presence';
 
 /** Payload mínimo con el que la demo pinta el evento, tomado del perfil. */
-function payloadFor(profile, type) {
-  return type === 'profile.moved'
-    ? { bearingDeg: profile.bearingDeg, distanceM: profile.distanceM, profileId: profile.profileId }
-    : { online: profile.online, profileId: profile.profileId };
+function payloadFor(profile) {
+  return { online: profile.online, profileId: profile.profileId };
 }
 
 /** El log completo, sin tocar disco (salvo leer el catálogo de `root`). */
@@ -100,13 +104,13 @@ export function computeEventLog({ root = CONTRACT_ROOT } = {}) {
 
     for (let seq = 1; seq <= events; seq += 1) {
       const profile = profiles[(seq - 1) % profiles.length];
-      const type = typeFor(profile);
+      const type = typeFor();
       const id = formatEventId(regionKey, seq);
       const seconds = id === INVERTED_ID ? -10 : offset;
       const event = {
         id,
         occurredAt: new Date(BASE_EPOCH_MS + seconds * 1000).toISOString(),
-        payload: payloadFor(profile, type),
+        payload: payloadFor(profile),
         type,
       };
 

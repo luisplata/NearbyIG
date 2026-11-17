@@ -28,9 +28,9 @@ NotificationKind:
     Tipo de aviso. Los tres valores son los tres hechos de la demo que generan
     una notificación, con los mismos nombres que los eventos del stream.
 
-    `ping.received` lo produce `POST /pings` para el destinatario humano;
+    `ping.received` lo produce `POST /pings` para el destinatario;
     `match.created`, la aceptación de un ping; `message.created`, un mensaje
-    nuevo del otro lado (incluida la respuesta automática de un bot).
+    nuevo del otro lado.
 
 NotificationItem:
   type: object
