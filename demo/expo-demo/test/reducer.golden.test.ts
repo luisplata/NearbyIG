@@ -30,13 +30,21 @@ const stepsFile = readJson<{ projectionVersion: number; steps: GoldenStep[] }>('
 const steps = stepsFile.steps;
 /** El fixture que consume este test: `npm run sync` copia `shared/golden/` acá. */
 let expected = readJson<GoldenFile>('expected.json');
-const goldenRaw = readFileSync(new URL('./golden/expected.json', import.meta.url), 'utf8');
 
 /** Fuente única: el writer escribe acá, no en la copia sincronizada. */
 const sharedGolden = fileURLToPath(new URL('../../shared/golden/expected.json', import.meta.url));
 
 /** Sólo `npm run golden:update` (que exporta la variable) escribe el fixture. */
 const update = process.env.UPDATE_GOLDEN === '1';
+
+/**
+ * Archivo cuyo formato valida el test: en modo grabación es el que el writer acaba
+ * de escribir; si validáramos la copia sincronizada, estaríamos leyendo bytes viejos
+ * (la copia recién se actualiza en el `npm run sync` siguiente).
+ */
+const goldenPath = update
+  ? sharedGolden
+  : fileURLToPath(new URL('./golden/expected.json', import.meta.url));
 
 /**
  * `sha256(projection)[0..12]` sobre la proyección canónica de `state-machine.md` §8.
@@ -94,13 +102,18 @@ function recompute(): GoldenFile {
 
 if (update) {
   const next = recompute();
-  const bytes = serializeGolden(next);
   mkdirSync(dirname(sharedGolden), { recursive: true });
-  writeFileSync(sharedGolden, bytes, 'utf8');
+  writeFileSync(sharedGolden, serializeGolden(next), 'utf8');
   // Una escritura CRLF en Windows cambiaría el archivo sin mover un solo digest:
-  // se relee y se compara para que el fallo sea del writer, no del `git diff` del CI.
-  if (readFileSync(sharedGolden, 'utf8') !== bytes) {
+  // se valida el archivo RELAIDO, nunca los bytes que quedaron en memoria. Si el
+  // writer pasara a `os.EOL` u otra indentación, la reserialización de lo leído no
+  // coincidiría con lo leído y el fallo apuntaría al writer, no al `git diff` del CI.
+  const written = readFileSync(sharedGolden, 'utf8');
+  if (written !== JSON.stringify(JSON.parse(written), null, 2) + '\n') {
     throw new Error('expected.json no quedó byte-estable (¿fin de línea CRLF?)');
+  }
+  if (JSON.stringify(JSON.parse(written)) !== JSON.stringify(next)) {
+    throw new Error('expected.json en disco no coincide con el golden recalculado');
   }
   // Los asserts de abajo corren contra lo recién escrito: el run que regenera es el
   // único lugar donde todavía se verifican las 27 acciones, los guards y el RESET.
@@ -117,8 +130,11 @@ describe('golden de regresión del reducer Expo', () => {
   });
 
   it('expected.json es byte-estable: LF, dos espacios y salto final', () => {
-    // El pin de formato es independiente de la frescura del fixture: detecta un
-    // writer que cambie de indentación, de separador o de fin de línea.
+    // Se relee de disco acá, después del bloque de grabación: el pin de formato tiene
+    // que mirar el archivo que quedó, no una foto tomada antes de escribir. El assert
+    // compara los bytes del disco contra su propia reserialización, así que un
+    // `os.EOL` que se cuele en el writer mueve la aguja de verdad.
+    const goldenRaw = readFileSync(goldenPath, 'utf8');
     expect(goldenRaw).not.toContain('\r');
     expect(goldenRaw).toBe(JSON.stringify(JSON.parse(goldenRaw), null, 2) + '\n');
   });

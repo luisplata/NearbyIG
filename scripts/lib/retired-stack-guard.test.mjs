@@ -17,15 +17,23 @@ import { fileURLToPath } from 'node:url';
  *
  *  1. Las agujas se arman por fragmentos: este archivo no contiene la palabra prohibida,
  *     así que no necesita excusarse a sí mismo para pasar. Aun así su propia ruta queda
- *     excluida (`SELF`): el guard no se escanea.
+ *     excluida (`SELF`): el guard no se escanea. El nombre del archivo tampoco la
+ *     contiene, por eso se llama `retired-stack-guard`: `git ls-files | grep -i <stack>`
+ *     tiene que volver vacío, y un test con el nombre viejo lo rompía.
  *  2. La allowlist histórica son seis rutas de `docs/` **fuera** de las raíces
  *     vigiladas. Se declara acá, a la vista, y tiene su propio test de existencia: una
  *     entrada muerta falla, porque una allowlist que no apunta a nada ya no documenta
- *     nada y sólo espera a que alguien la use para tapar un offender nuevo.
+ *     nada y sólo espera a que alguien la use para tapar un offender nuevo. Es
+ *     documentación, no un filtro: el escaneo no la consulta, porque su segundo
+ *     self-check garantiza que ningún entry puede caer dentro de lo vigilado.
  *  3. Ninguna entrada de la allowlist puede vivir dentro de una raíz vigilada. Si alguien
  *     agrega `demo/CONTRACT.md` "porque es doc", este test lo rechaza antes que el guard.
+ *     Esa garantía es lo que permite que el escaneo no tenga un `if` de excepción por
+ *     archivo: sin entradas alcanzables, no hay nada que perdonar.
  *  4. Se saltean directorios de build y dependencias: lo que se audita es el código y el
  *     contrato que producen el artefacto, no la salida de una compilación anterior.
+ *     `.expo` y `.vitest-cache` entran por el mismo motivo: son cachés de herramienta,
+ *     no fuentes, y un test que falla por un archivo temporal es un test que se ignora.
  *
  * El mensaje de falla nombra archivo y línea (`ruta:línea: texto`), que es lo único que
  * hace accionable un guard de texto.
@@ -56,6 +64,8 @@ const SKIPPED_DIRECTORIES = new Set([
   'dist',
   'site',
   '.git',
+  '.expo',
+  '.vitest-cache',
   'android',
   'ios',
   'build',
@@ -78,10 +88,6 @@ const TEXT_EXTENSIONS = new Set([
 
 function toRepoPath(absolute) {
   return relative(ROOT, absolute).split(sep).join('/');
-}
-
-function isHistorical(repoPath) {
-  return HISTORICAL_ALLOWLIST.some((entry) => repoPath === entry || repoPath.startsWith(`${entry}/`));
 }
 
 function* walkFiles(directory) {
@@ -108,7 +114,6 @@ function offenders() {
     for (const absolute of walkFiles(root)) {
       if (resolve(absolute) === SELF) continue;
       const repoPath = toRepoPath(absolute);
-      if (isHistorical(repoPath)) continue;
       const lines = readFileSync(absolute, 'utf8').split(/\r?\n/);
       lines.forEach((line, index) => {
         if (RETIRED.test(line)) hits.push(`${repoPath}:${index + 1}: ${line.trim().slice(0, 90)}`);
@@ -150,7 +155,10 @@ test('la allowlist histórica no vive dentro de una raíz vigilada', () => {
 });
 
 test('el guard detecta una reintroducción con ruta:línea', () => {
-  const probe = join(ROOT, 'scripts', 'guard-probe.md');
+  // El nombre de la sonda lleva el PID: dos runners en paralelo (o un run que murió
+  // sin `finally`) escribían el mismo archivo y se veían entre sí. Único por proceso,
+  // el test sólo puede fallar por el guard.
+  const probe = join(ROOT, 'scripts', `guard-probe-${process.pid}.md`);
   const probePath = toRepoPath(probe);
   rmSync(probe, { force: true });
   try {

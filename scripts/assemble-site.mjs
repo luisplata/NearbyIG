@@ -253,10 +253,13 @@ function checkLanding(dir, expectedDatasetId) {
   if (!/<meta\s+name="robots"\s+content="[^"]*noindex/i.test(html)) {
     problem('landing/index.html no declara <meta name="robots" content="noindex">');
   }
-  for (const href of ['./expo/']) {
-    if (!html.includes(`href="${href}"`)) {
-      problem(`landing/index.html no enlaza la demo con ruta relativa href="${href}"`);
-    }
+  // Un solo enlace que importa: el relativo a la demo publicada. Se declara como
+  // constante para que el diagnóstico diga qué href se esperaba, no un genérico.
+  const expectedDemoHref = './expo/';
+  if (!html.includes(`href="${expectedDemoHref}"`)) {
+    problem(
+      `landing/index.html no enlaza la demo con ruta relativa href="${expectedDemoHref}"`,
+    );
   }
   if (!html.includes('data-dataset-id')) {
     problem('landing/index.html no expone el datasetId (falta data-dataset-id)');
