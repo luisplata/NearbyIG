@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
 import { BlocksModule } from './blocks/blocks.module';
-import { BotsModule } from './bots/bots.module';
 import { ChatModule } from './chat/chat.module';
 import { RateLimitModule } from './common/rate-limit.module';
 import { ConfigModule } from './config/config.module';
@@ -25,8 +24,7 @@ import { ResetModule } from './reset/reset.module';
  *   RateLimitModule→ límites de frecuencia en memoria (global)
  *   HealthModule   → /health y /health/ready (fuera del contrato)
  *   AuthModule     → sesión demo, logout, ticket de stream y sus guards
- *   BotsModule     → los 2 bots derivados de cada humano vivo (geometría y cap)
- *   EventsModule   → log de eventos, SSE, polling y ticker del mundo
+ *   EventsModule   → log de eventos, SSE y polling
  *   DiscoveryModule→ GET /discovery (radio, filtros y medidas por observador)
  *   PresenceModule → PUT y DELETE /presence (región y zona derivadas)
  *   ProfilesModule → GET /demo/profiles y GET /me
@@ -44,7 +42,6 @@ import { ResetModule } from './reset/reset.module';
     RateLimitModule,
     HealthModule,
     AuthModule,
-    BotsModule,
     EventsModule,
     DiscoveryModule,
     PresenceModule,

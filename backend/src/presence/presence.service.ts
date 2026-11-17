@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Pool } from 'pg';
 import type { AuthContext } from '../auth/session.types';
-import { BotsService } from '../bots/bots.service';
 import { AppProblemError } from '../common/problem';
 import {
   asOptionalRecord,
@@ -44,8 +43,8 @@ function parseVisibility(record: Record<string, unknown>): Visibility | null {
  *
  *   1. el filtro es exacto en el instante de leer; un barrido siempre llega
  *      tarde (una presencia vencida seguiría contando hasta la próxima pasada);
- *   2. la tabla tiene a lo sumo una fila por sesión viva (≤ 20 humanos + bots en
- *      la demo), así que no hay nada que compactar;
+ *   2. la tabla tiene a lo sumo una fila por sesión viva (≤ 20 humanos en la
+ *      demo), así que no hay nada que compactar;
  *   3. la fila se reusa por upsert en el siguiente `PUT` y se borra en cascada
  *      cuando la sesión se cierra o se resetea, así que tampoco crece sin
  *      control.
@@ -132,7 +131,6 @@ export class PresenceService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-    private readonly bots: BotsService,
     private readonly events: EventsService,
   ) {}
 
@@ -145,9 +143,7 @@ export class PresenceService {
    *
    * **Ghost (v0.5).** `visibility: ghost` deja la fila viva y con la posición
    * que el cliente mandó; lo que cambia es el filtro de lectura de los demás
-   * (discovery, stream, pings). Los bots **no** se borran: el dueño se sigue
-   * viendo a sí mismo y sus bots orbitan alrededor suyo. Apagar todo es
-   * `DELETE /presence`, no ghost.
+   * (discovery, stream, pings). Apagar todo es `DELETE /presence`, no ghost.
    *
    * Omitir `visibility` conserva la vigente (`coalesce($7, presence.visibility)`),
    * así el heartbeat de posición del cliente no saca a nadie de ghost.
@@ -286,11 +282,8 @@ export class PresenceService {
       );
     }
 
-    // Ghost/pausa: sin presencia, los 2 bots propios dejan de existir para los
-    // demás. La lectura ya los filtra por la presencia viva del dueño (efecto
-    // inmediato); borrar las filas acá evita además que el radar de S3 los
-    // encuentre en la ventana hasta el próximo tick del mundo.
-    await this.bots.removeOwnerBots(session.regionKey, session.profileId);
+    // Ghost/pausa: sin presencia, el perfil deja de existir para los demás. La
+    // lectura ya lo filtra por la ausencia de presencia viva (efecto inmediato).
     await this.events.append(rows[0]?.region_key ?? session.regionKey, 'profile.presence', {
       profileId: session.profileId,
       online: false,

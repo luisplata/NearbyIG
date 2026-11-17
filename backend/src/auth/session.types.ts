@@ -1,6 +1,6 @@
 /** Tipos de la sesión demo, alineados con `contract/schemas/auth.yaml`. */
 
-export type SourceType = 'human' | 'bot' | 'guest';
+export type SourceType = 'human' | 'guest';
 
 /** Lo que devuelve `POST /auth/demo-session` (`DemoSession`). */
 export interface DemoSession {

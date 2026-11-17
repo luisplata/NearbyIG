@@ -28,7 +28,7 @@ interface SessionClaims {
   aud: string;
 }
 
-const SOURCE_TYPES: readonly SourceType[] = ['human', 'bot', 'guest'];
+const SOURCE_TYPES: readonly SourceType[] = ['human', 'guest'];
 
 export interface IssueSessionInput {
   readonly sessionId: string;

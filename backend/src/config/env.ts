@@ -37,25 +37,12 @@ export interface AppConfig {
    */
   readonly presenceTtlSeconds: number;
   /**
-   * Bots que arrastra cada humano de la demo: el plan fija 2.
-   *
-   * Fijo en código por la misma razón que el TTL: no es una perilla de
-   * operación, es la densidad que el plan promete (`§4`).
-   */
-  readonly botsPerHuman: number;
-  /** Cap de bots por observador: el plan fija 6 (`§12`, "densidad excesiva"). */
-  readonly observerBotCap: number;
-  /** Segundos que un bot tarda en pisar el siguiente waypoint. */
-  readonly botLegSeconds: number;
-  /** Cadencia del ticker de movimiento (ms). */
-  readonly worldTickMs: number;
-  /**
    * Eventos retenidos por región: debajo de eso, el cursor está `CURSOR_EXPIRED`.
    *
-   * Con la densidad tope de la demo (10 humanos × 2 bots, un waypoint cada 5 s)
-   * son ~4 eventos/s: 5000 da ~20 minutos de ventana para que un cliente que se
-   * cayó pueda reanudar sin perder el hilo. Más retención es más tabla; menos,
-   * más `410` en la cara del cliente.
+   * Con la densidad tope de la demo (10 humanos, una presencia por latido) son
+   * pocos eventos por minuto: 5000 da una ventana amplia para que un cliente
+   * que se cayó pueda reanudar sin perder el hilo. Más retención es más tabla;
+   * menos, más `410` en la cara del cliente.
    */
   readonly eventRetention: number;
   /**
@@ -258,10 +245,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     slotCount: 10,
     streamTicketTtlSeconds: 30,
     presenceTtlSeconds: 12,
-    botsPerHuman: 2,
-    observerBotCap: 6,
-    botLegSeconds: 5,
-    worldTickMs: 2_000,
     eventRetention: 5_000,
     sseHeartbeatMs: 15_000,
     defaultRegionKey: (env.DEFAULT_REGION_KEY?.trim() || 'mx').toLowerCase(),

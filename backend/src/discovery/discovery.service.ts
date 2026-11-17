@@ -1,11 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Pool } from 'pg';
 import type { AuthContext } from '../auth/session.types';
-import { BotsService } from '../bots/bots.service';
 import { RateLimiterService } from '../common/rate-limit.service';
 import { validationFailed } from '../common/validation';
-import { APP_CONFIG } from '../config/config.module';
-import type { AppConfig } from '../config/env';
 import { PG_POOL } from '../db/database.module';
 import { toProfileSummary, type ProfileRow, type ProfileSummary } from '../profiles/profiles.service';
 import type { DiscoveryFilters, DiscoveryResult } from './discovery.types';
@@ -18,8 +15,7 @@ const MAX_RADIUS_M = 5_000;
 /**
  * Filas por respuesta. Es el `maxItems: 10` de `DiscoveryResult`, no un límite
  * de paginación: el contrato declara que una página es el resultado entero y no
- * hay cursor. Con bots el conjunto visible puede pasar de 10 (9 humanos +
- * 6 bots), así que el tope se aplica acá y corta por distancia.
+ * hay cursor. El tope se aplica acá y corta por distancia.
  */
 const PAGE_SIZE = 10;
 
@@ -104,31 +100,18 @@ function parseFlag(raw: unknown, name: string): boolean {
 /**
  * `GET /discovery` — quién está cerca de la sesión.
  *
- * **Qué se ve.** Los humanos de la región con presencia viva y zona derivada
- * (menos el propio perfil) y **los bots visibles del observador, propios
- * incluidos**. El negocio cierra así: con dos humanos en la misma región cada
- * uno ve 1 humano + 2 bots propios + 2 del otro = **5 perfiles** (plan §4 y §5).
- * Los bots propios no son un caso especial acá: `BotsService.visibleBotIds` es
- * la única definición de "bots visibles" y el stream de eventos usa la misma, así
- * que discovery nunca muestra un bot que el stream no mueve.
- *
- * **Un bot no es una copia de su dueño.** `profileId` es estable
- * (`<owner>-b1|b2`) y el slot es el del dueño, pero la identidad de display
- * (nickname, iniciales, foto, instagram, estado, bio, intención, género,
- * verificado) la presta **otro perfil de la región**, elegido de forma
- * determinista. Heredar la fila del dueño mostraba a la misma persona tres veces
- * en el radar (el humano y sus dos bots). La regla completa, con el orden de
- * candidatos y la rotación por slot, vive en el comentario de `bots_visible`.
+ * **Qué se ve.** Los humanos de la región con presencia viva y zona derivada,
+ * menos el propio perfil. No hay otra fuente de filas: una persona sola recibe
+ * `results: []`, que es una respuesta válida del contrato, no un error.
  *
  * **Exclusiones, todas de lectura.**
  *
  * | Excluido | Cómo |
  * |---|---|
- * | el propio humano | `profile_id <> $2` (los bots propios sí entran) |
+ * | el propio humano | `profile_id <> $2` |
  * | pausados / ghost | sin presencia viva **o** `visibility = 'ghost'` no hay fila visible |
  * | fuera de región | `zone_key IS NOT NULL` + `region_key` de la sesión |
- * | dueño de bot en ghost | `OWNER_VISIBLE` dentro de `visibleBotIds` |
- * | bloqueados | `blocks` en cualquier dirección, en humanos y en bots (v0.5) |
+ * | bloqueados | `blocks` en cualquier dirección (v0.5) |
  *
  * **Geometría: el frame es el observador, no el ancla de zona.** `distanceM` y
  * `bearingDeg` se miden desde la presencia de la sesión. El origen del radar es
@@ -150,7 +133,7 @@ function parseFlag(raw: unknown, name: string): boolean {
  *
  * **Nunca una coordenada.** El SELECT proyecta la lista blanca de
  * `ProfileSummary` y las dos medidas ya redondeadas; `geo` (el punto del
- * observador) y `bots.position` sólo existen dentro de la consulta.
+ * observador) y el punto del sujeto sólo existen dentro de la consulta.
  */
 @Injectable()
 export class DiscoveryService {
@@ -158,12 +141,7 @@ export class DiscoveryService {
 
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
-    private readonly bots: BotsService,
     private readonly rateLimit: RateLimiterService,
-    // `botsPerHuman` es lo que separa la rotación de caras entre dueños
-    // contiguos: con dos bots por humano, el dueño del slot `s` arranca en la
-    // posición `(s - 1) * botsPerHuman` de la lista de candidatos.
-    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   /**
@@ -193,10 +171,6 @@ export class DiscoveryService {
       { capacity: DISCOVERY_RATE_BURST, refillPerSecond: DISCOVERY_RATE_PER_SECOND },
       `Superaste el tope de ${DISCOVERY_RATE_PER_SECOND} consultas de descubrimiento por segundo.`,
     );
-
-    // El conjunto de bots sale de `BotsService` para que el cap de 6 y el filtro
-    // de ghost no tengan una segunda copia que se desincronice del stream.
-    const botIds = await this.bots.visibleBotIds(session.regionKey, session.profileId);
 
     const { rows } = await this.pool.query<ProfileRow>(
       `WITH observer AS (
@@ -263,104 +237,11 @@ export class DiscoveryService {
                    OR (bl.blocker_profile_id = p.profile_id AND bl.blocked_profile_id = $2)
                  )
             )
-       ), live_humans AS (
-         -- Quién está en la página **ahora**: presencia viva, con zona y sesión
-         -- viva, en la región del observador. Es el mismo predicado que alimenta
-         -- humans, así que un perfil de este conjunto es exactamente uno que el
-         -- observador ya está viendo como humano.
-         --
-         -- Un bot no presta la cara de alguien que ya está en la página (sería
-         -- el mismo perfil dos veces en el radar). Es la parte "si es posible" de
-         -- la regla: si el catálogo no alcanza, prestar de un humano vivo está
-         -- permitido; repetir al dueño, no.
-         SELECT DISTINCT s.profile_id
-           FROM presence pr
-           JOIN sessions s ON s.session_id = pr.session_id
-          WHERE pr.region_key = (SELECT region_key FROM observer)
-            AND pr.zone_key IS NOT NULL
-            AND pr.expires_at > now()
-            AND s.revoked_at IS NULL
-            AND s.expires_at > now()
-       ), bots_visible AS (
-         -- Un bot no tiene fila de catálogo. profileId y demoSlot siguen siendo
-         -- los del dueño (<owner>-b1|b2 es la identidad estable que usan el
-         -- cliente, los eventos y los matches), pero **la identidad de display
-         -- la presta otro perfil de la región**. Heredar la fila del dueño era el
-         -- bug: el radar mostraba a la misma persona tres veces (el humano y sus
-         -- dos bots) con el mismo nombre y la misma foto.
-         --
-         -- **Regla de selección.** El donante sale del catálogo de la región
-         -- (tabla profiles, humanos con slot), nunca del dueño, ordenado así:
-         --
-         --   1. primero los que hoy **no** están vivos (live_humans), para no
-         --      duplicar a nadie que el observador ya ve;
-         --   2. dentro de cada grupo, por distancia hacia adelante desde el slot
-         --      del dueño con wrap de 10:
-         --      (donor.demo_slot - o.demo_slot + 9) % 10.
-         --
-         -- El bot i del dueño toma el candidato
-         -- ((demo_slot - 1) * botsPerHuman + (i - 1)) % total + 1. Sin la
-         -- rotación por slot, dos dueños en slots contiguos (1 y 2) recibirían
-         -- la misma pareja de caras (2,3 y 3,4) y volvería el problema que esto
-         -- corrige; con ella, dueño 1 → posiciones 1,2 y dueño 2 → 3,4.
-         --
-         -- Garantías: el dueño queda excluido (profile_id <> o.profile_id), y
-         -- los dos bots del mismo dueño toman posiciones consecutivas, así que
-         -- con 10 slots (al menos 8 candidatos) nunca comparten nickname ni foto.
-         -- Nada de random(): la cara es función del catálogo y del par
-         -- (demo_slot, índice). Dos lecturas seguidas devuelven la misma fila.
-         --
-         -- La cara y los atributos que la acompañan viajan juntos: intención,
-         -- género y verified también son del donante. La tarjeta del cliente
-         -- pinta nombre, iniciales, foto, estado y el chip de intención en el
-         -- mismo bloque, así que un "Nico" con género female o con el badge de
-         -- un tercero sería una fila que se contradice sola. Lo que sigue siendo
-         -- del dueño es la **posición** (el bot orbita a la persona), el slot y
-         -- la existencia: sin presencia viva del dueño no hay fila.
-         SELECT b.bot_profile_id AS profile_id, b.region_key, o.demo_slot, 'bot'::text AS source_type,
-                d.nickname, d.initials, d.intention, d.gender, d.verified,
-                d.photo_id, d.instagram_handle, d.status_key, d.bio_key,
-                b.position AS point
-           FROM bots b
-           JOIN profiles o
-             ON o.region_key = b.region_key AND o.profile_id = b.owner_profile_id
-           LEFT JOIN LATERAL (
-             SELECT c.profile_id
-               FROM (
-                 SELECT donor.profile_id,
-                        row_number() OVER (
-                          ORDER BY (live.profile_id IS NOT NULL),
-                                   (donor.demo_slot - o.demo_slot + 9) % 10
-                        ) AS candidate,
-                        count(*) OVER () AS candidates
-                   FROM profiles donor
-                   LEFT JOIN live_humans live ON live.profile_id = donor.profile_id
-                  WHERE donor.region_key = b.region_key
-                    AND donor.source_type = 'human'
-                    AND donor.demo_slot IS NOT NULL
-                    AND donor.profile_id <> o.profile_id
-               ) c
-              WHERE c.candidate = (
-                       ((o.demo_slot - 1) * $8::int + (b.bot_index - 1)) % c.candidates
-                     ) + 1
-           ) donor_pick ON true
-           -- Fallback al dueño sólo si la región no tiene ningún otro perfil de
-           -- catálogo: el bot no puede desaparecer de la página (los propios
-           -- siempre entran). En una región con 10 perfiles nunca se usa.
-           JOIN profiles d
-             ON d.region_key = b.region_key
-            AND d.profile_id = coalesce(donor_pick.profile_id, o.profile_id)
-          WHERE b.region_key = (SELECT region_key FROM observer)
-            AND b.bot_profile_id = ANY($3::text[])
-       ), subjects AS (
-         SELECT * FROM humans
-         UNION ALL
-         SELECT * FROM bots_visible
        )
        SELECT r.profile_id, r.region_key, r.demo_slot, r.source_type,
               r.nickname, r.initials, r.intention, r.gender, r.verified,
-              -- Toda fila existe porque hay una presencia viva (propia o del
-              -- dueño del bot): lo visible está online por construcción.
+              -- Toda fila existe porque hay una presencia viva del perfil: lo
+              -- visible está online por construcción.
               true AS online,
               EXISTS (
                 SELECT 1
@@ -381,39 +262,37 @@ export class DiscoveryService {
               -- a 200 m al norte, no con bearingDeg null.
               coalesce((((round(degrees(ST_Azimuth(o.ref, r.point))::numeric)::int % 360) + 360) % 360), 0) AS bearing_deg,
               r.photo_id, r.instagram_handle, r.status_key, r.bio_key
-         FROM subjects r
+         FROM humans r
          CROSS JOIN observer o
          -- La medida vive en un LATERAL para calcularla una vez: filtra, ordena y
          -- se proyecta sobre el mismo número.
          CROSS JOIN LATERAL (
            SELECT ST_Distance(o.ref::geography, r.point::geography) AS distance_m
          ) m
-        WHERE m.distance_m <= $4::int
-          AND ($5::text IS NULL OR r.intention = $5::text)
-          AND ($6::text IS NULL OR r.gender = $6::text)
-          AND (NOT $7::boolean OR r.verified)
+        WHERE m.distance_m <= $3::int
+          AND ($4::text IS NULL OR r.intention = $4::text)
+          AND ($5::text IS NULL OR r.gender = $5::text)
+          AND (NOT $6::boolean OR r.verified)
           -- online no entra en el WHERE: toda fila existe porque hay presencia
-          -- viva (propia o del dueño), así que lo visible está online por
-          -- construcción. Se valida igual en parseFilters (422 si no es
-          -- true/false) y el contrato sólo filtra cuando es true.
+          -- viva, así que lo visible está online por construcción. Se valida
+          -- igual en parseFilters (422 si no es true/false) y el contrato sólo
+          -- filtra cuando es true.
         ORDER BY m.distance_m ASC, r.profile_id ASC
         LIMIT ${PAGE_SIZE}`,
       [
         session.sessionId,
         session.profileId,
-        botIds,
         filters.radiusM,
         filters.intention ?? null,
         filters.gender ?? null,
         filters.verified,
-        this.config.botsPerHuman,
       ],
     );
 
     // Sin coordenadas ni identificadores de sesión en el log: sólo el tamaño de
     // la página y los filtros que la achicaron.
     this.logger.debug(
-      `discovery region=${session.regionKey} filas=${rows.length} radio=${filters.radiusM} bots_visibles=${botIds.length}`,
+      `discovery region=${session.regionKey} filas=${rows.length} radio=${filters.radiusM}`,
     );
 
     return { results: rows.map(toProfileSummary) };
