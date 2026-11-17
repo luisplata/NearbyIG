@@ -28,6 +28,9 @@ const SKIPPED_DIRECTORIES = new Set([
   '.dart_tool',
   '.vitest-cache',
   '.git',
+  // Salida de `expo prebuild`: código nativo generado desde app.config.ts.
+  'android',
+  'ios',
 ]);
 const TEXT_EXTENSIONS = new Set([
   '.json',

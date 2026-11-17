@@ -1,5 +1,10 @@
 /**
- * Geolocalización del navegador, en un solo lugar.
+ * Geolocalización, en un solo lugar.
+ *
+ * Dos backends, un contrato: `requestBrowserPoint` habla con
+ * `navigator.geolocation` y `requestNativePoint` con el proveedor del device
+ * (`expo-location`, inyectado). El resultado es el mismo `GeoResult` en las dos
+ * plataformas, así el controlador no sabe en qué app corre.
  *
  * **Para qué.** En el modo live, el `PUT /presence` acepta un `point` privado:
  * es la única entrada del contrato que lleva coordenadas y la única forma de que
@@ -196,4 +201,104 @@ export function browserGeoEnvironment(): GeoEnvironment {
 
 export function requestBrowserPoint(options?: GeoRequestOptions): Promise<GeoResult> {
   return requestPoint(browserGeoEnvironment(), options);
+}
+
+/**
+ * Lectura del device en el binario nativo (Android/iOS).
+ *
+ * **Por qué la librería entra por parámetro.** `expo-location` no existe en el
+ * bundle web ni en el runtime de vitest (`environment: 'node'`, sin preset de
+ * React Native: `.native.ts` no se resuelve). Con la lib inyectada, la lógica
+ * de permisos, timeout y mapeo se prueba con un fake y el módulo `.native` queda
+ * de 18 líneas cableando el adapter.
+ *
+ * **Qué NO hace.** No mira `secureContext` (en nativo no existe: el binario
+ * habla con el proveedor del sistema, no con un origen HTTP), no abre un canal
+ * continuo de posiciones ni usa la última posición conocida, y no guarda nada.
+ * Una lectura por gesto, como la web.
+ */
+export type NativeLocationLike = {
+  requestForegroundPermissionsAsync(): Promise<{ granted?: boolean } | null | undefined>;
+  getCurrentPositionAsync(options?: { accuracy?: number }): Promise<{
+    coords?: { latitude?: unknown; longitude?: unknown; accuracy?: number | null };
+  }>;
+};
+
+export type NativePointOptions = {
+  timeoutMs?: number;
+  /** `Location.Accuracy.*` del adapter; se propaga tal cual. */
+  accuracy?: number;
+};
+
+/** El mismo techo que el gesto web: 8 s dejan lugar a un GPS frío sin colgar la UI. */
+export const NATIVE_TIMEOUT_MS = TIMEOUT_MS;
+
+/**
+ * `getCurrentPositionAsync` **no acepta timeout ni cancelación**. Se corre una
+ * carrera contra un timer y se deja la lectura abandonada con su `catch`
+ * adjunto: si llega tarde (o rechaza tarde) nadie la escucha, el resultado ya
+ * está decidido y no hay unhandled rejection que tumbe el proceso en RN.
+ */
+export function requestNativePoint(
+  lib: NativeLocationLike | null,
+  options: NativePointOptions = {},
+): Promise<GeoResult> {
+  if (
+    lib === null ||
+    typeof lib.requestForegroundPermissionsAsync !== 'function' ||
+    typeof lib.getCurrentPositionAsync !== 'function'
+  ) {
+    return Promise.resolve({ status: 'unsupported' });
+  }
+  const timeoutMs = options.timeoutMs ?? NATIVE_TIMEOUT_MS;
+  const accuracy = options.accuracy;
+
+  return new Promise<GeoResult>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const settle = (result: GeoResult): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      resolve(result);
+    };
+
+    timer = setTimeout(() => settle({ status: 'timeout' }), timeoutMs);
+
+    const read = async (): Promise<void> => {
+      let permission: { granted?: boolean } | null | undefined;
+      try {
+        permission = await lib.requestForegroundPermissionsAsync();
+      } catch {
+        // El permiso puede explotar si el servicio no está: eso no es "denegado".
+        settle({ status: 'unavailable' });
+        return;
+      }
+      // Sólo `granted === true` habilita la lectura: un `undefined` de una versión
+      // nueva de la lib no se interpreta como permiso tácito.
+      if (permission?.granted !== true) {
+        settle({ status: 'denied' });
+        return;
+      }
+      let position: Awaited<ReturnType<NativeLocationLike['getCurrentPositionAsync']>>;
+      try {
+        position = await lib.getCurrentPositionAsync(
+          accuracy === undefined ? undefined : { accuracy },
+        );
+      } catch {
+        settle({ status: 'unavailable' });
+        return;
+      }
+      const point = pointFromPosition(position);
+      settle(
+        point === null
+          ? { status: 'unavailable' }
+          : { status: 'ok', point, accuracyM: roundAccuracy(position?.coords?.accuracy) },
+      );
+    };
+
+    // `.catch` adjunto a propósito: el `settle` ya es idempotente, pero una
+    // promesa sin manejar (lectura tardía) sigue siendo un crash en RN.
+    void read().catch(() => settle({ status: 'unavailable' }));
+  });
 }

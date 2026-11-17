@@ -11,10 +11,15 @@ las apps consumen lo generado y no duplican strings, colores, distancias ni guio
   landing y en el header de Flutter (referencia). El header de Expo no lleva chip: lleva
   el switch de visibilidad (fantasma).
 - Idioma: español (es-AR), tono del prototipo.
-- Alcance: demo no funcional. Sin backend, auth, push, geolocalización real, OAuth,
-  persistencia, premium ni referidos. El radar de **Expo** usa un basemap real de **un
-  único host** (`tiles.openfreemap.org`, OpenFreeMap con MapLibre GL JS, sin key ni
-  cuenta); Flutter (referencia congelada) mantiene el mapa ilustrado.
+- Alcance: demo no funcional. Sin backend, auth, push, OAuth, persistencia, premium ni
+  referidos. Geolocalización: **una sola puerta** (`requestPoint`) y un solo destino
+  (`PUT /presence`). En la demo **web** la lectura sale de `navigator.geolocation` y sigue
+  dependiendo de contexto seguro —sólo HTTPS o `localhost`—; en el binario Expo es una
+  lectura puntual del device con permiso explícito (`expo-location`), sólo al tocar "Usar
+  mi ubicación". Nadie guarda el punto: ni storage, ni cookie, ni historial. El radar de
+  **Expo** usa un basemap real de **un único host** (`tiles.openfreemap.org`, OpenFreeMap
+  con MapLibre GL JS, sin key ni cuenta); Flutter (referencia congelada) mantiene el mapa
+  ilustrado.
 
 ---
 
@@ -135,7 +140,7 @@ Los timers se derivan de acciones, no del reloj de pared. No hay timers al carga
 | 4 | Pings | F-4, F-5 | bandeja con recibidos (aceptar / rechazar) y enviados con estado “Enviado / esperando respuesta”, sin segunda acción de envío, estado vacío |
 | 5 | Notificaciones | F-6 | badge, eventos, marcar leído / todo leído, abrir el centro marca todo leído, "sin push real" |
 | 6 | Ajustes | F-1, F-7, F-8, F-12 | perfil propio, intención, Instagram (3 estados), fantasma, reiniciar demo |
-| 7 | Privacidad | F-11 | `privacy.noHistory` verbatim, sin ubicación real, sin persistencia |
+| 7 | Privacidad | F-11 | `privacy.noHistory` verbatim, sin historial ni persistencia; la ubicación se lee sólo por gesto explícito, se usa para el punto del radar y no se guarda |
 | 8 | Acerca de | F-15, SC-8 | marca, datasetId, schemaVersion, hoja "Qué es simulado" (8 ítems) |
 | 9 | Seguridad / reporte | F-10 | motivos, envío simulado, confirmación |
 | 10 | Bloqueados | F-10 | lista, desbloquear, estado vacío |
@@ -194,6 +199,7 @@ install.
 | Foco visible: highlight de Material vs borde `accent` explícito | Sí | Mismo criterio (foco visible), distinto mecanismo |
 | Navegación y descubrimiento: Expo con 4 tabs y radar sobre mapa; Flutter (referencia) con 5 tabs y radar/mapa separados | Sí | Presentación Expo-first descripta en §7; estado, timers, copy y datasetId siguen compartidos |
 | Mapa de fondo: Expo monta un basemap real (OpenFreeMap + MapLibre, sin key) con la ilustración como fallback; Flutter (referencia) mantiene el mapa ilustrado | Sí | La composición, la proyección de puntos, el barrido de 6 s y el dataset son los mismos; cambia el motor de dibujo del fondo y la atribución del proveedor |
+| Proveedor de geolocalización: web `navigator.geolocation` vs binario Expo `expo-location` | Sí | Mismo port (`requestPoint`), mismo gesto y mismo contrato de resultado (`ok`, `denied`, `unavailable`, `timeout`, `unsupported`, `insecure`); en nativo nunca hay `insecure` porque no existe `secureContext` |
 | Cualquier diferencia funcional no listada (timers, copy compartido, orden de datos, estado, datasetId) | **No** | Es un defecto del contrato |
 
 ## 9. Checklist de comportamiento (15 puntos; Expo-first)
@@ -316,10 +322,11 @@ y no se usa `setRTLTextPlugin`.
 y cae al SVG: `assemble-site --strict` falla si falta el chunk o el worker.
 
 **Centro de demo.** `DEMO_CENTER` (`src/map/basemap.ts`) es una constante de código: el
-mismo viewport para todos los visitantes, sin geolocalización, IP, cookies ni
-identificadores. La prohibición de `lat`/`lng`/`latitude`/`longitude` aplica a
-`demo/shared/*.json` (el contrato), **no** a este módulo: no es un dato del dataset y
-no debe moverse a los JSON.
+mismo viewport para todos los visitantes, sin IP, cookies ni identificadores. El punto del
+usuario **no mueve el viewport**: se dibuja sobre el mapa como un punto más y el centro
+sigue siendo el de la constante. La prohibición de `lat`/`lng`/`latitude`/`longitude`
+aplica a `demo/shared/*.json` (el contrato), **no** a este módulo: no es un dato del
+dataset y no debe moverse a los JSON.
 
 Cualquier otro host o URL externa, en cualquier archivo, sigue bloqueando el artefacto.
 
@@ -377,7 +384,7 @@ un navegador real y queda pendiente hasta la revisión con DevTools + lector de 
 | 11 | sin pantalla/modelo de historial; `privacy.noHistory` obligatorio | copy visible en privacidad |
 | 12 | widget test de reset; `store.test.ts` cancela timers | refresh en el navegador |
 | 13 | 360×640 sin overflow; labels con nombre + distancia + badges | 320/480/768/1440 y foco con teclado |
-| 14 | denylist de hosts por posición en el artefacto (`request-hosts.test.mjs`: allowlist exacta + benignos; `gstatic`/`eascdn`/MapLibre con sus formas exactas); cero storage/geolocation en el código (`privacy.test.ts`); `lang="es"` en los tres documentos | Network de Radar con un único host externo |
+| 14 | denylist de hosts por posición en el artefacto (`request-hosts.test.mjs`: allowlist exacta + benignos; `gstatic`/`eascdn`/MapLibre con sus formas exactas); una sola puerta de geolocalización, sin `watchPosition` ni persistencia del punto (`privacy.test.ts`); `lang="es"` en los tres documentos | Network de Radar con un único host externo |
 | 15 | `brand.test.mjs` (marca, slogan, DEMO en landing) + `copy.test.ts`; About con label DEMO y 8 ítems | label DEMO en About, landing header/footer y header Flutter |
 
 Automatizado y reproducible:

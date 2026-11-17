@@ -20,6 +20,12 @@ debe entrar al repositorio ni al artefacto de Pages.
 `demo/CONTRACT.md`). Son derivados deterministas: mismo SVG + misma versión de resvg →
 mismos bytes. Con `--no-raster` se reutilizan los PNG ya commiteados.
 
+`icon-1024.png` es el mismo rasterizado a 1024 px: es el tamaño que exige el App Store
+y el que declaramos como `icon` nativo y como imagen del splash. `adaptive-foreground.png`
+es el `icon.svg` anidado al 75 % dentro de un canvas transparente de 1024 px (zona segura
+del launcher de Android, `android.adaptiveIcon.foregroundImage`). Ninguno de los dos lo
+consume el bundle web: sólo se copian al target `expo`.
+
 ## Hashes
 
 El hash lo verifica `node scripts/sync-demo-assets.mjs` en cada corrida: si el SVG no

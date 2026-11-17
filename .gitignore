@@ -46,4 +46,7 @@ demo/expo-demo/dist/
 demo/expo-demo/node_modules/
 demo/expo-demo/.expo/
 demo/expo-demo/node_modules/.cache/
+# CNG: `expo prebuild` los genera desde app.config.ts y se borran sin backup.
+demo/expo-demo/android/
+demo/expo-demo/ios/
 

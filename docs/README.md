@@ -17,6 +17,7 @@ La carpeta ya tiene documentos de trabajo. El sitio publicado todavía no tiene 
 | [`plan-sprints-mvp.md`](plan-sprints-mvp.md) | Features, dependencias, orden de ejecución y demo esperada por sprint. |
 | [`plan-sprints-backend-demo.md`](plan-sprints-backend-demo.md) | Entregables del backend, gates de validación y demo esperada por sprint. |
 | [`runbook-demo.md`](runbook-demo.md) | Deploy de la demo live: variables, TLS, CORS con Pages, backup/restore, load test, rollback y qué no hacer. |
+| [`expo-native-dev.md`](expo-native-dev.md) | Entorno nativo: JDK 17, SDK de Android 37, correr la demo en un teléfono y qué falta para iOS. |
 | [`security-review.md`](security-review.md) | Revisión de seguridad de S7 con hallazgos, severidad y evidencia reproducible. |
 | [`demo-script.md`](demo-script.md) | Guion de la demo: qué decir y qué mirar en cada acto. |
 
