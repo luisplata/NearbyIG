@@ -142,3 +142,14 @@ mismo string es-AR que Android). Nada de eso bloquea el piloto en Android.
 | La app abre pero `/presence` falla | `EXPO_PUBLIC_API_URL` no llegó al bundle | reiniciar Metro con la variable puesta |
 | Cambios de `app.config.ts` no aparecen | `android/` es generado | `prebuild --clean` |
 | Warning `Install expo-system-ui in your project` | falta la dependencia | `npx expo install expo-system-ui` |
+| `ninja: error: Filename longer than 260 characters` | ruta absoluta de CMake duplicada | sección 6 |
+
+## 6. Compilar en Windows: MAX_PATH
+
+| Punto | Detalle |
+|---|---|
+| **Síntoma** | `ninja: error: Filename longer than 260 characters` en objetos CMake de `react-native-safe-area-context` y `react-native-svg`. |
+| **Causa** | CMake escribe la ruta absoluta del fuente dentro de `.cxx` (la duplica); ninja no respeta long paths ni con `LongPathsEnabled`. |
+| **No lo arregla** | Un junction/symlink a un directorio más corto: Gradle canonicaliza la ruta real. |
+| **Camino recomendado** | Compilar en CI con `.github/workflows/android.yml` (Linux, `workflow_dispatch`) y bajar el APK del artefacto. |
+| **Alternativa local** | WSL, con el SDK de Android instalado **dentro** de WSL: no se reusa el de Windows. |

@@ -1,0 +1,125 @@
+name: android
+
+# APK instalable para verificar la app en un teléfono real.
+#
+# Manual a propósito (`workflow_dispatch`): un build nativo tarda decenas de minutos
+# y no vale la pena en cada push. Se corre cuando hay algo que probar en el teléfono.
+#
+# Por qué `assembleRelease` y no `assembleDebug`:
+#   - El buildType `release` del template de Expo firma con el keystore de DEBUG
+#     (`demo/expo-demo/android/app/build.gradle`, buildTypes.release → signingConfigs.debug).
+#     El APK se instala por sideload sin armar un keystore propio.
+#   - Es autocontenido: el bundle JS viaja dentro del APK, no necesita Metro corriendo
+#     en la notebook ni en la misma red que el teléfono.
+#   - NO es un artefacto de Play: la firma es de debug y no hay versionado ni `.aab`.
+#
+# `EXPO_PUBLIC_API_URL` se inlinea en el bundle en build time: el APK queda apuntando
+# a lo que tenga la variable del repo `NEARBYIG_API_URL` en el momento del build.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-build
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: demo/expo-demo/package-lock.json
+
+      # La toolchain de Gradle (jvmToolchain(17) de RN) exige JDK 17 y no acepta 21.
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Nombres exactos: AGP 9 numera las plataformas con minor (`android-37.0`),
+      # `platforms;android-37` a secas no existe. Las licencias se aceptan de forma
+      # idempotente: en un runner nuevo no están y el `|| true` evita romper el rerun.
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Install Expo dependencies
+        working-directory: demo/expo-demo
+        run: npm ci
+
+      # El wrapper se genera en `prebuild`, así que en el primer run su properties
+      # todavía no existe: `hashFiles` devuelve vacío y la key cae al lockfile sólo.
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('demo/expo-demo/package-lock.json', 'demo/expo-demo/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # `android/` es salida de CNG y está gitignored: se regenera en cada run, por eso
+      # no hace falta `--clean` ni versionar nada nativo.
+      - name: Expo prebuild
+        working-directory: demo/expo-demo
+        env:
+          EXPO_PUBLIC_API_URL: ${{ vars.NEARBYIG_API_URL }}
+        run: npx expo prebuild --platform android
+
+      # Release autocontenido (ver cabecera). La variable va también acá porque es el
+      # paso que corre Metro para embeber el bundle: sin ella el APK sale con el mock.
+      - name: Assemble release APK
+        working-directory: demo/expo-demo/android
+        env:
+          EXPO_PUBLIC_API_URL: ${{ vars.NEARBYIG_API_URL }}
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
+        run: ./gradlew assembleRelease --no-daemon --console=plain
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nearbyig-android-apk
+          path: demo/expo-demo/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      # El host se lee del bundle ya empaquetado: es la única prueba de qué API quedó
+      # horneada. Si el grep no encuentra nada (bundle comprimido o URL ausente) no
+      # rompe el run; el summary muestra "no detectado".
+      - name: Summary
+        working-directory: demo/expo-demo
+        run: |
+          set -euo pipefail
+          apks=(android/app/build/outputs/apk/release/*.apk)
+          apk=${apks[0]}
+          size=$(awk "BEGIN{printf \"%.1f\", $(stat -c %s "$apk")/1048576}")
+          host=$(unzip -p "$apk" assets/index.android.bundle 2>/dev/null \
+            | grep -o '[a-z0-9-]*\.trycloudflare\.com' | head -1 || true)
+          {
+            echo "### APK de NearbyIG"
+            echo ""
+            echo "| Dato | Valor |"
+            echo "|---|---|"
+            echo "| Archivo | \`$(basename "$apk")\` |"
+            echo "| Tamaño | ${size} MB |"
+            echo "| API horneada | ${host:-no detectado} |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
