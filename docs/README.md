@@ -30,9 +30,9 @@ Docusaurus, Astro, o HTML plano) queda para el análisis técnico.
 ## Sitio actual: hub de demos
 
 El primer sitio publicado (`.github/workflows/pages.yml`) es el hub de demos mock:
-landing en `/`, demo Flutter en `/flutter/` y demo Expo en `/expo/`. No publica esta
+landing en `/` y demo Expo en `/expo/`. No publica esta
 carpeta `docs/`: cuando exista un generador, la documentación irá en `/docs/` sin
-romper `/`, `/flutter/` ni `/expo/`.
+romper `/` ni `/expo/`.
 
 Pages ya está habilitado (Source: GitHub Actions) y el primer deploy de las demos ya se
 completó. Publicación, verificación y rollback:

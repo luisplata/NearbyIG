@@ -1,7 +1,7 @@
 # Handoff — publicar las demos en GitHub Pages
 
 Estado: **Pages habilitado** con **Source: GitHub Actions** y **primer deploy completado**.
-El workflow corrió en verde y el sitio está vivo. Dataset en el artefacto: `ds-ddca69e0`
+El workflow corrió en verde y el sitio está vivo. Dataset en el artefacto: `ds-f88cad85`
 (schema 2).
 
 El workflow `.github/workflows/pages.yml` está commiteado y publica en cada push a
@@ -38,8 +38,8 @@ El workflow tiene tres jobs:
 
 | Job | Qué hace | Cuándo |
 |---|---|---|
-| `checks` | valida fixtures, drift de generados, tests de tooling, typecheck y tests de Expo, analyze y tests de Flutter | siempre, incluidos PR |
-| `build` | resuelve el base path, construye los docs del contrato, construye Expo y Flutter, ensambla y audita `site/`, sube el artefacto | push a `main` y manual |
+| `checks` | valida fixtures, drift de generados, tests de tooling, typecheck y tests de Expo | siempre, incluidos PR |
+| `build` | resuelve el base path, construye los docs del contrato, construye la demo Expo, ensambla y audita `site/`, sube el artefacto | push a `main` y manual |
 | `deploy` | publica el artefacto con `pages:write` + `id-token:write` | sólo `main`, después de `build` |
 
 Ningún paso habilita Pages, ni pide secretos, ni hace `git push`.
@@ -47,15 +47,14 @@ Ningún paso habilita Pages, ni pide secretos, ni hace `git push`.
 ## 3. Verificar la publicación
 
 Deploy verificado con `gh run watch 43056915845`: `checks`, `build` y `deploy` en verde.
-Las tres URLs respondieron 200 y el Network del navegador mostró sólo requests al mismo
-origen (CanvasKit, Inter y Roboto locales).
+Las rutas publicadas respondieron 200 y el Network del navegador mostró sólo requests al
+mismo origen.
 
 URLs vivas (sitio de proyecto):
 
 | Ruta | Contenido |
 |---|---|
 | `https://luisplata.github.io/NearbyIG/` | landing con datasetId y enlaces relativos |
-| `https://luisplata.github.io/NearbyIG/flutter/` | demo Flutter web |
 | `https://luisplata.github.io/NearbyIG/expo/` | demo Expo web |
 | `https://luisplata.github.io/NearbyIG/contract/` | doc estático del contrato (Redoc, autocontenido) |
 
@@ -65,12 +64,11 @@ primero que la va a tener viva. Se genera con `npm run contract:docs`.
 Checklist de aceptación:
 
 1. Las URLs de la tabla responden 200 y refrescan sin 404 (son directorios con `index.html`).
-2. La landing muestra `datasetId` y `schemaVersion`; “Acerca de” de ambas apps muestra
+2. La landing muestra `datasetId` y `schemaVersion`; “Acerca de” de la demo muestra
    **los mismos** valores.
-3. El chip DEMO sigue visible en las dos demos y la hoja “Qué es simulado” lista 8 ítems.
+3. El chip DEMO sigue visible en la demo y la hoja “Qué es simulado” lista 8 ítems.
 4. DevTools → Network, recorriendo las pantallas: sólo requests al mismo origen.
-5. Los assets de Expo resuelven bajo `/NearbyIG/expo/` y los de Flutter bajo
-   `/NearbyIG/flutter/` (sin dobles barras).
+5. Los assets de Expo resuelven bajo `/NearbyIG/expo/` (sin dobles barras).
 6. La landing responde `noindex` (`<meta name="robots" content="noindex, nofollow">`).
 7. El documento de `/expo/` declara `<html lang="es">` y su `<noscript>` está en español.
 
@@ -87,7 +85,6 @@ node scripts/validate-fixtures.mjs   # imprime el datasetId del contrato
 | `Get Pages site failed` | Pages deshabilitado | re-habilitar `Source: GitHub Actions` (paso 1) |
 | `Resource not accessible by integration` en deploy | falta `pages: write` / `id-token: write` | revisar que los permisos sigan en el job `deploy` |
 | El job `checks` falla en “anti-drift” | un generado quedó desactualizado | `npm run sync` y commitear |
-| 404 de assets en `/flutter/` | build con `--base-href` incorrecto | revisar que `configure-pages` corra antes de los builds |
 | 404 de assets en `/expo/` | `EXPO_BASE_URL` mal formado | debe ser `${base_path}/expo`, sin barra final |
 | `falta contract/index.html` en el ensamblado | el doc del contrato no se generó | `npm run contract:docs` (el job `build` lo hace antes del ensamblado) |
 | El doc de `/contract/` publica otro `x-contract-id` | el HTML quedó de una revisión anterior del spec | regenerar con `npm run contract:docs` |
