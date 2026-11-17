@@ -1,7 +1,7 @@
 # Backend — NearbyIG demo
 
-API NestJS + PostGIS de la demo. **Sprints 0–5 implementados**, contrato v0.5
-(`x-contract-id 3225f7e3ecd7`, 27 operations): el contrato de `contract/` manda y
+API NestJS + PostGIS de la demo. **Sprints 0–5 implementados**, contrato v0.6
+(`x-contract-id 3b0703ed2d53`, 27 operations): el contrato de `contract/` manda y
 acá se implementa, no se renegocia.
 
 | Pieza | Estado |
@@ -16,19 +16,17 @@ acá se implementa, no se renegocia.
 | `DELETE /presence` | listo (S2): 204, o 409 `PRESENCE_STALE` si no había presencia viva; apaga la presencia (no es ghost) |
 | `GET /events` | listo (S2): SSE con ticket, `Last-Event-ID` y `: keepalive` cada 15 s |
 | `GET /events/poll` | listo (S2): misma secuencia que el SSE desde el mismo cursor |
-| `GET /discovery` | listo (S3): radio, intención, género, verificado y online; medidas por observador |
-| Bots | listo (S2): 2 por humano vivo, 4 waypoints, ticker de 2 s, cap de 6 por observador |
+| `GET /discovery` | listo (S3): radio, intención, género, verificado y online; medidas por observador; sólo humanos vivos |
 | CORS | listo (S3): allowlist configurable (`CORS_ALLOWED_ORIGINS`) + túneles de ngrok en desarrollo |
 | `POST /demo/reset`, `/demo/reset/self` | listo (fuera del contrato, §11 del plan) |
 | `GET /matches` | listo (S4, contrato v0.4): bandeja con peer, `lastMessage` y `unreadCount` |
 | `GET\|POST /matches/{matchId}/messages` | listo (v0.4): conversación paginada con cursor; escritura idempotente por `clientMessageId` |
 | `POST /matches/{matchId}/read` | listo (v0.4): marca leídos los del otro lado, `204` |
 | `GET /me` | listo (v0.4): `SelfProfile` de la sesión, no el `self` del dataset |
-| `GET\|POST /blocks`, `DELETE /blocks/{profileId}` | listo (S5, v0.5): bloqueo idempotente, efecto simétrico, un bot canoniza a su dueño |
+| `GET\|POST /blocks`, `DELETE /blocks/{profileId}` | listo (S5, v0.5): bloqueo idempotente, efecto simétrico |
 | `POST /reports` | listo (v0.5): registro con motivo cerrado, `202` y acuse sin PII |
 | `GET /notifications`, `POST /notifications/read` | listo (v0.5): ping/match/mensaje persistidos, `unreadCount` y marca de leídas |
-| Bot del chat | listo (v0.4): responde a los ~2 s con texto fijo, emite `typing.started` y `message.created` |
-| Migraciones + seeds idempotentes | listo (`001_init` … `007_privacy`) |
+| Migraciones + seeds idempotentes | listo (`001_init` … `008_drop_bots`) |
 
 ## Empezar desde cero
 
@@ -165,29 +163,19 @@ curl -s -X DELETE $API/presence -H "Authorization: Bearer $T"                   
 TTL: la presencia vive **12 s**. `expires_at` es la única autoridad y toda lectura
 filtra `expires_at > now()`; no hay cron ni barrido (ver "Decisiones").
 
-### Eventos, bots y ghost (Sprint 2 · S2-B)
+### Eventos y ghost (Sprint 2 · S2-B)
 
-Un humano con presencia viva arrastra **2 bots** derivados de su perfil
-(`<profileId>-b1`, `<profileId>-b2`) que orbitan **su punto** en 4 waypoints y
-avanzan uno cada 5 s. Lo que se mueve nunca es una coordenada en el wire: el
-evento lleva `profileId` + `distanceM`/`bearingDeg` contra la presencia del dueño.
+El log de eventos es **append-only y compartido**: un `seq` monótono por región y
+una fila por hecho. El server emite **dos** tipos: `profile.presence` (una sesión
+entra o sale de línea) y `message.created` (un mensaje nuevo, filtrado por los dos
+lados del match). El contrato declara cuatro (`ping.received` y `match.created`
+siguen sin productor); el comentario de `EventType` en `src/events/events.types.ts`
+dice cuáles emite el server y por qué no se "arregla" a cuatro.
 
-**El ancla es la persona, no la ciudad.** Si el dueño tiene GPS, el loop se siembra
-a 900–1200 m de su punto con 300–449 m de radio; si eligió una zona demo (sin
-coordenada), el ancla es el centroide de la zona. `presence_anchors` (migración
-`004`) es la única definición de ese punto y la comparten reconciliación,
-waypoints y métricas. Antes el ancla era `ST_PointOnSurface(zones.polygon)` para
-todos: un humano en el norte de Bogotá (a ~7.7 km del centroide) veía sus propios
-bots a kilómetros, fuera de cualquier radio del radar, porque discovery mide desde
-su punto real.
-
-`bots.anchor` guarda el ancla con la que se sembró el loop y es privada. Sirve
-para decidir si un `PUT /presence` con otro punto obliga a reubicar: se recrea
-cuando el dueño se movió **más de 250 m** del ancla (menos que el radio mínimo del
-loop, para que el círculo siga rodeándolo) y no por el ruido del GPS. La
-comparación es `ST_Distance` en PostGIS, así que TypeScript no ve la distancia ni
-el punto. Cerca del borde del polígono no se recorta nada: el loop puede salir de
-la zona mientras la persona siga en el centro.
+**No hay eventos de posición.** Nadie se mueve en el servidor: la distancia y el
+rumbo salen de `GET /discovery`, que se consulta por snapshot, y el evento sólo
+avisa que alguien entró o salió. Un cliente que interpole movimiento inventa un
+dato que la API no tiene.
 
 Dos proyecciones del **mismo** log, con la misma secuencia para el mismo cursor:
 
@@ -198,7 +186,7 @@ Dos proyecciones del **mismo** log, con la misma secuencia para el mismo cursor:
 
 ```bash
 API=http://localhost:3000
-# A observa; B es el humano cuyos bots va a ver
+# A observa; B es la otra persona de la zona
 TA=$(curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":8}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
 TB=$(curl -s -X POST $API/auth/demo-session -H 'content-type: application/json' -d '{"regionKey":"mx","demoSlot":9}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
 curl -s -X PUT $API/presence -H "Authorization: Bearer $TA" -H 'content-type: application/json' -d '{"demoZoneKey":"cdmx"}' > /dev/null
@@ -210,8 +198,8 @@ curl -N "$API/events?ticket=$TICKET"
 # retry: 5000
 #
 # id: mx:000000000006
-# event: profile.moved
-# data: {"id":"mx:000000000006","type":"profile.moved","occurredAt":"…","payload":{"distanceM":1208,"profileId":"mx-p09-b1","bearingDeg":9}}
+# event: profile.presence
+# data: {"id":"mx:000000000006","type":"profile.presence","occurredAt":"…","payload":{"profileId":"mx-p09","online":true}}
 #
 # : keepalive          ← cada 15 s, para que un proxy no corte
 
@@ -232,15 +220,15 @@ Reglas de la proyección:
 | replay | `Last-Event-ID`/`cursor` ⇒ arranca en `seq + 1` |
 | página vacía | no avanza el cursor (`nextCursor` = el recibido, `hasMore: false`) |
 | retención | últimos 5000 eventos por región (~20 min a densidad tope); un cursor más viejo es `410 CURSOR_EXPIRED` |
-| visibilidad | humanos de la región (menos uno mismo) + bots visibles, **propios incluidos**, cap 6; ghost y bloqueados quedan afuera |
-| propio | el humano no se ve a sí mismo, pero **sí ve sus 2 bots** (S3: es la densidad que el plan promete) |
-| ghost | `visibility: ghost` oculta al humano y a sus bots de los demás, sin apagar la sesión; `DELETE /presence` apaga la presencia para todos (ver "Privacidad") |
+| visibilidad | humanos con presencia viva de la región, menos uno mismo; ghost y bloqueados quedan afuera |
+| propio | el humano no se ve a sí mismo |
+| ghost | `visibility: ghost` oculta al humano de los demás, sin apagar la sesión; `DELETE /presence` apaga la presencia para todos (ver "Privacidad") |
 
 **Ghost (v0.5) vs. apagar la presencia.** `DELETE /presence` apaga la presencia
 para todos, incluido el dueño: sin presencia viva no hay origen para
 `GET /discovery`, así que el humano también deja de ver. `PUT /presence` con
-`visibility: ghost` es "online pero invisible": la fila sigue viva, el dueño se
-sigue viendo (sus bots incluidos) y los demás dejan de recibir sus movimientos. El
+`visibility: ghost` es "online pero invisible": la fila sigue viva, el dueño sigue
+viendo a los demás y los demás dejan de recibir sus transiciones. El
 `profile.presence online:false` del heartbeat de ghost es lo que saca la tarjeta
 del radar ajeno sin revelar que sigue conectado.
 
@@ -262,22 +250,19 @@ curl -s -X PUT $API/presence -H "Authorization: Bearer $TA" -H 'content-type: ap
   -d '{"point":{"lat":19.44,"lng":-99.127297}}' > /dev/null
 curl -s -X PUT $API/presence -H "Authorization: Bearer $TB" -H 'content-type: application/json' \
   -d '{"point":{"lat":19.435,"lng":-99.12}}' > /dev/null
-sleep 3   # el ticker siembra los 2 bots de cada uno
 
 curl -s "$API/discovery" -H "Authorization: Bearer $TA" \
   | node -pe 'JSON.parse(require("fs").readFileSync(0)).results.map(r=>`${r.profileId} ${r.sourceType} ${r.distanceM}m`).join("\n")'
-# mx-p02      human  945m      ← el otro humano
-# mx-p02-b1   bot    1358m     ← sus bots
-# mx-p02-b2   bot    1364m
-# mx-p01-b2   bot    1410m     ← MIS bots (el propio perfil humano no aparece)
-# mx-p01-b1   bot    1416m
-# → 5 perfiles = 1 humano + 4 bots. Es la validación del plan §4/§5.
+# mx-p02  human  945m      ← la otra persona; no hay nadie más en el radar
+# → una fila por persona conectada. El perfil propio nunca aparece.
+
+# con una sola persona en la zona              → 200 {"results": []} (vacío, no 422)
 
 # filtros: uno por uno y combinados (todos opcionales)
-curl -s "$API/discovery?radiusM=1000" -H "Authorization: Bearer $TA"          # sólo el humano
-curl -s "$API/discovery?intention=friendship" -H "Authorization: Bearer $TA"  # 3 (el otro humano y sus bots)
+curl -s "$API/discovery?radiusM=1000" -H "Authorization: Bearer $TA"          # dentro del radio
+curl -s "$API/discovery?intention=friendship" -H "Authorization: Bearer $TA"  # por intención
 curl -s "$API/discovery?gender=male" -H "Authorization: Bearer $TA"
-curl -s "$API/discovery?verified=true" -H "Authorization: Bearer $TA"         # los 2 bots propios
+curl -s "$API/discovery?verified=true" -H "Authorization: Bearer $TA"
 curl -s "$API/discovery?online=true&intention=friendship&radiusM=1500" -H "Authorization: Bearer $TA"
 
 # fuera de rango o enum inválido → 422 VALIDATION_FAILED (no clamp)
@@ -293,8 +278,8 @@ curl -s "$API/discovery?radiusM=150" -H "Authorization: Bearer $TA"
 | radio | 200–5000 m, default 5000; fuera de rango es `422 VALIDATION_FAILED`, nunca un clamp |
 | filtros | `intention`, `gender`, `verified`, `online`; `verified`/`online` filtran **sólo** con `true` (el contrato lo dice así) |
 | query de más | se ignora (OpenAPI no valida parámetros fuera de la operation); el body sí es estricto |
-| exclusiones | el propio humano (sus bots **sí**), sin presencia viva (ghost/pausa), fuera de la región, bloqueados (ver abajo) |
-| bots | los visibles de `BotsService.visibleBotIds`: propios primero, cap de 6, corte determinista por `bot_profile_id` |
+| exclusiones | el propio humano, sin presencia viva (ghost/pausa), fuera de la región, bloqueados (ver abajo) |
+| densidad | una fila por humano con presencia viva: no hay perfiles sintéticos que sumar |
 | página | `maxItems: 10` del contrato: sin paginación, y con la región llena gana el más cercano |
 | sin presencia | `{"results": []}`: sin origen no hay descubrimiento, y un fantasma no ve (invisible ⇒ ciego) |
 | región | la de la sesión; no hay parámetro para pedir otra |
@@ -307,38 +292,25 @@ se ubica en el ancla de **su** zona más su vector de catálogo (`distanceM` /
 `bearingDeg` del dataset, la posición con la que el mock lo dibuja). Sin ese
 vector, dos personas que eligen la misma zona caen en el mismo punto y todo el
 radar se aplana en el piso de 200 m. Con el vector, el flujo sin GPS devuelve
-exactamente la dispersión del dataset (mx-p02 a 480 m y 118° del ancla) y el flujo
-con GPS mide donde corresponde.
+exactamente la dispersión del dataset y el flujo con GPS mide donde corresponde.
 
-**Por qué el observador ve sus propios bots.** Un bot es una proyección de su
-dueño, no un desconocido. El plan promete que con dos humanos en la misma región
-cada uno ve **1 humano + 4 bots = 5 perfiles**, y ese 5 sólo cierra si los 2
-propios están: 1 ajeno + 2 propios + 2 del otro. El perfil humano propio sigue
-fuera: no se descubre a sí mismo. La fila del bot hereda la del dueño (nickname,
-foto, intención, género, verificación, slot) y se distingue por `profileId` +
-`sourceType: 'bot'`: no se inventó un segundo catálogo de personas para la demo.
+**Densidad honesta.** Con dos personas conectadas en la misma zona cada una ve
+**una** fila: la otra. No hay relleno que haga parecer más poblado el radar, y la
+UI lo dice (estado vacío y copy propio) en vez de simularlo. Un test lo fija:
+`discovery-density.test.mjs` (una sesión viva ⇒ `results: []`, el propio perfil
+nunca aparece) y `two-humans.test.mjs` (dos personas ⇒ una fila cada una).
 
-**Los bloqueados son de S5.** No existe tabla `blocks` en el esquema (el bloqueo
-llega con privacidad, S5), así que hoy la exclusión es vacía por construcción: no
-hay pares bloqueados que excluir. Cuando S5 agregue la tabla, el filtro es una
-condición más en el mismo `WHERE` (`NOT EXISTS (… blocks …)`); el contrato ya lo
-documenta como exclusión server-side y por eso no hay ningún parámetro.
+**Los bloqueados son de S5.** La tabla `blocks` llega con privacidad: el filtro es
+una condición más en el mismo `WHERE` (`NOT EXISTS (… blocks …)`) y el contrato ya
+lo documenta como exclusión server-side, por eso no hay ningún parámetro.
 
 #### Frames de distancia
 
-`GET /discovery` mide desde el observador. El payload de `profile.moved` mide
-desde **el dueño del bot** (su presencia o el centroide de su zona demo): un log
-compartido y append-only no puede llevar una medida por receptor sin guardar una
-coordenada (el contrato prohíbe que salga alguna) o recalcular en lectura (el
-mismo `seq` dejaría de valer lo mismo y el replay dejaría de ser honesto). El
-contrato de `ProfileMovedPayload` dice "relativos a quien recibe", así que el
-stream conserva una deuda de frame declarada para el observador ajeno; lo que sí
-cambió con la migración `004` es que el dueño ve en su radar exactamente la
-distancia que publica el evento de sus propios bots. Consecuencia práctica: **las
-posiciones del radar salen de discovery** (y se interpolan entre snapshots);
-`profile.moved` sirve para saber que algo se movió, no para sumarle su `distanceM`
-a la fila de discovery de un tercero. Las dos proyecciones **sí** coinciden en el
-conjunto de perfiles visibles, que es lo que corrigió S3-A.
+**Hay un solo frame.** `GET /discovery` mide desde el observador y es la única
+fuente de `distanceM`/`bearingDeg` que el cliente ve: el log de eventos no lleva
+medidas porque no hay nada que se mueva (ver "Eventos y ghost"). La deuda de
+"relativos a quien recibe" desapareció con los perfiles sintéticos: un evento de
+presencia dice `profileId` y `online`, y la distancia se pide aparte.
 
 ### Pings y matches (Sprint 4)
 
@@ -373,19 +345,17 @@ curl -s "$API/pings?box=sent" -H "Authorization: Bearer $TA"
 | aceptar/rechazar dos veces | `409 PING_RESOLVED` (idempotencia explícita, no un 204 silencioso) |
 | vencimiento | 24 h (`expiresAt`); perezoso, al leer y al resolver; `410 PING_EXPIRED` |
 | sólo el destinatario resuelve | `403 PING_FORBIDDEN` |
-| el bot acepta solo | si el destino es `<owner>-b1`, el `201` vuelve ya `accepted` con `matchId` |
 | cuota | 30 envíos por minuto por perfil; después, `429 RATE_LIMITED` |
 | sin coordenadas | ni `lat`/`lng` ni `distanceM`/`bearingDeg` en ninguna response |
 
-**Por qué el bot acepta en la misma transacción.** Un job que despierte bots "a
-los 2 s" sería otro proceso, otra tabla de agenda y otro estado que puede quedar a
-medio camino. Aceptar en el `INSERT` da el mismo resultado para la demo y el
-cliente no tiene un caso especial: mira el mismo `Ping`.
+**El ping no se auto-acepta.** El `201` siempre vuelve `pending`: la aceptación es
+del destinatario (`POST /pings/{id}/accept`) y es lo único que crea el match. Un
+`accepted` en el `INSERT` sería una de las dos personas hablando por la otra.
 
 **Por qué la bandeja es `{ ping, peer }`.** La fila muestra al **otro**: nickname,
 iniciales, foto e intención. Sin `peer`, el cliente tendría que cruzar el ping
-contra `/demo/profiles`, que además no conoce a los bots. El peer de un bot hereda
-la proyección de su dueño y se distingue por `sourceType`, igual que en discovery.
+contra `/demo/profiles`; el `peer` se resuelve en la misma consulta, con la
+proyección pública del perfil destino.
 
 **Por qué `reset` global los borra.** `pings` y `matches` son estado de demo, no
 catálogo: el reset global los vacía (pings primero, por la FK) y deja la bandeja
@@ -427,24 +397,24 @@ curl -s $API/matches -H "Authorization: Bearer $TB"                    # unreadC
 | no leídos | watermark `match_reads.last_read_seq` por `(match, perfil)`; los propios nunca cuentan |
 | body | se recorta en los bordes; vacío o de más de 2000 es `422 VALIDATION_FAILED` |
 | cuota | 60 mensajes por minuto por perfil; después, `429 RATE_LIMITED` |
-| el bot contesta | un timer por match (~2 s); emite `typing.started` y después `message.created` |
-| stream | `message.created` y `typing.started` se filtran por **participante del match**, no por región |
+| quién contesta | el otro lado del match; el server no tiene respuestas propias ni temporizadores de chat |
+| stream | `message.created` se filtra por **participante del match**, no por región |
 
 **Por qué el cursor no es `createdAt`.** Dos mensajes pueden caer en el mismo
 milisegundo; un cursor por tiempo pierde o repite filas. `message_seq` es un
 `IDENTITY` que ordena y desempata sin mirar el reloj.
 
-**Por qué el bot no contesta dos veces.** El timer vive en un `Map` por `matchId`:
-tres mensajes seguidos agendan **una** respuesta. El texto sale de una lista fija
-y se elige para no repetir la última línea del mismo bot; no hay LLM ni costo por
-mensaje, y dos corridas de la demo dicen lo mismo.
+**Por qué el envío es idempotente y no hay timers del server.** El único mensaje
+que existe es el que escribió una persona: `clientMessageId` hace que un reintento
+de red devuelva el mismo `Message` en vez de duplicarlo, y no hay job ni `Map` de
+respuestas pendientes que pueda contestar por alguien.
 
 **Por qué los eventos del chat no usan la visibilidad del resto del stream.** El
-resto del log se filtra por sujetos visibles (humanos de la región + bots
-visibles). Un `message.created` lleva `matchId` y no `profileId`; filtrar por
-región le mostraría a cualquiera las conversaciones ajenas. La regla es "soy uno
-de los dos lados de ese match", y el payload no lleva el texto: el evento avisa,
-la página de mensajes es la fuente del contenido.
+resto del log se filtra por sujetos visibles (humanos de la región). Un
+`message.created` lleva `matchId` y no `profileId`; filtrar por región le
+mostraría a cualquiera las conversaciones ajenas. La regla es "soy uno de los dos
+lados de ese match", y el payload no lleva el texto: el evento avisa, la página de
+mensajes es la fuente del contenido.
 
 **Por qué `GET /me` existe.** `DemoSession` da `profileId` y `demoSlot`, pero no
 el nickname ni la foto: el tab Perfil mostraba el `self` del dataset, que es otra
@@ -461,10 +431,9 @@ campo hasta que lo consuma).
 
 | Pieza | Regla |
 |---|---|
-| ghost | `PUT /presence` con `visibility: ghost`; la sesión sigue viendo, los demás no la ven (ni a sus bots); `DELETE /presence` apaga la presencia para todos |
+| ghost | `PUT /presence` con `visibility: ghost`; la sesión sigue viendo, los demás no la ven; `DELETE /presence` apaga la presencia para todos |
 | bloqueo | `POST /blocks` idempotente (201 con el `createdAt` original), `DELETE /blocks/{profileId}` idempotente (204), `GET /blocks` con la identidad del otro |
 | efecto del bloqueo | el par desaparece de discovery **en las dos direcciones**, `POST /pings` es `403 CHAT_BLOCKED` y la conversación existente no acepta mensajes (`403 CHAT_BLOCKED`); la historia sigue legible |
-| bot | bloquear o reportar `<owner>-b1` canoniza al dueño: el bot no existe sin la persona |
 | reporte | `POST /reports` → `202` con `{reportId, createdAt}`; motivo cerrado (`spam`, `harassment`, `inappropriate`, `impersonation`, `other`); no bloquea ni cambia discovery |
 | notificaciones | `GET /notifications` (`{notifications, unreadCount}`, 100 más recientes) y `POST /notifications/read` (todas o por id) → `{marked, unreadCount}` |
 | invitados | `POST /blocks`, `DELETE /blocks/{profileId}` y `POST /reports` responden `403 PROFILE_REQUIRED`: un invitado no tiene perfil |
@@ -475,17 +444,21 @@ campo hasta que lo consuma).
 bloqueó"), pero discovery, stream y pings excluyen el par en las dos direcciones.
 El bloqueado recibe `CHAT_BLOCKED` sin saber quién bloqueó a quién.
 
-**Ghost no borra los bots.** El ticker los sigue moviendo y el dueño los sigue
-viendo (es la densidad del radar propio); lo que cambia es el filtro de lectura de
-los demás: `visibleBotIds` incluye los propios sin mirar `visibility`, y para el
-resto exige `visibility = 'visible'` y el par no bloqueado. Si el ghost borrara las
-filas, `reconcile()` las recrearía en el tick siguiente y el dueño vería sus bots
-parpadear.
+**El `profileId` es el perfil, sin traducciones.** No hay alias ni canonización: lo
+que se bloquea o se reporta es la fila de `profiles` que existe, y una referencia a
+un perfil que no está en el catálogo es `404 PROFILE_NOT_FOUND` (el `DELETE` sigue
+siendo idempotente: `204` sin tocar nada).
+
+**Ghost no apaga la sesión.** La fila de `presence` sigue viva: lo que cambia es el
+filtro de lectura de los demás (`visibility = 'visible'` y par no bloqueado). El
+dueño sigue viendo el radar de los demás, y por eso ghost es "invisible", no
+"desconectado". `DELETE /presence` es la otra cosa: apaga la presencia para todos,
+incluido el dueño.
 
 **Notificaciones persistidas, no derivadas.** `PingsService` y `ChatService`
-insertan la fila en la misma transacción que el hecho (ping, match, mensaje); el
-bot que contesta también deja su aviso. `read_at` es la única autoridad de lectura
-(`null` = no leída), y `unreadCount` cuenta la tabla, no la página de 100.
+insertan la fila en la misma transacción que el hecho (ping, match, mensaje).
+`read_at` es la única autoridad de lectura (`null` = no leída), y `unreadCount`
+cuenta la tabla, no la página de 100.
 
 **Compatibilidad del badge.** El cliente live ya usa los pings pendientes
 (`bellBadgeCount(state, live.pings.pending)`) y **eso no cambió**: `GET /pings`,
@@ -493,13 +466,10 @@ bot que contesta también deja su aviso. `read_at` es la única autoridad de lec
 `/notifications` es la superficie nueva; cuando el front la adopte, el badge de
 pings queda como fallback documentado.
 
-**Cierre por zona.** Cuando un match tiene un bot, `matches.bot_zone_key` guarda la
-zona en la que nació. Si el dueño cambia de zona, `reconcile()` vuelve a sembrar el
-bot en otra y `POST /matches/{matchId}/messages` responde `409 MATCH_CLOSED`; la
-conversación sigue legible. La demo tiene **una zona por región** (`mx → cdmx`,
-`co → bogota`), así que el escenario de test mueve el valor registrado del match —
-la invariante que compara el server es la misma: `matches.bot_zone_key ==
-bots.zone_key`.
+**Cierre de conversación.** `POST /matches/{matchId}/messages` responde
+`409 MATCH_CLOSED` cuando el otro lado ya no se puede proyectar como perfil (el
+match sobrevive a su par): la conversación sigue legible y no se escribe a ciegas.
+La zona ya no cierra nada: `matches.bot_zone_key` se fue con la migración `008`.
 
 **Sin PII nueva.** `blocks` guarda dos `profileId` y una fecha; `reports`, dos
 `profileId`, el motivo del enum y la fecha; `notifications`, el destinatario, el
@@ -612,10 +582,11 @@ Migraciones actuales:
 | 001 | `001_init.sql` | `regions`, `zones`, `profiles`, `sessions`, `stream_tickets`, `demo_meta` | dropea las 6 tablas |
 | 002 | `002_presence.sql` | `presence` (una fila por sesión, `Point,4326` privado, `expires_at`) | `DROP TABLE presence`; catálogo y sesiones intactas |
 | 003 | `003_bots_events.sql` | `bots`, `bot_waypoints`, `event_seq`, `events` | dropea las 4 tablas; catálogo, sesiones y presencia intactas |
-| 004 | `004_bots_anchor.sql` | `bots.anchor` (ancla privada del loop) + vista `presence_anchors` (punto del dueño: GPS o centroide de su zona) | `DROP VIEW presence_anchors` + `DROP COLUMN bots.anchor`; los bots siguen y el ticker los vuelve a sembrar con el ancla de zona |
-| 005 | `005_pings.sql` | `pings` (un pendiente por par dirigido, TTL y estados) + `matches` (un match por par) | `DROP TABLE pings` y después `matches`; catálogo, sesiones, presencia y bots intactos |
+| 004 | `004_bots_anchor.sql` | `bots.anchor` (ancla privada del loop) + vista `presence_anchors` (punto del dueño: GPS o centroide de su zona) | `DROP VIEW presence_anchors` + `DROP COLUMN IF EXISTS bots.anchor` (`IF EXISTS`: después de `008` la tabla no existe) |
+| 005 | `005_pings.sql` | `pings` (un pendiente por par dirigido, TTL y estados) + `matches` (un match por par) | `DROP TABLE pings` y después `matches`; catálogo, sesiones, presencia y events intactos |
 | 006 | `006_chat.sql` | `messages` (orden por `message_seq`, idempotencia por `(match, emisor, clientMessageId)`), `match_reads` (watermark de lectura), FK compuesta `(region_key, match_id)` y el CHECK de `events` ampliado a los dos tipos del chat | borra los eventos del chat, vuelve el CHECK a dos tipos, dropea `match_reads`, `messages` y el único agregado a `matches`; los matches de 005 quedan |
-| 007 | `007_privacy.sql` | `presence.visibility` (`visible`/`ghost`), `blocks`, `reports`, `notifications` y `matches.bot_zone_key` (cierre por cambio de zona) | dropea las cuatro tablas, después las dos columnas; sesiones, presencia, bots, pings, matches y mensajes quedan intactos |
+| 007 | `007_privacy.sql` | `presence.visibility` (`visible`/`ghost`), `blocks`, `reports`, `notifications` y `matches.bot_zone_key` | dropea las cuatro tablas, después las dos columnas; sesiones, presencia, pings, matches y mensajes quedan intactos |
+| 008 | `008_drop_bots.sql` | **borra el vocabulario viejo**: `bots`, `bot_waypoints`, la vista `presence_anchors`, `matches.bot_zone_key`, los eventos `profile.moved`/`typing.started` y los `source_type` que ya no existen | `008_drop_bots.down.sql` recrea el esquema **post-007 vacío** (tablas, vista, columna, CHECK de 4 tipos y `source_type` de 3) |
 
 `002` es aditiva y reversible sin pérdida: la única tabla nueva referencia a
 `sessions` y `zones` (no al revés), así que el `down` no desarma nada. Aplicar y
@@ -629,9 +600,11 @@ docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate
 ```
 
 `003` sigue la misma regla: los waypoints referencian a `bots`, y `bots` a
-`profiles`/`zones` (nunca al revés). Un `003` revertido deja `GET /events` sin
-esquema (500) hasta volver a aplicarlo; no hay datos de catálogo que se pierdan y
-el log de la demo no es histórico (la retención ya lo recorta).
+`profiles`/`zones` (nunca al revés). Revertir `003` hoy no es un camino: `008` ya
+borró esas tablas, así que primero hay que revertir `008` (su `down` las recrea
+vacías) y recién después `003`. Un `003` revertido deja `GET /events` sin esquema
+(500) hasta volver a aplicarlo; no hay datos de catálogo que se pierdan y el log de
+la demo no es histórico (la retención ya lo recorta).
 
 `006` es la primera que **amplía** una restricción existente: el `CHECK` de
 `events.event_type` pasa de dos tipos a cuatro (los dos del chat). Por eso el
@@ -641,28 +614,34 @@ viejo; si no, el `ALTER TABLE` falla con las filas nuevas adentro. Las tablas
 del par `(region_key, match_id)` y `match_reads` de `matches`), y al final el
 único `(region_key, match_id)` que `006` le agregó a `matches`.
 
-`004` es aditiva pero **el orden del rollback importa**: el código que usa
-`presence_anchors` es el de este batch, así que revertir la migración con ese
-binario corriendo deja el ticker sin vista (`relation "presence_anchors" does not
-exist` en el `warn` del tick, sin tumbar la API). Para volver atrás hay que
-revertir el código primero (o aceptar que los bots no se resiembren hasta
-re-aplicarla). El `down` no borra sesiones, presencia ni catálogo.
+`004` es aditiva y su `down` ya no puede correr contra el esquema actual: `008`
+borró `bots`. Por eso usa `IF EXISTS` en las dos sentencias — un `--rollback-all`
+después de `008` pasa por `004` sin explotar. El `down` no borra sesiones,
+presencia ni catálogo.
 
 `007` es **reversible sin tocar S1–S4** y está probada: el `down` dropea las
 cuatro tablas (primero `notifications`, que referencia pings/matches/messages) y
 después las dos columnas. `presence.visibility` vuelve a leerse como `visible`
-(el default histórico) y los matches pierden `bot_zone_key`, así que una
-conversación con un bot deja de cerrarse por cambio de zona. No hay FK de otras
-tablas hacia las nuevas: ni sesiones, ni catálogo, ni chat dependen de ellas. La
-prueba (`test/integration/migrations-seeds.test.mjs`) corre `down` y `up` dentro
-de una transacción y la revierte: ensaya el SQL real del runner sin dejar la base
+(el default histórico). No hay FK de otras tablas hacia las nuevas: ni sesiones, ni
+catálogo, ni chat dependen de ellas. La prueba
+(`test/integration/migrations-seeds.test.mjs`) corre `down` y `up` dentro de una
+transacción y la revierte: ensaya el SQL real del runner sin dejar la base
 compartida a medio migrar.
+
+`008` es la que **borra el vocabulario viejo** y la única con un `down` que recrea
+estructura en vez de deshacerla: el `down` deja el esquema **post-007 vacío** (las
+tablas, la vista, la columna, el CHECK de 4 tipos y los `source_type` de 3), no los
+datos. El gate real es el test: `BEGIN` → assert post-008 → corre `008.down` →
+assert post-007 → corre `004.down` y assert que **no lanza** → corre `008.sql` →
+assert post-008 → `ROLLBACK`. El ensayo manual completo (incluido
+`--rollback-all` → `000` → `migrate`) está en
+[`docs/runbook-demo.md`](../docs/runbook-demo.md).
 
 ```bash
 docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate:rollback
-# → rollback ok: 007_privacy
+# → rollback ok: 008_drop_bots
 docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate
-# → migrate ok: 007_privacy
+# → migrate ok: 008_drop_bots
 ```
 
 Dentro de Docker los comandos son los mismos, con `docker compose exec`:
@@ -670,6 +649,8 @@ Dentro de Docker los comandos son los mismos, con `docker compose exec`:
 ```bash
 docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate:status
 docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate:rollback
+# todas: sin error y sin [drift] al re-aplicar
+docker compose -f compose.yml -f compose.dev.yml exec api npm run migrate -- --rollback-all
 ```
 
 ## Seeds
@@ -696,20 +677,18 @@ Corren contra la API y la base reales (no hay mocks ni contenedores efímeros).
 Cubren health, sesión demo (claim, 409, invitado, slot vencido), perfiles
 (401/403/422, orden, shape exacto, cero coordenadas), logout (token revocado en el
 acto), tickets de stream (un solo uso), reset propio y global, presencia (punto
-real → zona, fallback, TTL, cambio de región, `DELETE`), bots (2 por humano,
-waypoints, ghost, cap de 6, aislamiento regional), ancla de los bots (la persona
-con GPS vs. el centroide de la zona demo, reubicación por desplazamiento),
-descubrimiento (5 perfiles con los bots propios, medidas por observador, filtros y
-combinados, 422, ghost, región, cap y tope de página), pings y matches (bandeja de
-los dos lados, dedupe, aceptar/rechazar, bot que acepta solo, vencimiento y el
-único match por par), eventos (ticket, cursor, replay, paridad SSE↔polling,
-dedupe), privacidad (ghost, bloqueo, reporte, notificaciones y cierre por cambio
-de zona), expiración de sesión y reset de las tablas nuevas, logs sin PII y
-migraciones/seeds idempotentes + `ST_Covers`.
+real → zona, fallback, TTL, cambio de región, `DELETE`), descubrimiento (densidad
+real: 0 y 1 persona ⇒ lista vacía, 2 ⇒ una fila cada una; medidas por observador,
+filtros y combinados, 422, ghost, región y tope de página), pings y matches
+(bandeja de los dos lados, dedupe, aceptar/rechazar, vencimiento y el único match
+por par), chat entre dos personas (incluido el peer ausente ⇒ `409`), eventos
+(ticket, cursor, replay, paridad SSE↔polling, vocabulario cerrado, dedupe),
+privacidad (ghost, bloqueo, reporte, notificaciones), expiración de sesión y reset
+de las tablas nuevas, logs sin PII y migraciones/seeds idempotentes + `ST_Covers`.
 
-Los tests del mundo (`bots`, `events`, `discovery`) empujan el vencimiento de las
-presencias del escenario con un `UPDATE` (`extendPresence`) para no depender de los
-12 s de TTL: el TTL se sigue probando en `presence.test.mjs`, y la lectura sigue
+Los tests del mundo (`events`, `discovery`, `two-humans`) empujan el vencimiento de
+las presencias del escenario con un `UPDATE` (`extendPresence`) para no depender de
+los 12 s de TTL: el TTL se sigue probando en `presence.test.mjs`, y la lectura sigue
 filtrando `expires_at > now()`.
 
 ```bash
@@ -740,16 +719,17 @@ guarda antes y las repone al terminar.
 | `reset.test.mjs` | reset propio, aislamiento, reset global, idempotencia, catálogo intacto |
 | `logs-no-pii.test.mjs` | ningún call site de log interpola token/ticket/coordenada/identidad |
 | `presence.test.mjs` | `PUT`/`DELETE /presence`: punto → zona, fallback, `demoZoneKey`, `ZONE_UNKNOWN`, cambio de región, TTL, 404 y upsert |
-| `bots.test.mjs` | 2 bots por humano con `profileId` estable, waypoints y métricas, bots propios dentro del stream, ghost, cap de 6, aislamiento mx/co |
-| `bots-anchor.test.mjs` | ancla en la persona (GPS en el norte de Bogotá), `demoZoneKey` ⇒ centroide, reubicación por desplazamiento > 250 m, ruido de GPS que no recrea, borde del polígono sin recorte |
-| `discovery.test.mjs` | 5 perfiles (1 humano + 4 bots), medidas por observador vs ancla, radio, filtros y combinados, 422, ghost, región, cap de 6 y tope de 10 |
-| `pings.test.mjs` | 201 pendiente, inbox/sent con `peer`, `409 PING_DUPLICATE`, accept → un match por par, reject 204, bot que acepta solo, 403/404/410/422 y bandeja que sobrevive al logout |
-| `chat.test.mjs` | bandeja con `unreadCount` y preview, dos mensajes con orden y recorte, cursor de dos páginas, idempotencia por `clientMessageId` (y por emisor), read → 0, bot que contesta distinto cada vez, `message.created`/`typing.started` por SSE y el tercero que no ve la conversación ajena |
+| `discovery.test.mjs` | densidad real (2 humanos ⇒ 1 fila cada uno; 5 ⇒ 4), medidas por observador, radio, filtros y combinados, 422, ghost, región y tope de 10 |
+| `discovery-density.test.mjs` | una sesión viva ⇒ `results: []` (200, no 422), el propio perfil nunca aparece, sin presencia sigue 200 |
+| `pings.test.mjs` | 201 pendiente, inbox/sent con `peer`, `409 PING_DUPLICATE`, accept → un match por par, reject 204, 403/404/410/422 y bandeja que sobrevive al logout |
+| `chat.test.mjs` | bandeja con `unreadCount` y preview, dos mensajes con orden y recorte, cursor de dos páginas, idempotencia por `clientMessageId` (y por emisor), read → 0, respuesta del peer humano, `message.created` por SSE y el tercero que no ve la conversación ajena |
+| `chat-peer-absent.test.mjs` | match con `profile_b_id` fuera de `profiles`: `POST …/messages` ⇒ `409 MATCH_CLOSED`, 0 mensajes y 0 notificaciones; la lectura sigue 200 |
+| `two-humans.test.mjs` | dos sesiones de la misma región se ven, ping → accept → match → chat en las dos direcciones, sin relleno |
 | `me.test.mjs` | `SelfProfile` de la sesión (no el `self` del dataset), 10 campos sin medidas, dos slots distintos, `404 PROFILE_NOT_FOUND` y 401 |
-| `privacy.test.mjs` | ghost (discovery, stream y vista propia, ida y vuelta), bloqueo (idempotencia, efecto simétrico, ping/chat bloqueados, bot ⇒ dueño, unblock), reporte (202 sin PII, discovery intacto, 422/404), notificaciones (ping/match/mensaje/bot, contador, marcar una y todas, persistencia) y cierre por cambio de zona (`MATCH_CLOSED` y reapertura) |
-| `expiry-reset.test.mjs` | sesión vencida (401, slot libre, presencia sin contar, bots retirados, fuera del radar), reset propio (lo mío sí, lo ajeno no) y reset global (bloques/reportes/notificaciones a cero, sin bots huérfanos) |
-| `events.test.mjs` | ticket de un uso, `Last-Event-ID`, cursor y `limit` 422/410, página vacía, paridad SSE↔polling, `profile.presence`, dedupe |
-| `migrations-seeds.test.mjs` | idempotencia de migraciones y seeds, `ST_Covers` y rollback de `007` dentro de una transacción |
+| `privacy.test.mjs` | ghost (discovery, stream y vista propia, ida y vuelta), bloqueo (idempotencia, efecto simétrico, ping/chat bloqueados, unblock), reporte (202 sin PII, discovery intacto, 422/404), notificaciones (ping/match/mensaje, contador, marcar una y todas, persistencia) y `MATCH_CLOSED` con el peer ausente |
+| `expiry-reset.test.mjs` | sesión vencida (401, slot libre, presencia sin contar, fuera del radar), reset propio (lo mío sí, lo ajeno no) y reset global (bloques, reportes, notificaciones, pings, matches, mensajes, sesiones, presencia y eventos a cero) |
+| `events.test.mjs` | ticket de un uso, `Last-Event-ID`, cursor y `limit` 422/410, página vacía, paridad SSE↔polling, `profile.presence`, vocabulario cerrado (el CHECK rechaza `profile.moved`) y dedupe |
+| `migrations-seeds.test.mjs` | idempotencia de migraciones y seeds, `ST_Covers` y el gate de rollback `008` → `004` → `008` dentro de una transacción |
 
 ## Endpoints
 
@@ -766,22 +746,22 @@ guarda antes y las repone al terminar.
 | `GET /events?ticket=` | ticket | `paths/events.yaml` | SSE: `retry: 5000`, `Last-Event-ID`, `: keepalive` cada 15 s; `401 TICKET_EXPIRED`/`TICKET_REUSED`; `410 CURSOR_EXPIRED`; `422` |
 | `GET /events/poll?cursor=&limit=` | Bearer | `paths/events.yaml` | `EventsPage` del mismo log; `limit` 1..500 (default 100); misma secuencia que el SSE desde el mismo cursor |
 | `GET /discovery?radiusM=&intention=&gender=&verified=&online=` | Bearer | `paths/discovery.yaml` | `DiscoveryResult`: filas `ProfileSummary` ordenadas por distancia, medidas desde el observador; `422 VALIDATION_FAILED` fuera de rango |
-| `POST /pings` | Bearer | `paths/pings.yaml` | `201 Ping`; `409 PING_DUPLICATE`; `404 PROFILE_NOT_FOUND`; `410 PING_EXPIRED`; `429 RATE_LIMITED`; `403 PING_FORBIDDEN` (invitado) o `403 CHAT_BLOCKED` (par bloqueado); un bot vuelve `accepted` |
+| `POST /pings` | Bearer | `paths/pings.yaml` | `201 Ping` **siempre `pending`**; `409 PING_DUPLICATE`; `404 PROFILE_NOT_FOUND`; `410 PING_EXPIRED`; `429 RATE_LIMITED`; `403 PING_FORBIDDEN` (invitado) o `403 CHAT_BLOCKED` (par bloqueado) |
 | `GET /pings?box=inbox\|sent` | Bearer | `paths/pings.yaml` | `PingList` (`{ping, peer}`) más nuevo primero; `422 VALIDATION_FAILED` sin `box` |
 | `POST /pings/{pingId}/accept` | Bearer | `paths/pings.yaml` | `200 Match`; `403 PING_FORBIDDEN`; `404 PING_NOT_FOUND`; `409 PING_RESOLVED`; `410 PING_EXPIRED` |
 | `POST /pings/{pingId}/reject` | Bearer | `paths/pings.yaml` | `204` sin cuerpo; mismas guardas que accept; nunca crea match |
 | `GET /matches` | Bearer | `paths/matches.yaml` | `MatchList` más reciente primero; `peer` del otro, `lastMessage` y `unreadCount` |
 | `GET /matches/{matchId}/messages?cursor=` | Bearer | `paths/matches.yaml` | `MessagePage` cronológica, cursor opaco; `403 CHAT_BLOCKED`; `404 MATCH_NOT_FOUND`; `422` |
-| `POST /matches/{matchId}/messages` | Bearer | `paths/matches.yaml` | `201 Message`; idempotente por `clientMessageId`; `409 MATCH_CLOSED` (otro lado fuera o zona cambiada); `403 CHAT_BLOCKED` (par bloqueado); `429 RATE_LIMITED`; el bot contesta solo |
+| `POST /matches/{matchId}/messages` | Bearer | `paths/matches.yaml` | `201 Message`; idempotente por `clientMessageId`; `409 MATCH_CLOSED` (peer ausente de `profiles`); `403 CHAT_BLOCKED` (par bloqueado); `429 RATE_LIMITED` |
 | `POST /matches/{matchId}/read` | Bearer | `paths/matches.yaml` | `204` sin cuerpo; idempotente por resultado; baja el `unreadCount` |
 | `GET /me` | Bearer | `paths/me.yaml` | `200 SelfProfile` de la sesión; `404 PROFILE_NOT_FOUND` si es invitado |
 | `GET /blocks` | Bearer | `paths/blocks.yaml` | `BlockList` con `{block, peer}`; `403 PROFILE_REQUIRED` si es invitado |
 | `POST /blocks` | Bearer | `paths/blocks.yaml` | `201 Block` idempotente; `404 PROFILE_NOT_FOUND`; `422` auto-bloqueo/body |
-| `DELETE /blocks/{profileId}` | Bearer | `paths/blocks.yaml` | `204` idempotente; un bot revierte el bloqueo de su dueño |
+| `DELETE /blocks/{profileId}` | Bearer | `paths/blocks.yaml` | `204` idempotente (también si el bloqueo no existía) |
 | `POST /reports` | Bearer | `paths/reports.yaml` | `202 {reportId, createdAt}`; `404 PROFILE_NOT_FOUND`; `422` auto-reporte/motivo |
 | `GET /notifications` | Bearer | `paths/notifications.yaml` | `{notifications, unreadCount}`; 100 más recientes; sin PII del mensaje |
 | `POST /notifications/read` | Bearer | `paths/notifications.yaml` | `{marked, unreadCount}`; todas sin body, o `notificationIds`; idempotente |
-| `POST /demo/reset` | — | **no** | reset global: borra sesiones, invitados, bots, eventos, pings, matches, mensajes, acuses, bloqueos, reportes y notificaciones; no el catálogo (§11) |
+| `POST /demo/reset` | — | **no** | reset global: borra sesiones, invitados, eventos, pings, matches, mensajes, acuses, bloqueos, reportes y notificaciones; no el catálogo (§11) |
 | `POST /demo/reset/self` | Bearer | **no** | reset de la propia sesión (y de lo privado propio); idempotente |
 
 ### Takeover: por qué es otra operation
@@ -834,14 +814,12 @@ DTOs de la demo. El shape es propio y sólo lo consumen Docker y el runbook.
 | **El punto se guarda, la coordenada no sale** | `presence.point` es `geometry(Point, 4326)` privado (lo va a necesitar S3 para distancia/rumbo). Ningún `SELECT` de la API lo proyecta y ningún log lo interpola: lo que sale es `regionKey`/`zoneKey`/`fallbackRequired`. |
 | **Una sola proyección de eventos** | SSE y polling llaman a `EventsService.readPage`. La paridad no se mantiene sincronizando dos implementaciones: hay una. El SSE pagina el log cada 250 ms después del replay y manda `: keepalive` cada 15 s. |
 | **`seq` por región, no un reloj** | `event_seq` se incrementa con `UPDATE … RETURNING` (serializa la fila y no reparte el mismo número). `occurredAt` viaja porque el contrato lo exige, pero no ordena: entre requests concurrentes el reloj se invierte. |
-| **Ticker del mundo, un solo proceso** | El movimiento se escribe una vez y todas las lecturas ven lo mismo; si se calculara al leer, dos clientes con el mismo cursor verían posiciones distintas para el mismo `seq`. Con más de una instancia hace falta un job con lock (límite anotado, no resuelto antes de tener el problema). |
-| **Bots derivados, geometría en PostGIS** | El `profileId` del bot es `<owner>-b1/b2` (estable entre logins del mismo slot) y su centro/waypoints se calculan en SQL: TypeScript nunca ve una coordenada. El ancla es **la persona** (`presence_anchors`: su punto GPS o el centroide de su zona demo) y `distanceM`/`bearingDeg` se miden contra ella, así el payload no depende de quién lo lee. `bots.anchor` guarda el ancla usada y la reubicación por desplazamiento (> 250 m) se decide con `ST_Distance`, también en SQL. |
-| **Discovery mide desde el observador** | `GET /discovery` es una proyección por sesión: `ST_Distance`/`ST_Azimuth` desde la presencia viva (o el ancla de su zona demo, que es el origen del radar) hasta cada perfil, redondeados half-up. Un perfil de zona demo se ubica en el ancla + su vector de catálogo, que es su posición autorada. Desde la migración `004` los bots orbitan a su dueño, así que el dueño ve sus propios bots a la misma distancia que publica su `profile.moved`; para un observador ajeno el frame sigue siendo el observador (ver "Frames de distancia"). |
-| **Una sola definición de "bots visibles"** | `BotsService.visibleBotIds` (propios primero, cap 6, corte por `bot_profile_id`) la usan el stream y discovery. Dos consultas con el mismo nombre se desincronizan; una sola no. |
+| **Discovery mide desde el observador** | `GET /discovery` es una proyección por sesión: `ST_Distance`/`ST_Azimuth` desde la presencia viva (o el ancla de su zona demo, que es el origen del radar) hasta cada perfil, redondeados half-up. Un perfil de zona demo se ubica en el ancla + su vector de catálogo, que es su posición autorada. Es la única fuente de distancia: el log de eventos no lleva medidas (ver "Frames de distancia"). |
 | **`distanceM` proyectado a la banda 200–5000** | El schema congelado no tiene dónde poner "a 30 m" y el cliente valida 200–5000. El clamp es monótono (no reordena: el orden se calcula sobre la medida real) y está aislado en la proyección, no en el filtro del radio. |
-| **Ghost = `DELETE /presence`** | Es la superficie que el contrato ya tiene; apagar la presencia oculta al humano y retira sus 2 bots de las lecturas. Un ghost que mantenga la presencia viva pide un delta de contrato (S5). |
+| **Ghost es un campo, no un borrado** | `presence.visibility` (`visible`/`ghost`) mantiene la fila viva y cambia sólo el filtro de lectura de los demás: el dueño sigue viendo el radar y `DELETE /presence` sigue siendo la superficie que apaga para todos. |
+| **Densidad = personas conectadas** | No hay productores de población sintética: discovery, el stream y la UI muestran lo que hay. Un vacío es un vacío declarado (copy propio, sin carga infinita), no un relleno que finja actividad. |
 
-## Modelo de datos (S1 + S5)
+## Modelo de datos (S1 + S5 + 008)
 
 | Tabla | Clave | Invariante |
 |---|---|---|
@@ -851,25 +829,22 @@ DTOs de la demo. El shape es propio y sólo lo consumen Docker y el runbook.
 | `sessions` | `session_id` | un solo slot vivo por región (índice único parcial); invitado ⇔ slot `NULL` |
 | `stream_tickets` | `ticket_id` | hash del ticket, no el valor (S2) |
 | `presence` | `session_id` | **una fila por sesión** (upsert); `geometry(Point, 4326)` privado + `expires_at` de 12 s; zona ⇔ región por FK compuesto; `visibility` `visible`/`ghost` (S5) |
-| `bots` | `(region_key, bot_profile_id)` | 2 por humano (`UNIQUE (region_key, owner_profile_id, bot_index)`); `<owner>-b1/b2`; `anchor`/centro/posición privados + `distanceM`/`bearingDeg` publicables |
-| `bot_waypoints` | `(region_key, bot_profile_id, waypoint_index)` | 4 waypoints por bot, `geometry(Point, 4326)` privados; cascada con el bot |
 | `event_seq` | `region_key` | contador monotónico por región (el orden de `id`) |
-| `events` | `(region_key, seq)` | log de las dos proyecciones; `payload` jsonb sin coordenadas; retención de 5000 por región |
+| `events` | `(region_key, seq)` | log de las dos proyecciones; `payload` jsonb sin coordenadas; `event_type` cerrado a `profile.presence`/`message.created` (008); retención de 5000 por región |
 | `pings` | `ping_id` | un pendiente por par dirigido (índice único parcial); `pending` ⇔ `resolved_at IS NULL`; `accepted` ⇔ `match_id IS NOT NULL`; TTL 24 h |
-| `matches` | `match_id` | **uno por par no dirigido** (`UNIQUE (region_key, profile_a_id, profile_b_id)` con `a < b`); `bot_zone_key` guarda la zona de nacimiento cuando hay un bot (S5) |
-| `blocks` | `(region_key, blocker_profile_id, blocked_profile_id)` | un bloqueo por par dirigido, sin auto-bloqueo; guarda al humano canónico (un bot ⇒ su dueño) |
-| `reports` | `report_id` | registro con motivo del enum; sin estado ni consola; reportar un bot guarda al dueño |
+| `matches` | `match_id` | **uno por par no dirigido** (`UNIQUE (region_key, profile_a_id, profile_b_id)` con `a < b`); el match sobrevive a su par (peer ausente ⇒ `409` al escribir) |
+| `blocks` | `(region_key, blocker_profile_id, blocked_profile_id)` | un bloqueo por par dirigido, sin auto-bloqueo; guarda el `profileId` tal como existe en `profiles` |
+| `reports` | `report_id` | registro con motivo del enum; sin estado ni consola |
 | `notifications` | `notification_id` | campana persistida: `kind` + referencias (ping/match/message, exactamente las de su tipo) + `read_at` |
 | `demo_meta` | `key` | `seed_id` y `contract_id` aplicados |
 
 El slot se reclama con la base, no con un `SELECT` previo: si dos navegadores piden
 el mismo, el índice único parcial decide y el segundo recibe `409 PROFILE_IN_USE`.
 
-S3-A no agrega tablas ni columnas: `GET /discovery` es una **proyección** sobre
-`profiles`, `sessions`, `presence`, `zones` y `bots`. La migración `004` sí es de
-S3-B: agrega `bots.anchor` (el ancla con la que se sembró el loop) y la vista
-`presence_anchors` (el punto de cada perfil, `Point,4326` privado, una fila por
-perfil). Nada de eso se proyecta en la API.
+`GET /discovery` no agrega tablas: es una **proyección** sobre `profiles`,
+`sessions`, `presence`, `zones` y `blocks`. La migración `008` va en el otro
+sentido: **quita** todo lo que servía a la población sintética (`bots`,
+`bot_waypoints`, `presence_anchors`, `matches.bot_zone_key`).
 
 ## Reset
 
@@ -894,14 +869,12 @@ curl -s -X POST http://localhost:3000/demo/reset/self -H "Authorization: Bearer 
 ```
 
 Los dos son idempotentes: repetirlos devuelve `sessionsDeleted: 0` y no rompe nada.
-El global además vacía `bots`, `events`, `event_seq`, `pings`, `matches`,
-`notifications`, `blocks` y `reports`: la demo arranca con el stream vacío, el
-`seq` de cada región en 1, la bandeja limpia y sin bloqueos ni avisos de una
-corrida anterior. El reset propio retira los bots de su perfil en la misma
-transacción (no espera al tick) y borra **sus** bloqueos, **sus** reportes y
-**sus** notificaciones, pero **no** pings ni matches (cerrar sesión no vacía una
-bandeja) ni el bloqueo que otra persona puso sobre su perfil (eso es de la otra
-persona).
+El global además vacía `events`, `event_seq`, `pings`, `matches`, `notifications`,
+`blocks` y `reports`: la demo arranca con el stream vacío, el `seq` de cada región
+en 1, la bandeja limpia y sin bloqueos ni avisos de una corrida anterior. El reset
+propio borra **sus** bloqueos, **sus** reportes y **sus** notificaciones, pero
+**no** pings ni matches (cerrar sesión no vacía una bandeja) ni el bloqueo que otra
+persona puso sobre su perfil (eso es de la otra persona).
 
 ## Imágenes y compose
 
@@ -988,7 +961,7 @@ hardcodeadas — corre en Windows y en Linux/macOS.
 | Errores de body-parser | `src/common/problem.filter.ts` | `400`/`413`/`415` se normalizan a `422` (el contrato no tiene 400) |
 | Rate limits | `src/common/rate-limit.service.ts` | bucket en memoria para discovery (2/s, ráfaga 60), reset global (1/10 s), blocks (30/min) y reports (10/min); pings (30/min) y mensajes (60/min) siguen contando filas en SQL |
 | Backup / restore | `scripts/backup-db.sh`, `scripts/restore-db.sh` | `pg_dump -Fc` con `.meta` y sha256; restore verificado en una base aparte con `--target-db`; sobre la viva exige `--yes` |
-| Load test | `scripts/load-test.mjs` | 10 humanos + 20 bots por región, presencia/discovery/stream/chat, p50/p95/p99, sale 1 si hay 5xx |
+| Load test | `scripts/load-test.mjs` | humanos reales por región (2 en el piloto, 10 en el test), presencia/discovery/stream y ping→accept→chat entre pares, p50/p95/p99, sale 1 si hay 5xx |
 | Revisión de seguridad | [`docs/security-review.md`](../docs/security-review.md) | autorización, IDOR, coordenadas, tickets SSE, reset, CORS y hallazgos con severidad |
 
 Los tests nuevos son `test/integration/{validation,rate-limits,boot-config}.test.mjs`:
@@ -1019,21 +992,10 @@ reset con y sin token).
   contrato congelado: no rompe ningún gate (el test del contrato sigue verde
   porque el 501 está declarado, no ejercitado) y se corrige en el próximo delta de
   contrato, no acá.
-- **Bloqueos: la exclusión no existe todavía.** `GET /discovery` documenta
-  "bloqueados" como exclusión server-side, pero no hay tabla `blocks` (S5). Hasta
-  entonces no hay pares bloqueados que excluir; el `WHERE` está listo para sumar
-  la condición sin cambiar la forma de la respuesta.
-- **El stream de eventos mide desde el dueño del bot, discovery desde el
-  observador.** Un log compartido no puede llevar una medida por receptor sin
-  guardar una coordenada o romper el replay. El cliente arma posiciones con
-  discovery; la deuda de frame de `profile.moved` para un observador ajeno (el
-  contrato dice "relativos a quien recibe") es de S4 y pide `events.position`
-  privado + proyección por receptor. El dueño sí ve en su radar la misma distancia
-  que publica el evento de sus propios bots.
-- **`maxItems: 10` acota la página de discovery.** Con la región llena (9 humanos
-  + 6 bots) se devuelven 10 filas: gana el más cercano. No hay cursor porque el
-  contrato dice que una página es el resultado entero; si S4/S5 necesita más,
-  primero se congela el cursor.
+- **`maxItems: 10` acota la página de discovery.** Con la región llena (10 humanos)
+  el observador ve 9 filas, así que el tope no se alcanza; si algún día se suma
+  densidad, gana el más cercano. No hay cursor porque el contrato dice que una
+  página es el resultado entero.
 - **`migrate` da `ECONNREFUSED` con `db` healthy.** La imagen de Postgres levanta un
   servidor temporal por socket durante la inicialización. El healthcheck usa
   `-h 127.0.0.1` para esperar TCP y el runner reintenta al conectar.
@@ -1049,20 +1011,10 @@ reset con y sin token).
   resuelva.
 - **Tests contra la base equivocada**: exportá `DATABASE_URL`/`API_BASE_URL`; los
   defaults apuntan al compose local.
-- **El ticker del mundo corre en la API.** Con una sola instancia no hay problema;
-  con varias, cada proceso mueve bots y el log recibiría eventos duplicados (el
-  avance es idempotente por `leg_started_at`, la emisión no). S6/S7: job aparte o
-  `pg_advisory_lock` por tick.
-- **`distanceM`/`bearingDeg` de un bot son contra la presencia de su dueño**, no
-  contra la de cada observador. El contrato dice "relativos a quien recibe"; con
-  un log único por región, la única forma de que el mismo `seq` valga lo mismo para
-  todos es una referencia fija, y la referencia natural de un bot es la persona
-  que lo arrastra. El cálculo por observador es `/discovery`.
-- **La posición privada de un bot puede caer fuera de su polígono.** Desde que el
-  ancla es la persona, un humano cerca del borde tiene bots que salen de la zona:
-  se aceptó a propósito (recortar el centro al polígono era lo que apilaba los bots
-  en el centroide). `bots.zone_key` sigue siendo la zona del dueño y no se usa para
-  contener la geometría, sólo para el fallback del ancla y para la FK.
-- **El ghost apaga también al humano.** `DELETE /presence` es la única superficie
-  de pausa que el contrato tiene; si S5 pide "invisible pero online", primero hay
-  que congelar el campo en `PresenceUpdate`.
+- **Un match puede sobrevivir a su par.** Si el `profileId` del otro lado deja de
+  estar en `profiles` (dato viejo, restauración parcial), el match sigue en la
+  bandeja pero escribir devuelve `409 MATCH_CLOSED`: la conversación queda legible
+  y el usuario ve un cierre, no un 500. `chat-peer-absent.test.mjs` lo fija.
+- **Sin nadie conectado el radar está vacío.** No es un bug ni un estado de carga:
+  la UI lo dice con copy propio (`empty.density`) y no hay polling agresivo. Dos
+  dispositivos en la misma región es el escenario mínimo de la demo.

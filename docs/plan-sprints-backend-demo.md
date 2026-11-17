@@ -2,8 +2,17 @@
 
 > **Alcance:** mapa de entregables y validación para convertir la demo mock en una demo funcional con backend.
 > **Sin fechas ni horas.** Cada sprint cierra con un entregable demostrable y un gate de validación.
-> **Supuestos:** 10 perfiles humanos por región (`mx`, `co`), 2 bots por humano, aislamiento por región, sesiones demo, Expo live primero. El mock sigue publicado como fallback.
+> **Supuestos:** 10 perfiles humanos por región (`mx`, `co`), densidad real (una fila por persona conectada), aislamiento por región, sesiones demo, Expo live primero. El mock sigue publicado como fallback.
 > **Fuera de alcance:** signup/signin real, OAuth, push del sistema, GPS en background, mapas con tiles, media, moderación y Flutter live.
+
+> **Revisión 2026-11-17 — v2, sin población sintética.** El cambio `remove-bots`
+> eliminó los perfiles automáticos: el servidor ya no crea ni mueve perfiles de
+> relleno, el contrato perdió `sourceType: bot` y los eventos `profile.moved` /
+> `typing.started`, y **la densidad es la de las personas conectadas**. §4 y §5
+> están reescritas porque eran las secciones que quedaban falsas; las menciones a
+> perfiles automáticos que sobreviven en §6, §7, §9 y §12 son **históricas**:
+> describen lo que se planeó y hoy no existe. El comportamiento vigente está en
+> [`demo-script.md`](demo-script.md) y [`runbook-demo.md`](runbook-demo.md).
 
 ---
 
@@ -13,9 +22,9 @@
 |---|---|---|---|---:|
 | **0** | Contrato y banco de pruebas | — | Contrato revisado y cliente TS compilando | US$ 0 |
 | **1** | Backend core + identidad demo | Sprint 0 | Dos navegadores entran con perfiles distintos | US$ 0 local |
-| **2** | Presencia, región y bots | Sprint 1 | Un humano ve 2 bots moverse; dos humanos ven 5 perfiles | US$ 0 local |
-| **3** | Descubrimiento + Expo live | Sprint 2 | Radar/mapa/lista live con movimiento e interpolación | US$ 0 local o tunnel |
-| **4** | Pings, matches y chat | Sprint 3 | Ping → match → chat; bot responde texto fijo | US$ 0 local |
+| **2** | Presencia y región | Sprint 1 | Dos personas de la misma región se ven | US$ 0 local |
+| **3** | Descubrimiento + Expo live | Sprint 2 | Radar/mapa/lista live con distancia y rumbo | US$ 0 local o tunnel |
+| **4** | Pings, matches y chat | Sprint 3 | Ping → match → chat entre dos personas | US$ 0 local |
 | **5** | Privacidad, seguridad y reset | Sprint 4 | Ghost, reveal, block/report y reset limpio | US$ 0 local |
 | **6** | Deploy y E2E de dos navegadores | Sprint 5 | URL pública con dos testers en MX/CO | US$ 30–60/mes |
 | **7** | Hardening y handoff | Sprint 6 | Runbook, restore, load test y demo script | US$ 30–60/mes |
@@ -78,39 +87,39 @@ Incluye:
 
 ---
 
-## 4. Sprint 2 — Presencia, región y bots
+## 4. Sprint 2 — Presencia y región
 
-**Entregable:** ubicación real o zona demo, región derivada, presencia con TTL y 2 bots por humano.
+**Entregable:** ubicación real o zona demo, región derivada y presencia con TTL.
 
 Incluye:
 
 - `PUT /presence` con punto privado o `demoZoneKey`.
 - `ST_Covers` contra polígonos de México y Colombia.
 - Fallback suave: GPS denegado, fuera de región o cambio de región.
-- 2 bots por humano, con waypoints y ticker de movimiento.
 - SSE `GET /events` con ticket, `Last-Event-ID` y polling fallback.
 - Ghost/pausa y TTL de 12 s.
-- Límite de 6 bots por observador.
+- Sin población sintética: la densidad es la de las personas conectadas.
 
 **Validación:**
 
-- [ ] GPS en México → región `mx` y 2 bots.
-- [ ] GPS en Colombia → región `co` y 2 bots.
+- [ ] GPS en México → región `mx`.
+- [ ] GPS en Colombia → región `co`.
 - [ ] GPS denegado → sheet de zona demo; CDMX/Bogotá funciona.
 - [ ] Fuera de México/Colombia → `fallbackRequired`, sin efectos; elección de zona demo.
 - [ ] Movimiento fuera de la región → fallback a zona demo, sin logout.
-- [ ] Dos humanos en la misma región ven 1 humano + 4 bots = 5 perfiles.
-- [ ] Dos humanos en regiones distintas no se ven.
-- [ ] Ghost oculta los 2 bots del dueño para los demás.
+- [ ] Dos personas en la misma región se ven: una fila cada una.
+- [ ] Una sola persona conectada ve una lista vacía (no hay relleno).
+- [ ] Dos personas en regiones distintas no se ven.
+- [ ] Ghost oculta a la persona de los demás sin apagar su sesión.
 - [ ] Ningún payload o evento contiene coordenadas.
 
-**Demo:** un humano ve 2 bots moverse; dos humanos en la misma región ven 5 perfiles.
+**Demo:** dos personas en la misma región se ven en el radar.
 
 ---
 
 ## 5. Sprint 3 — Descubrimiento + Expo live
 
-**Entregable:** radar, mapa y lista conectados al backend, con interpolación y modo dual mock/live.
+**Entregable:** radar, mapa y lista conectados al backend, con modo dual mock/live.
 
 Incluye:
 
@@ -118,21 +127,21 @@ Incluye:
 - Cálculo de distancia/rumbo server-side y redondeo.
 - Exclusión de bloqueados, pausados y fuera de región.
 - Cliente Expo live: API client, store live, SSE, polling fallback.
-- Interpolación de movimiento solo en render.
 - Selector mock/live y fallback al mock si la API falla.
 - Build `/live/expo/` sin romper `/expo/`.
 
 **Validación:**
 
 - [ ] Radar, mapa y lista muestran los mismos perfiles.
-- [ ] El movimiento se ve fluido entre snapshots.
+- [ ] La distancia y el rumbo se recalculan en cada snapshot de discovery.
 - [ ] Los filtros cambian la lista sin recargar la app.
-- [ ] Dos humanos de la misma región se ven y ven sus bots.
+- [ ] Dos personas de la misma región se ven (una fila cada una).
+- [ ] Sin nadie más en la zona, el estado vacío es explícito y no hay carga infinita.
 - [ ] Un humano de otra región no aparece.
 - [ ] Si la API se cae, el mock sigue disponible.
 - [ ] No hay requests a hosts externos.
 
-**Demo:** radar live con movimiento, mapa/lista y comparación contra el mock.
+**Demo:** radar live con distancia real, mapa/lista y comparación contra el mock.
 
 ---
 

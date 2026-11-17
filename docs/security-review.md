@@ -35,7 +35,7 @@ verificado del Bearer; un recurso ajeno responde **404**, nunca 403.
 | `GET /discovery` | excluye al propio perfil y bloqueados | `discovery.test.mjs`, `privacy.test.mjs` |
 | `GET /pings`, `accept`/`reject` | filtro por emisor/destinatario; tercero → 404 | `pings.test.mjs` |
 | `GET/POST /matches/{id}/messages`, `read` | participante del match; tercero → 404 | `chat.test.mjs`, `privacy.test.mjs` |
-| `GET/POST/DELETE /blocks`, `POST /reports` | perfil propio; bot canonicalizado al dueño | `privacy.test.mjs` |
+| `GET/POST/DELETE /blocks`, `POST /reports` | perfil propio; el `profileId` tiene que existir en `profiles` | `privacy.test.mjs` |
 | `GET /notifications`, `read` | `recipient_profile_id = sub` | `privacy.test.mjs` |
 | `POST /demo/reset/self` | borra **sólo** lo del `sub` | `expiry-reset.test.mjs` |
 

@@ -18,8 +18,9 @@
 | 6 | CORS con el origen de Pages | preflight con y sin `Origin` | verificado en local (`boot-config`) |
 | 7 | Landing apuntando al live | `https://luisplata.github.io/NearbyIG/expo/?api=…` | **pendiente** (depende de 1) |
 | 8 | Backup + restore | `backup-db.sh` + `restore-db.sh --target-db` | verificado en local |
-| 9 | Load test de la densidad | `load-test.mjs --humans=10` | verificado en local |
-| 10 | Rollback al mock | quitar `?api=` y el link | procedimiento listo |
+| 9 | Load test con humanos reales | `load-test.mjs --humans=2 --duration=20` | verificado en local (§14) |
+| 10 | Piloto de dos dispositivos | §10.2 + [`demo-script.md`](demo-script.md) | procedimiento listo |
+| 11 | Rollback al mock | quitar `?api=` y el link | procedimiento listo |
 
 ## 1. Prerrequisitos
 
@@ -246,19 +247,56 @@ El script corre `pg_dump` en un contenedor efímero `postgis/postgis:16-3.4`
 `nearbyig_restore`, se borró `messages` (`DROP TABLE … CASCADE`), se restauró de
 nuevo y los conteos volvieron a `sessions=3, messages=12, matches=3, pings=3`.
 
-## 10. Load test
+## 10. Load test y piloto de dos dispositivos
+
+### 10.1 Load test (volumen)
 
 ```bash
 cd backend
-node scripts/load-test.mjs                      # 10 humanos/región, 60 s
-node scripts/load-test.mjs --humans=2 --duration=20   # versión reducida
+node scripts/load-test.mjs                            # 10 humanos/región, 60 s
+node scripts/load-test.mjs --humans=2 --duration=20   # ensayo del piloto: 2 por región
 API_BASE_URL=https://api.example.com node scripts/load-test.mjs --humans=10 --duration=60
 ```
 
-Genera presencia cada 2,5 s, discovery cada 3 s, un stream SSE por humano, un
-ping a su bot y dos mensajes. Los 20 bots por región los crea el servidor: con 10
-humanos por región la densidad es la del plan. Sale con código 1 si hay 5xx o si
-los no-2xx superan el 2 %.
+Abre sesiones reales con `POST /auth/demo-session` y, por cada una, genera
+presencia cada 2,5 s, discovery cada 3 s y un stream SSE. Después arma **pares
+disjuntos por región**: el primero pings al segundo, el segundo acepta y el
+primero manda dos mensajes (`messages`, `accept`, `messages-read`).
+
+La densidad es la de las sesiones que abre el script: **no hay población
+sintética en el servidor**. Con `--humans=2` hay un par por región; con 10, cinco.
+Un humano impar no chatea (no tiene peer) y un invitado tampoco (no puede
+pinguar). Sale con código 1 si hay 5xx o si los no-2xx superan el 2 %.
+
+### 10.2 Piloto de dos dispositivos
+
+El piloto **no** es un load test: es la prueba de aceptación con dos personas
+reales en la misma región. El guion acto por acto está en
+[`demo-script.md`](demo-script.md); esto es cómo se corre y qué se verifica.
+
+```bash
+# 1. Stack arriba y sano
+curl -s https://api…/health/ready | jq '.status, .checks.db.status'   # "ready", "up"
+
+# 2. Demo limpia (nadie arrastra sesión ni slot ocupado)
+curl -s -X POST https://api…/demo/reset -H "Authorization: Bearer $DEMO_RESET_TOKEN"
+
+# 3. Ensayo del volumen esperado: 2 humanos por región, 20 s
+cd backend && node scripts/load-test.mjs --humans=2 --duration=20
+# → PASS, 0 no-2xx, "pares con match: 2/2"
+```
+
+| Qué verificar | Cómo | Criterio |
+|---|---|---|
+| Dos dispositivos, dos identidades `human` | selector en cada uno, `sourceType` en `GET /me` | ninguno entra como invitado |
+| Se ven | `GET /discovery` en Network | **una** fila por persona conectada, sin extras |
+| Sin relleno el primer dispositivo | abrir el radar antes que el segundo entre | estado vacío honesto, `results: []` |
+| Ping → aceptar → match | Acto 5 del guion | match en la bandeja de los dos |
+| Chat persistente | recargar y reentrar | la conversación sigue |
+| Ghost | Acto 7 | desaparece del otro lado, sigue viendo |
+| Bloqueo | Acto 8 | `403` al escribir, fuera de discovery en las dos direcciones |
+| Reset propio | Acto 9 | el otro dispositivo intacto |
+| Sin coordenadas | Network de `discovery` y del stream | sólo `distanceM`/`bearingDeg` |
 
 ## 11. Rollback al mock
 
@@ -278,8 +316,29 @@ de la API. Para volver atrás:
    Sin `-v`: el volumen no aplica en producción (la base es administrada), pero
    `down -v` en un host con Postgres local borraría los datos.
 4. **Volver a la versión anterior:** `git checkout <tag>` en el Droplet y
-   `up --build -d`. Las migraciones son forward-only: no hay rollback de esquema
-   automático (ver `backend/README.md`).
+   `up --build -d`. Las migraciones tienen `.down.sql` y `--rollback-all` los
+   corre en orden inverso (ver `backend/README.md`); un rollback de esquema en
+   caliente se ensaya de antemano, no se improvisa en producción.
+
+### Rehearsal de rollback de esquema (antes de la ventana de deploy)
+
+`008_drop_bots` es la migración que borra el vocabulario viejo. Su `.down` recrea
+el esquema **post-007 vacío**; el de `004` usa `IF EXISTS` para poder correrse
+después. El test de integración lo prueba dentro de una transacción; el ensayo
+manual es este, sobre la base local:
+
+```bash
+cd backend
+npm run migrate:status                 # 001–008 aplicadas, sin [drift]
+node scripts/migrate.mjs --rollback-all
+npm run migrate:status                 # 000 en cabeza: todo pendiente
+npm run migrate                        # 001 → 008
+npm run migrate:status                 # sin [drift] en ninguna
+```
+
+Lo que invalida el ensayo: un `[drift]` después de re-aplicar, o un `down` que
+falla porque la tabla que intenta dropear no existe. En producción el rollback no
+es la primera opción: primero se revierte el código que depende del esquema nuevo.
 
 ## 12. Qué NO hacer
 
@@ -312,8 +371,9 @@ de la API. Para volver atrás:
 | `docker compose -f compose.yml -f compose.prod.yml config` | válido con las 3 variables; falla con mensaje si falta una |
 | Backup | `bytes=65117`, `sha256=8d6c2c…`, `profiles=20`, `regions=2`, `zones=2` |
 | Restore destructivo | `sessions=3, messages=12, matches=3, pings=3` → `DROP TABLE messages` → restore → mismos conteos, `postgis=1` |
-| Load test 4 humanos / 8 bots | 0 errores, p95 ≤ 36 ms |
-| Load test 20 humanos / 40 bots | 20 streams, 786 eventos, 0 errores, p95 ≤ 128 ms |
-| `npm run test:integration` | 184/184 (157 previos + 27 nuevos), 0 fallos |
-| `npm run contract:gates` | 4/5: G1, G2, G3, G5 verdes; **G4** falla sólo en el paso `diff demo/ site/` por cambios en curso de otro agente en `demo/` (esta entrega no tocó esa carpeta) |
+| Load test 2 humanos/región (20 s) | 4 sesiones, 4 streams, 20 eventos, 2/2 pares con match, 95 requests, 0 no-2xx; p95 ≤ 11,6 ms en los endpoints de la demo (`health` es 1 muestra de arranque: 53 ms) |
+| Load test 10 humanos/región (60 s) | pendiente de re-correr con densidad humana; con 10 por región son 5 pares |
+| Piloto de dos dispositivos | procedimiento en §10.2; el guion es [`demo-script.md`](demo-script.md) |
+| `npm run test:integration` | 180/180 (30 suites), 0 fail, 41,2 s dentro del contenedor |
+| `npm run contract:gates` | 5/5 (G1 3/3, G2 2/2, G3 1/1, G4 5/5, G5 1/1) |
 | `npm run test:scripts` | 83/83 |
