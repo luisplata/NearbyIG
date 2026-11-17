@@ -1,6 +1,8 @@
 import { useFonts } from 'expo-font';
-import { useEffect, useMemo, useState } from 'react';
-import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { DemoFrame } from './components/DemoFrame';
 import { FilterSheet } from './components/FilterSheet';
@@ -20,6 +22,12 @@ import { LiveProvider, useLive } from './live/LiveProvider';
 import { prefsCopy } from './live/prefsCopy';
 import { safetyText } from './live/safetyCopy';
 import { useGhost } from './live/useGhost';
+import {
+  nextBackAction,
+  topSheet,
+  type BackAction,
+  type BackState,
+} from './navigation/backAction';
 import { AboutScreen } from './screens/AboutScreen';
 import { BlockedScreen } from './screens/BlockedScreen';
 import { ChatHubScreen } from './screens/ChatHubScreen';
@@ -71,13 +79,21 @@ export default function App() {
   }
 
   return (
-    <DemoStoreProvider store={store}>
-      <PreferencesProvider>
-        <LiveProvider store={store}>
-          <DemoShell />
-        </LiveProvider>
-      </PreferencesProvider>
-    </DemoStoreProvider>
+    <SafeAreaProvider>
+      {/*
+        La barra de estado se declara una sola vez, en la raíz: el fondo es
+        #09090B en toda la app, así que los glifos tienen que ser claros. Un
+        `StatusBar` por pantalla sería tres copias que se pisan al abrir un sheet.
+      */}
+      <StatusBar style="light" />
+      <DemoStoreProvider store={store}>
+        <PreferencesProvider>
+          <LiveProvider store={store}>
+            <DemoShell />
+          </LiveProvider>
+        </PreferencesProvider>
+      </DemoStoreProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -110,24 +126,90 @@ function DemoShell() {
   const closeSheet = (): void => setSimOpen(false);
   const openSheet = (): void => setSimOpen(true);
 
-  const onBack = (): void => {
-    if (state.overlay === 'safety' && state.profileId !== null) {
-      dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: state.profileId });
-      return;
+  /**
+   * Efectos de un paso de back. El botón "volver" del header y el gesto del
+   * sistema pasan por la misma función: si divergen, el usuario aprende dos
+   * comportamientos para el mismo botón.
+   */
+  const runBack = (action: BackAction): void => {
+    switch (action.type) {
+      case 'close-sheet':
+        if (action.sheet === 'sim') setSimOpen(false);
+        else if (action.sheet === 'profiles') setPickerOpen(false);
+        else live.dismissZoneSheet();
+        return;
+      case 'open-overlay':
+        /**
+         * Volver desde una conversación cae en el **Chat**, no en descubrimiento:
+         * es la pantalla desde la que se abrió. Además cierra el chat real, así
+         * el próximo match del guion no muestra la conversación del server.
+         */
+        if (action.overlay === 'pings') {
+          live.closeChat();
+          dispatch({ type: 'OPEN_OVERLAY', overlay: 'pings' });
+          return;
+        }
+        dispatch({ type: 'OPEN_OVERLAY', overlay: 'profile', profileId: state.profileId });
+        return;
+      case 'close-overlay':
+        dispatch({ type: 'CLOSE_OVERLAY' });
+        return;
+      case 'exit':
+        return;
     }
-    /**
-     * Volver desde una conversación cae en el **Chat**, no en descubrimiento: es
-     * la pantalla desde la que se abrió y la que el usuario espera encontrar.
-     * Además cierra el chat real, así el próximo match del guion no muestra la
-     * conversación del server.
-     */
-    if (state.overlay === 'chat') {
-      live.closeChat();
-      dispatch({ type: 'OPEN_OVERLAY', overlay: 'pings' });
-      return;
-    }
-    dispatch({ type: 'CLOSE_OVERLAY' });
   };
+
+  /**
+   * Back del sistema (Android). Se suscribe **una vez** y el estado entra por
+   * ref: re-suscribir con dependencias deja una ventana sin handler justo al
+   * abrir o cerrar un sheet, y agrega un add/remove por cada toque.
+   *
+   * En web no se registra: `react-native-web` no lo soporta y su `addEventListener`
+   * imprime un `console.error` en la consola del sitio publicado.
+   */
+  const backRef = useRef<BackState>({
+    sheet: null,
+    match: false,
+    overlay: null,
+    hasProfile: false,
+  });
+  backRef.current = {
+    sheet: topSheet({ sim: simOpen, profiles: pickerOpen, zone: zonePrompt !== null }),
+    // La celebración no es `state.overlay`: se modela aparte porque tapa la vista.
+    match: state.matchCelebration !== null,
+    overlay: state.overlay,
+    hasProfile: state.profileId !== null,
+  };
+  const runBackRef = useRef(runBack);
+  runBackRef.current = runBack;
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const action = nextBackAction(backRef.current);
+      // En la raíz no se intercepta: `false` deja que Android cierre la app.
+      if (action.type === 'exit') return false;
+      runBackRef.current(action);
+      return true;
+    });
+    return () => subscription.remove();
+  }, []);
+
+  /**
+   * El `onBack` del header: mismo paso, sin sheet porque se pulsa desde el overlay.
+   * `match: false` a propósito: el botón vive dentro del `Overlay`, y la
+   * celebración (si la hay) está encima suyo, no debajo. Que el header cierre la
+   * celebración cambiaría un comportamiento ya verificado en el device.
+   */
+  const onBack = (): void =>
+    runBack(
+      nextBackAction({
+        sheet: null,
+        match: false,
+        overlay: state.overlay,
+        hasProfile: state.profileId !== null,
+      }),
+    );
 
   /**
    * Abrir el centro de notificaciones limpia el badge (F-6): navega y después
