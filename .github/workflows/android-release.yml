@@ -1,0 +1,367 @@
+name: android-release
+
+# Publica el `.aab` firmado con la upload key de Play y crea el Release con su tag.
+#
+# Por qué existe aparte de `android.yml`: aquel entrega un APK de debug para el
+# teléfono del piloto y no tiene versión ni `.aab`. Este es el único workflow que
+# produce un artefacto que Play Console acepta, y por eso es el único que usa
+# secretos, deriva versión y escribe un tag.
+#
+# Las reglas que sostienen el Release (cada una tiene su assertion estática en
+# `scripts/lib/android-release-workflow.test.mjs`):
+#   - `dry_run` compila y verifica todo, pero no crea tag ni Release.
+#   - `cancel-in-progress: false`: cada `.aab` quema un versionCode aunque el
+#     upload a Console se descarte. Cancelar a mitad de camino sólo desperdicia
+#     números que Play no deja reusar.
+#   - El paso de versión sale con 2 (nada que publicar) o 3 (guarda) ANTES de
+#     Gradle: no se compilan 30 minutos para descubrir que el tag ya existe.
+#   - Ningún paso hornea la API en el bundle: el binario de Play resuelve el
+#     backend en runtime; un host de túnel adentro sobrevive al build y nadie lo
+#     nota hasta que el túnel muere.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        # `auto` deriva el bump de los conventional commits desde el último tag;
+        # los otros tres son la señal humana para forzarlo (también hacia abajo).
+        description: 'Bump de versión (auto = derivado de los commits)'
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+        default: auto
+      dry_run:
+        description: 'Compilar y verificar sin crear tag ni Release'
+        type: boolean
+        default: false
+
+# `contents: write` es para `gh release create`: crea el tag y el Release sobre el
+# commit del checkout (`--target $GITHUB_SHA`). No alcanza con `read`.
+permissions:
+  contents: write
+
+# Un solo release a la vez: dos runs paralelos calcularían el mismo versionCode
+# desde el mismo `ls-remote` y el segundo chocaría contra el tag del primero.
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  aab:
+    name: aab
+    runs-on: ubuntu-latest
+    # 4 ABIs + Hermes + R8: 25-35 min medidos en `android.yml` con una sola ABI.
+    timeout-minutes: 60
+    steps:
+      # `fetch-depth: 0` + `fetch-tags: true`: el CLI de versión necesita la ventana
+      # completa de commits desde el último tag y los tags alcanzables desde HEAD.
+      # Con el checkout shallow (default: 1) no hay ventana y el bump se pierde.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: demo/expo-demo/package-lock.json
+
+      # `jvmToolchain(17)` de React Native no acepta 21.
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Mismo bloque que `android.yml`: el runner ya trae el SDK en `$ANDROID_HOME`
+      # y `android-actions/setup-android` falla con el cmdline-tools nuevo. AGP 9
+      # numera las plataformas con minor (`android-37.0`; `android-37` no existe).
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager_bin="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | tail -1)"
+          yes | "$sdkmanager_bin" --licenses > /dev/null || true
+          "$sdkmanager_bin" "platforms;android-37.0" "build-tools;37.0.0"
+
+      # bundletool no viene en el runner y es el que lee el manifest del bundle y
+      # arma el APK universal. Se pinea versión y SHA-256: es la única descarga de
+      # red del job que no viene del lockfile.
+      - name: Install bundletool
+        env:
+          BUNDLETOOL_VERSION: '1.18.3'
+          BUNDLETOOL_SHA256: 'a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29'
+        run: |
+          set -euo pipefail
+          jar="$RUNNER_TEMP/bundletool.jar"
+          curl -fsSL \
+            "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar" \
+            -o "$jar"
+          echo "${BUNDLETOOL_SHA256}  ${jar}" | sha256sum -c -
+          echo "BUNDLETOOL_JAR=$jar" >> "$GITHUB_ENV"
+
+      - name: Install Expo dependencies
+        working-directory: demo/expo-demo
+        run: npm ci
+
+      # El keystore viaja en base64 porque los secrets de Actions son texto. Se
+      # escribe en `$RUNNER_TEMP` (fuera del workspace: no se sube en ningún
+      # artifact) y se abre acá: un secret mal pegado tiene que fallar en este
+      # paso, no en Gradle 20 minutos después.
+      - name: Decode upload keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/upload-keystore.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          chmod 600 "$keystore"
+          # La ruta no es un secreto y la consumen prebuild, Gradle y la
+          # verificación: publicarla una vez evita que se repita (y se
+          # desincronice) en cada paso. Las tres credenciales NO van acá.
+          echo "ANDROID_KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+          keytool -list -keystore "$keystore" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" > /dev/null
+
+      # Sin `--print`: el CLI también escribe el `key=value` en `$GITHUB_OUTPUT`,
+      # y es la única fuente de `version` y `version_code` para el resto del job.
+      - name: Read the release version
+        id: version
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
+        run: node scripts/version.mjs --release-type="$RELEASE_TYPE"
+
+      # El bundle de Play no lleva API horneada. Se chequea antes de compilar
+      # porque un `env:` global que se cuele no rompe nada hasta que el tester
+      # abre la app y el host ya no existe.
+      - name: Assert the API url is not baked in
+        run: |
+          set -euo pipefail
+          if [ -n "${EXPO_PUBLIC_API_URL:-}" ]; then
+            echo "::error::EXPO_PUBLIC_API_URL está definida (${EXPO_PUBLIC_API_URL}); el .aab de Play no lleva API horneada"
+            exit 1
+          fi
+
+      # `prebuild` regenera `android/` (salida de CNG, gitignored) y ahí corre el
+      # plugin de firma: necesita las 4 variables en SU entorno, no en el del job.
+      - name: Expo prebuild
+        working-directory: demo/expo-demo
+        env:
+          NEARBYIG_VERSION: ${{ steps.version.outputs.version }}
+          NEARBYIG_VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: npx expo prebuild --platform android
+
+      # Fail-fast: si el plugin no enganchó, Gradle firmaría con el keystore de
+      # debug y el `.aab` se vería como cualquier otro. Este grep cuesta segundos
+      # y corre antes de los 30 minutos de compilación.
+      - name: Assert the release signing config was injected
+        working-directory: demo/expo-demo
+        run: |
+          set -euo pipefail
+          gradle_file="android/app/build.gradle"
+          markers=$(grep -c '@nearbyig/release-signing' "$gradle_file" || true)
+          if [ "$markers" != "1" ]; then
+            echo "::error::el plugin withReleaseSigning no inyectó la firma (marcadores: $markers); revisá las 4 variables ANDROID_KEYSTORE_* del prebuild"
+            exit 1
+          fi
+          if ! grep -q 'signingConfig signingConfigs.release' "$gradle_file"; then
+            echo "::error::el buildType release no apunta a signingConfigs.release: el .aab saldría firmado en debug"
+            exit 1
+          fi
+
+      # Sin recortar arquitecturas: el `.aab` lleva las 4 de `gradle.properties`
+      # y Play sirve el split de cada dispositivo. Recortarlas acá dejaría afuera a
+      # los teléfonos que no sean arm64.
+      - name: Bundle release (aab)
+        working-directory: demo/expo-demo/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
+        run: ./gradlew bundleRelease --no-daemon --console=plain
+
+      # Verificación completa del artefacto. Cualquier falla es `exit 1` y no hay
+      # Release: el archivo ya está compilado, pero el versionCode se quema igual,
+      # así que se verifica antes de publicar, no después.
+      - name: Verify the aab
+        working-directory: demo/expo-demo/android
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          KEYSTORE="$ANDROID_KEYSTORE_PATH"
+          UNIVERSAL="$RUNNER_TEMP/universal.apks"
+          MANIFEST="$RUNNER_TEMP/manifest.xml"
+          ENTRIES="$RUNNER_TEMP/aab-entries.txt"
+
+          die() { echo "::error::$1"; exit 1; }
+          # `expect <archivo> <regex> <mensaje>`: un grep pelado bajo `set -e`
+          # muere sin decir qué atributo faltaba.
+          expect() { grep -Eq "$2" "$1" || die "${3:-falta /$2/ en $1}"; }
+
+          [ -f "$AAB" ] || die "no existe $AAB: Gradle no produjo el bundle"
+
+          # 1. Firma: fingerprint SHA-256 del .aab == el del keystore. Se compara
+          #    el hash normalizado y no el `Owner:` textual, que cambia de formato
+          #    entre versiones de JDK y rompería el check sin motivo.
+          aab_sha=$(keytool -printcert -jarfile "$AAB" \
+            | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-Z' 'a-z')
+          ks_sha=$(keytool -list -v -keystore "$KEYSTORE" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" \
+            | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-Z' 'a-z')
+          [ -n "$aab_sha" ] || die "keytool no informó SHA-256 del .aab"
+          [ "$aab_sha" = "$ks_sha" ] \
+            || die "el .aab no está firmado con la upload key (aab=$aab_sha keystore=$ks_sha)"
+          if keytool -printcert -jarfile "$AAB" | grep -q 'CN=Android Debug'; then
+            die "el .aab está firmado con el keystore de debug"
+          fi
+
+          # 2. Manifest del bundle: lo verifica sobre el archivo que se publica,
+          #    no sobre el template de Expo. `(android:)?` porque bundletool omite
+          #    el prefijo del namespace en algunos atributos.
+          java -jar "$BUNDLETOOL_JAR" dump manifest --bundle "$AAB" > "$MANIFEST"
+          expect "$MANIFEST" '(android:)?package="com.nearbyig.app"' 'el package del .aab no es com.nearbyig.app'
+          expect "$MANIFEST" "(android:)?versionName=\"$VERSION\"" "el versionName del .aab no es $VERSION"
+          expect "$MANIFEST" "(android:)?versionCode=\"$VERSION_CODE\"" "el versionCode del .aab no es $VERSION_CODE (¿prebuild sin NEARBYIG_VERSION_CODE?)"
+          expect "$MANIFEST" '(android:)?targetSdkVersion="36"' 'el targetSdk del .aab no es 36'
+          if grep -Eq '(android:)?debuggable="true"' "$MANIFEST"; then
+            die "el manifest del .aab declara debuggable=true"
+          fi
+
+          # 3. APK universal: es el binario que instalaría el tester, y donde
+          #    aparecen los `uses-permission:` que el manifest del bundle no lista.
+          java -jar "$BUNDLETOOL_JAR" build-apks --bundle="$AAB" --output="$UNIVERSAL" \
+            --mode=universal --ks="$KEYSTORE" --ks-key-alias="$ANDROID_KEY_ALIAS" \
+            --ks-pass="pass:$ANDROID_KEYSTORE_PASSWORD" --key-pass="pass:$ANDROID_KEY_PASSWORD"
+          unzip -o -q "$UNIVERSAL" universal.apk -d "$RUNNER_TEMP/apk"
+          AAPT2="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/37.0.0/aapt2"
+          "$AAPT2" dump badging "$RUNNER_TEMP/apk/universal.apk" > "$RUNNER_TEMP/badging.txt"
+          expect "$RUNNER_TEMP/badging.txt" "^package: name='com.nearbyig.app'" 'el APK universal no declara com.nearbyig.app'
+          expect "$RUNNER_TEMP/badging.txt" "versionCode='$VERSION_CODE'" "el APK universal no tiene versionCode $VERSION_CODE"
+          for forbidden in android.permission.SYSTEM_ALERT_WINDOW android.permission.ACCESS_BACKGROUND_LOCATION; do
+            if grep -Fq "uses-permission: name='$forbidden'" "$RUNNER_TEMP/badging.txt"; then
+              die "el APK universal pide $forbidden: Play lo trata como permiso sensible"
+            fi
+          done
+
+          # 4. ABIs: el `.aab` tiene que traer las 4 de `gradle.properties`.
+          #    Se comparan los dos lados ordenados: el orden de `sort` no es el de
+          #    la lista escrita a mano, y comparar strings sin ordenar falla siempre.
+          unzip -Z1 "$AAB" > "$ENTRIES"
+          expected=$(printf '%s\n' armeabi-v7a arm64-v8a x86 x86_64 | sort -u | tr '\n' ' ' | sed 's/ $//')
+          actual=$(sed -n 's|^base/lib/\([^/]*\)/.*|\1|p' "$ENTRIES" | sort -u | tr '\n' ' ' | sed 's/ $//')
+          [ "$actual" = "$expected" ] \
+            || die "ABIs del .aab: esperaba [$expected], encontré [$actual]"
+
+          # 5. Bundle completo: un .aab sin manifest o sin dex instala y no arranca.
+          grep -q '^base/manifest/AndroidManifest.xml$' "$ENTRIES" \
+            || die "el .aab no contiene base/manifest/AndroidManifest.xml"
+          grep -Eq '^base/dex/classes[0-9]*\.dex$' "$ENTRIES" \
+            || die "el .aab no contiene ningún base/dex/classes*.dex"
+
+          # 6. Sin API horneada. `grep -a` porque el bundle de Hermes es binario
+          #    (sin `-a` sólo diría "Binary file matches" y no el host). La variable
+          #    no puede estar seteada en ningún lado: si un `env:` global la
+          #    reintroduce, este check la ve antes que el tester.
+          [ -z "${EXPO_PUBLIC_API_URL:-}" ] \
+            || die "EXPO_PUBLIC_API_URL está definida (${EXPO_PUBLIC_API_URL}); el .aab de Play no lleva API horneada"
+          if unzip -p "$AAB" base/assets/index.android.bundle \
+            | grep -aoE '[a-z0-9-]+\.trycloudflare\.com'; then
+            die "el bundle lleva un host de API horneado: el .aab de Play no puede apuntar a un túnel"
+          fi
+
+          # Los datos del resumen salen de acá: recalcularlos en cada paso los deja
+          # desincronizados con lo verificado (no son secretos).
+          {
+            echo "AAB_FINGERPRINT=$aab_sha"
+            echo "ABIS=$actual"
+          } >> "$GITHUB_ENV"
+          echo "Verificación completa: $AAB"
+
+      # Se sube también en `dry_run`: es la forma de bajar y probar el artefacto
+      # antes de que exista un Release. 90 días porque el upload manual a Console
+      # puede esperar semanas.
+      - name: Upload aab artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nearbyig-android-aab
+          path: demo/expo-demo/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 90
+
+      # El único paso que publica. `--target` ancla el tag al commit del checkout:
+      # sin eso, `gh` lo crearía sobre el HEAD de la rama remota, que puede haber
+      # avanzado mientras el job compilaba.
+      - name: Publish GitHub release
+        if: ${{ !inputs.dry_run }}
+        working-directory: demo/expo-demo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          LAST_TAG: ${{ steps.version.outputs.last_tag }}
+        run: |
+          set -euo pipefail
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          NOTES="$RUNNER_TEMP/notes.md"
+          # Sin tag previo no hay ventana: `git log ..HEAD` sería un rango inválido.
+          range="HEAD"
+          if [ -n "${LAST_TAG:-}" ]; then range="$LAST_TAG..HEAD"; fi
+
+          {
+            echo "## Nearby Social Club $VERSION"
+            echo ""
+            echo "| Dato | Valor |"
+            echo "|---|---|"
+            echo "| versionCode | \`$VERSION_CODE\` |"
+            echo "| ABIs | $ABIS |"
+            echo "| SHA-256 del certificado | \`$AAB_FINGERPRINT\` |"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+            echo ""
+            echo "### Cambios"
+            git log "$range" --no-merges --pretty='- %s' \
+              | grep -E '^- (feat|fix|perf|refactor)' \
+              || echo "- Sin cambios de producto en esta ventana."
+          } > "$NOTES"
+
+          gh release create "v$VERSION" \
+            "$AAB#Nearby Social Club $VERSION (com.nearbyig.app)" \
+            --target "$GITHUB_SHA" \
+            --title "Nearby Social Club $VERSION" \
+            --notes-file "$NOTES"
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### .aab de NearbyIG $VERSION"
+            echo ""
+            echo "| Dato | Valor |"
+            echo "|---|---|"
+            echo "| Versión | \`$VERSION\` |"
+            echo "| versionCode | \`$VERSION_CODE\` |"
+            echo "| ABIs | $ABIS |"
+            echo "| SHA-256 del certificado | \`$AAB_FINGERPRINT\` |"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+            echo "| Publicado | $([ "$DRY_RUN" = "true" ] && echo 'no (dry run)' || echo "sí: tag v$VERSION") |"
+          } >> "$GITHUB_STEP_SUMMARY"
