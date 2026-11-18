@@ -61,6 +61,30 @@ describe('mapStyle', () => {
     }
   });
 
+  /**
+   * Renderer-agnóstico: un estilo con `center`/`zoom`/`bearing` está pensado
+   * para GL JS, y MapLibre Native ignora esos campos o los interpreta distinto.
+   * `maxzoom`/`tileSize` mueven la pirámide de tiles y romperían la escala que
+   * ya asume `zoomForRadius`. La cámara es del renderer (`nativeCamera`), nunca
+   * del estilo.
+   */
+  it('no trae cámara ni tileSize propios: sirve a los dos renderers', () => {
+    const style = mapStyle() as unknown as UnknownRecord;
+    for (const key of ['center', 'zoom', 'bearing', 'maxzoom', 'tileSize']) {
+      expect(Object.hasOwn(style, key), key).toBe(false);
+    }
+  });
+
+  it('el único host de URLs del estilo es el de tiles', () => {
+    const style = mapStyle() as unknown as UnknownRecord;
+    const hosts = urls(style).map(
+      (value) =>
+        new URL(value.replace('{fontstack}', 'Noto Sans Regular').replace('{range}', '0-255'))
+          .host,
+    );
+    expect(new Set(hosts)).toEqual(new Set([ALLOWED_HOST]));
+  });
+
   it('usa el esquema de OpenMapTiles en capas conocidas', () => {
     const style = mapStyle() as unknown as UnknownRecord;
     const layers = style.layers as Array<UnknownRecord>;
