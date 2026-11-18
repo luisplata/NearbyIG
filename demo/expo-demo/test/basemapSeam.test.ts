@@ -21,12 +21,16 @@ import { describe, expect, it } from 'vitest';
  * - el renderer web ya no pregunta por la plataforma: si volviera el `if`, el
  *   binario volvería a mostrar la ilustración sin mapa;
  * - las props del `Map` nativo son un contrato visual: textura obligatoria,
- *   cero gestos y cero ornamentos del SDK.
+ *   cero gestos y cero ornamentos del SDK;
+ * - y el contrato escrito dice lo mismo: `CONTRACT.md` §8 permite dos motores
+ *   (nunca dos encuadres) y no describe el basemap como exclusivo de la web.
  *
  * Los escenarios de render (tiles reales, orden de capas en device) no se
  * unit-testean: esto congela el seam, no la composición.
  */
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src');
+/** El contrato vive un nivel arriba de la app: `demo/CONTRACT.md`. */
+const CONTRACT = resolve(SRC, '..', '..', 'CONTRACT.md');
 
 function walk(directory: string): string[] {
   const out: string[] = [];
@@ -141,5 +145,33 @@ describe('seam de plataforma del basemap', () => {
     for (const prop of ['attribution', 'logo', 'compass', 'scaleBar']) {
       expect(text, `${prop} debe estar en false`).toContain(`${prop}={false}`);
     }
+  });
+
+  it('el contrato declara el motor como diferencia permitida y no vuelve al "sólo web"', () => {
+    // El seam no termina en `src/`: la fila `Motor de mapa` de §8 es lo que
+    // autoriza dos rasterizadores sin autorizar dos comportamientos. Si la fila
+    // desaparece, GL JS vs Native queda fuera de la lista de diferencias y el
+    // contrato se vuelve a leer como "el binario no tiene mapa".
+    const contract = readFileSync(CONTRACT, 'utf8');
+
+    const section8 = contract.slice(contract.indexOf('## 8.'), contract.indexOf('## 9.'));
+    expect(section8, 'falta la sección 8 del contrato').toContain(
+      '## 8. Diferencias permitidas',
+    );
+    expect(section8).toMatch(
+      /^\| Motor de mapa: MapLibre GL JS \(web\) vs MapLibre Native \(binario\) \| Sí \|/m,
+    );
+    // Una sola cámara y un solo estilo: si la fila permitiera diferencias de
+    // encuadre, la paridad de 27 casos de `nativeMap.test.ts` sobraría.
+    expect(section8).toMatch(/Mismo estilo \(`src\/map\/style\.ts`\) y misma cámara/);
+    expect(section8).toMatch(/Cualquier diferencia de cámara, atribución o badge/);
+
+    // Y la afirmación que el change vino a borrar: el basemap ya no es de una
+    // sola plataforma. Es el mismo patrón que el gate documental del runbook.
+    expect(contract).toMatch(/con \*\*un estilo y dos renderers\*\*/);
+    expect(contract).toMatch(/montado en \*\*las dos\s+plataformas\*\*/);
+    expect(contract).toMatch(/Falla en web:/);
+    expect(contract).toMatch(/Falla en nativo:/);
+    expect(contract).not.toMatch(/sólo web|solo web|only web/i);
   });
 });
