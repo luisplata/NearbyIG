@@ -100,5 +100,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
      * En web este plugin no hace nada: ahí el mapa lo dibuja MapLibre GL JS.
      */
     '@maplibre/maplibre-react-native',
+    /**
+     * Keep de R8 del mapa, versionado porque `android/` es CNG y se regenera en
+     * cada `prebuild`. Va DESPUÉS del plugin del SDK a propósito: el SDK registra
+     * el módulo y escribe su configuración; este mod local corre sobre el
+     * `android/` ya generado. Invertirlos deja al mod sin proyecto que editar.
+     */
+    './plugins/withMapLibreProguard',
   ],
 });

@@ -86,6 +86,31 @@ describe('plugin del basemap nativo', () => {
   it('no recorta plataformas: web sigue publicado y android es el piloto', () => {
     expect(app.platforms).toEqual(['web', 'android', 'ios']);
   });
+
+  /**
+   * El keep de R8 es lo único que impide que el release recorte las clases del
+   * SDK. Si el plugin local se pierde del config, el APK compila igual y el mapa
+   * revienta en el teléfono: por eso se fija acá y no en un comentario.
+   */
+  const LOCAL_PLUGIN = './plugins/withMapLibreProguard';
+
+  it('declara el keep de R8 después del plugin del SDK', () => {
+    // El SDK registra el módulo; el mod local edita el `android/` ya generado.
+    // Invertirlos deja al plugin local escribiendo antes de que exista el proyecto.
+    const plugins = app.plugins ?? [];
+    const sdk = plugins.indexOf('@maplibre/maplibre-react-native');
+    const local = plugins.indexOf(LOCAL_PLUGIN);
+
+    expect(sdk).toBeGreaterThanOrEqual(0);
+    expect(local).toBeGreaterThan(sdk);
+    expect(plugins[plugins.length - 1]).toBe(LOCAL_PLUGIN);
+  });
+
+  it('el archivo del plugin local existe en disco', () => {
+    // Expo no compila el plugin: una ruta rota no se ve hasta `prebuild` en CI.
+    // El existsSync la agarra en el gate de tests.
+    expect(existsSync(join(ROOT, 'plugins', 'withMapLibreProguard.js'))).toBe(true);
+  });
 });
 
 describe('icono y splash', () => {
