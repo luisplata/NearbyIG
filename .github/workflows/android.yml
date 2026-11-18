@@ -18,6 +18,15 @@ name: android
 
 on:
   workflow_dispatch:
+    inputs:
+      abis:
+        # Un ABI por default: el piloto se instala en un teléfono arm64 y el APK
+        # de 4 ABIs pesa ≈4×. La lista separada por coma es la sintaxis que
+        # `reactNativeArchitectures` ya acepta, sin traducir nada en el workflow.
+        description: 'ABIs del APK del piloto (separadas por coma si son varias)'
+        type: string
+        required: false
+        default: 'arm64-v8a'
 
 permissions:
   contents: read
@@ -89,12 +98,21 @@ jobs:
 
       # Release autocontenido (ver cabecera). La variable va también acá porque es el
       # paso que corre Metro para embeber el bundle: sin ella el APK sale con el mock.
+      #
+      # ABIs: el input del dispatch llega vacío en un disparo sin parámetros, así que
+      # el default se resuelve acá (`${ABIS:-arm64-v8a}`) y se publica en $GITHUB_ENV
+      # para que el Summary muestre lo que Gradle compiló de verdad, no otra copia.
       - name: Assemble release APK
         working-directory: demo/expo-demo/android
         env:
           EXPO_PUBLIC_API_URL: ${{ vars.NEARBYIG_API_URL }}
+          ABIS: ${{ inputs.abis }}
           GRADLE_OPTS: -Dorg.gradle.daemon=false
-        run: ./gradlew assembleRelease --no-daemon --console=plain
+        run: |
+          set -euo pipefail
+          abis="${ABIS:-arm64-v8a}"
+          echo "ABIS=$abis" >> "$GITHUB_ENV"
+          ./gradlew assembleRelease -PreactNativeArchitectures="$abis" --no-daemon --console=plain
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -123,6 +141,9 @@ jobs:
             echo "|---|---|"
             echo "| Archivo | \`$(basename "$apk")\` |"
             echo "| Tamaño | ${size} MB |"
+            # Viene de $GITHUB_ENV (el paso de Gradle), no de este script: es la
+            # única prueba de qué ABIs se compilaron cuando el dispatch trae varias.
+            echo "| ABIs | ${ABIS:-arm64-v8a} |"
             echo "| API horneada | ${host:-no detectado} |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

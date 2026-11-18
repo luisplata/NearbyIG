@@ -1,20 +1,20 @@
 # NearbyIG demos — runbook
 
-Una demo mock del flujo NearbyIG (Expo web) más una landing, alimentadas por un único
-contrato compartido en `demo/shared/` y publicadas como un solo artefacto de GitHub
-Pages.
+Una demo mock del flujo NearbyIG que corre en web (Expo web) y en Android (APK de Expo),
+más una landing, alimentadas por un único contrato compartido en `demo/shared/`; la web y
+la landing se publican como un solo artefacto de GitHub Pages.
 
 Todo es simulado salvo el fondo del radar de Expo: sin backend, sin auth, sin push, sin
 geolocalización real, sin OAuth, sin persistencia, sin premium ni referidos. Ver
 `CONTRACT.md`.
 
-**Red = un host.** El único pedido externo del artefacto es `tiles.openfreemap.org`
-(OpenFreeMap, tiles vectoriales para el basemap del radar de Expo, sin API key ni cuenta).
-No hay Google Maps, Mapbox, `googleapis.com` ni un segundo host pedible: el estilo es
-local, no se piden sprites y la auditoría `--strict` falla si aparece otro. El proveedor
-ve IP, User-Agent y el mismo viewport de demo para todos (centro fijo + zoom derivado del
-radio); sin cookies ni identificadores. Si el basemap no carga, la ilustración local toma
-el relevo.
+**Red = un host.** El único pedido externo es `tiles.openfreemap.org` (OpenFreeMap, tiles
+vectoriales para el basemap del radar, sin API key ni cuenta), en el artefacto web **y** en
+el APK. No hay Google Maps, Mapbox, `googleapis.com` ni un segundo host pedible: el estilo
+es local, no se piden sprites y la auditoría `--strict` falla si aparece otro en el bundle
+web. El proveedor ve IP, User-Agent y el mismo viewport de demo para todos (centro fijo +
+zoom derivado del radio); sin cookies ni identificadores. Si el basemap no carga, la
+ilustración local toma el relevo en cualquiera de las dos plataformas.
 
 ## Layout
 
@@ -22,7 +22,7 @@ el relevo.
 |---|---|
 | `demo/shared/` | Contrato: `fixtures.json`, `copy.json`, `design-tokens.json`, `photos.json`, `state-machine.md`, `golden/steps.json`, assets de marca y fuentes |
 | `demo/landing/` | Landing estática (raíz del sitio) |
-| `demo/expo-demo/` | Demo Expo web (consume `src/generated/`) |
+| `demo/expo-demo/` | Demo Expo: web y APK Android (consume `src/generated/`) |
 | `demo/CONTRACT.md` | Inventario de pantallas, timers, diferencias permitidas y checklist de paridad (15 puntos) |
 | `scripts/` | Tooling Node: validación, sync de assets/generados, ensamblado del sitio |
 
@@ -33,7 +33,7 @@ el relevo.
   rasterizar el icono de marca.
 - Sin servicios externos, sin variables de entorno, sin secretos. La única dependencia
   externa de runtime es el basemap: `tiles.openfreemap.org` (sin key), y sólo desde el
-  radar de Expo.
+  radar, en web y en el APK.
 
 ## Setup y verificación del contrato
 
@@ -60,15 +60,17 @@ node scripts/sync-demo-assets.mjs --no-raster         # reusa los PNG de marca y
 ## Checklist visual de la demo Expo
 
 Vitest corre en Node y no renderiza: estos puntos se verifican a mano en el navegador
-sobre `site/expo/` (o `expo export` + `assemble-site --strict`). Sin servidores que queden
+sobre `site/expo/` (o `expo export` + `assemble-site --strict`). Los puntos 2, 10 y 11
+tienen además su versión en el APK del workflow `android` (ver
+[`../docs/expo-native-dev.md`](../docs/expo-native-dev.md)). Sin servidores que queden
 vivos al terminar la revisión.
 
 1. **Cuadrado**: a 320, 360, 480, 768 y 1440 px de ancho, el radar es cuadrado
    (`side = floor(min(w, h))`): anillos circulares, sin elipses ni puntos fuera de su anillo.
 2. **Composición**: un solo radar con basemap real de fondo (o la ilustración si el mapa
-   falla), anillos + cruz, barrido de 6 s y exactamente una capa de 10 puntos; atribución
-   OpenFreeMap/OpenMapTiles/OSM cuando hay tiles, leyenda "mapa simulado" cuando manda la
-   ilustración, y caption + nota fuera del cuadrado.
+   falla), anillos + cruz, barrido de 6 s y exactamente una capa de 10 puntos; en web **y**
+   en el APK, atribución OpenFreeMap/OpenMapTiles/OSM cuando hay tiles, leyenda "mapa
+   simulado" cuando manda la ilustración, y caption + nota fuera del cuadrado.
 3. **Mapa reservado**: no hay tab Mapa; `DemoView.map` no es alcanzable desde la UI.
 4. **Reduced motion**: con `prefers-reduced-motion: reduce`, el barrido queda estático y
    los 10 puntos siguen visibles y tappables.
@@ -82,15 +84,19 @@ vivos al terminar la revisión.
    overlay sigue abierto; Ajustes y header muestran el mismo estado.
 9. **Foco**: tabular por la barra y el header deja foco visible en cada control; los
    targets son ≥ 44 px y los labels accesibles incluyen nombre y distancia.
-10. **Red**: abrir Radar y mirar DevTools Network. Debe haber **un único** host externo,
-    `tiles.openfreemap.org` (TileJSON, tiles y glifos; sin sprite, sin key ni cookie). La
-    lista y la landing no piden tiles; recargar sin red deja la ilustración, los 10 puntos
-    y los timers funcionando.
-11. **Atribución**: con tiles cargados, el chip de la esquina inferior derecha se lee
-    completo a 320 px (dos líneas como máximo, sin elipsis), no recibe foco y anuncia el
-    texto completo; con el mapa caído no aparece y vuelve la leyenda "mapa simulado".
-12. **Bundle**: `expo export` emite el chunk `maplibre-gl-*.js` aparte; el entry no evalúa
-    MapLibre hasta entrar a Radar.
+10. **Red**: en web, abrir Radar y mirar DevTools Network: debe haber **un único** host
+    externo, `tiles.openfreemap.org` (TileJSON, tiles y glifos; sin sprite, sin key ni
+    cookie). En el APK se verifica **por código**, no por DevTools: `src/map/style.ts` es la
+    única fuente de URLs del estilo y no hay `sprite`. La lista y la landing no piden
+    tiles; recargar sin red deja la ilustración, los 10 puntos y los timers funcionando.
+11. **Atribución**: con tiles cargados —en web y en el APK—, el chip de la esquina inferior
+    derecha se lee completo a 320 px (dos líneas como máximo, sin elipsis), no recibe foco
+    y anuncia el texto completo; el motor no monta su propio control (web
+    `attributionControl: false`; APK las cuatro props en `false`). Con el mapa caído no
+    aparece y vuelve la leyenda "mapa simulado".
+12. **Bundle web**: `expo export` emite el chunk `maplibre-gl-*.js` aparte; el entry no
+    evalúa MapLibre hasta entrar a Radar. En el APK ese chunk no existe: el motor es
+    MapLibre Native, compilado en el binario.
 
 ## Golden de regresión
 
@@ -114,6 +120,10 @@ npm --prefix demo/expo-demo run typecheck
 npm --prefix demo/expo-demo run test          # golden de regresión (Vitest) + selectores + formato
 (cd demo/expo-demo && EXPO_BASE_URL="" npx expo export --platform web --output-dir dist --clear)
 ```
+
+El binario Android no sale de esos comandos: se compila en el workflow `android`
+(`workflow_dispatch`, un ABI por default) y el entorno de máquina —JDK 17, SDK 37, dev
+client y keep de R8— está en [`../docs/expo-native-dev.md`](../docs/expo-native-dev.md).
 
 Tests del tooling Node (denylist del artefacto, hosts benignos acotados, guard de no
 reintroducción del stack retirado):

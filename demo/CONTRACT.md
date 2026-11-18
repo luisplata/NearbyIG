@@ -16,8 +16,10 @@ las apps consumen lo generado y no duplican strings, colores, distancias ni guio
   dependiendo de contexto seguro —sólo HTTPS o `localhost`—; en el binario Expo es una
   lectura puntual del device con permiso explícito (`expo-location`), sólo al tocar "Usar
   mi ubicación". Nadie guarda el punto: ni storage, ni cookie, ni historial. El radar de
-  **Expo** usa un basemap real de **un único host** (`tiles.openfreemap.org`, OpenFreeMap
-  con MapLibre GL JS, sin key ni cuenta) y mantiene la ilustración como fallback.
+  **Expo** usa un basemap real de **un único host** (`tiles.openfreemap.org`, OpenFreeMap,
+  sin key ni cuenta) con **un estilo y dos renderers**: MapLibre GL JS en el bundle web y
+  MapLibre Native en el binario. La ilustración es fallback en las dos plataformas, nunca
+  el default nativo.
 
 ---
 
@@ -74,6 +76,10 @@ Reglas duras del dataset (validadas por script):
   URL ni control. `discovery.mapNote` aclara el centro fijo y las posiciones de guion.
   `discovery.mapLegend` ("mapa simulado") queda **sólo** para el fallback ilustrado: el
   validador sigue exigiendo `/simulado/i`.
+- La fase del basemap gobierna los dos renderers: `ready` ⇒ atribución visible; cualquier
+  otra fase ⇒ leyenda ilustrada y, si falló, chip de motivo y reintento. `failWebgl` y
+  `failContext` son motivos **web-only**; el binario sólo puede fallar por `failStyle` o
+  `failTimeout`.
 - Posicionamiento: `about.brand` es el nombre visible (**Nearby Social Club**) y
   `landing.eyebrow` y `about.club` contienen el mismo slogan (**Cowork Café**).
   `about.positioning` explica el club. Es estilo y posicionamiento: **no** cambia el
@@ -132,7 +138,7 @@ Los timers se derivan de acciones, no del reloj de pared. No hay timers al carga
 
 | # | Pantalla | Requisito | Contenido mínimo |
 |---|---|---|---|
-| 1 | Descubrimiento | F-2, F-3 | lista cercana o radar sobre basemap real (con la ilustración como fallback), radio 500 m–5 km, 4 filtros, contador, atribución del proveedor cuando hay tiles o leyenda "mapa simulado" cuando manda la ilustración |
+| 1 | Descubrimiento | F-2, F-3 | lista cercana o radar sobre basemap real (con la ilustración como fallback), radio 500 m–5 km, 4 filtros, contador, atribución del proveedor cuando hay tiles —en el bundle web **y** en el binario— o leyenda "mapa simulado" cuando manda la ilustración |
 | 2 | Perfil de otro | F-1, F-4 | foto (blur/clear), intención, distancia, verificado/online, ping, seguridad, bloqueo |
 | 3 | Chat | F-5, F-9 | mensajes guionados, typing 1.2 s, revelar foto, bloqueo |
 | 4 | Pings | F-4, F-5 | bandeja con recibidos (aceptar / rechazar) y enviados con estado “Enviado / esperando respuesta”, sin segunda acción de envío, estado vacío |
@@ -151,11 +157,13 @@ estado la setea programáticamente, renderiza la misma composición radar-sobre-
 pantalla 1 de Expo es esa composición única más la lista.
 
 La composición de Expo, de abajo hacia arriba: mapa ilustrado (`MapCanvas`, **siempre**
-montado), basemap real de OpenFreeMap (sólo web, no interactivo, sin controles) cuando
-cargó, anillos/cruz/barrido de 6 s, **una sola** capa de puntos, y en la esquina inferior
-derecha la atribución `discovery.mapAttribution` (texto, sin URL, no focusable). Si el
-basemap falla —sin WebGL, error, pérdida de contexto o timeout de 8 s— la composición no
-cambia: queda la ilustración y vuelve la leyenda "mapa simulado".
+montado), basemap real de OpenFreeMap —no interactivo, sin controles, montado en **las dos
+plataformas**: MapLibre GL JS en web y MapLibre Native en el binario— cuando cargó,
+anillos/cruz/barrido de 6 s, **una sola** capa de puntos, y en la esquina inferior derecha la
+atribución `discovery.mapAttribution` (texto, sin URL, no focusable). Falla en web: sin
+WebGL, error de estilo, contexto perdido o timeout de 8 s. Falla en nativo: error de estilo
+o timeout de 8 s. En los dos casos la composición no cambia: queda la ilustración, vuelve la
+leyenda "mapa simulado" y aparece el chip de reintento.
 
 **No existe** pantalla, tab, modelo, campo ni analítica de historial de rutas,
 encuentros o visitas. Tampoco hay onboarding de 7 pasos, premium, referidos ni PWA
@@ -169,7 +177,8 @@ install.
   los 10 perfiles aparecen ordenados por distancia ascendente.
 - La barra inferior tiene cuatro tabs en este orden: **Lista → Radar → Pings → Perfil**.
   No hay tab Mapa: Radar es una única composición con basemap real de fondo (la
-  ilustración hace de fallback), anillos, barrido de 6 s y una capa de puntos. Pings y
+  ilustración hace de fallback), anillos, barrido de 6 s y una capa de puntos. El fondo
+  real existe en las dos plataformas; la ilustración es **sólo** fallback en ambas. Pings y
   Perfil abren overlays sin cambiar la vista. El valor `map` sigue reservado en la máquina
   de estados: si se setea, se renderiza la misma composición radar-sobre-mapa, nunca un
   cuerpo sólo-mapa.
@@ -189,6 +198,7 @@ diferencias de plataforma, nunca de contrato:
 |---|---|---|
 | Antialiasing, rasterizado de texto y bordes; scroll nativo (overscroll, barra) | Sí | DOM del navegador vs motor nativo |
 | Proveedor de geolocalización: web `navigator.geolocation` vs binario Expo `expo-location` | Sí | Mismo port (`requestPoint`), mismo gesto y mismo contrato de resultado (`ok`, `denied`, `unavailable`, `timeout`, `unsupported`, `insecure`); en nativo nunca hay `insecure` porque no existe `secureContext` |
+| Motor de mapa: MapLibre GL JS (web) vs MapLibre Native (binario) | Sí | Mismo estilo (`src/map/style.ts`) y misma cámara (mismo centro y zoom, norte arriba, cenital); cambia el rasterizador, no el encuadre. Cualquier diferencia de cámara, atribución o badge cae en la fila de abajo: **No** |
 | Cualquier diferencia funcional no listada (timers, copy compartido, orden de datos, estado, datasetId) | **No** | Es un defecto del contrato |
 
 ## 9. Checklist de comportamiento (15 puntos)
@@ -208,7 +218,7 @@ diferencias de plataforma, nunca de contrato:
 | 11 | Sin historial | Sin tab/pantalla/campos de historial; `privacy.noHistory` verbatim |
 | 12 | Reset + refresh | Tras flujo completo → estado inicial (vista `lista`); refresh idéntico; sin timers vivos |
 | 13 | Responsive + a11y | 320/360/480/768/1440 px sin overflow; labels con nombre y distancia; foco visible; ≥ 44 px |
-| 14 | Red contenida | DevTools Network en Radar: **un único** host externo, `tiles.openfreemap.org` (estilo local, TileJSON, tiles, glifos; sin sprite, sin key ni cookie). La Lista y la landing no piden tiles: el primer pedido ocurre al abrir Radar |
+| 14 | Red contenida | Web: DevTools Network en Radar, **un único** host externo, `tiles.openfreemap.org` (estilo local, TileJSON, tiles, glifos; sin sprite, sin key ni cookie). Nativo: se verifica **por código** —`src/map/style.ts` es la única fuente de URLs y el APK no tiene DevTools—. La Lista y la landing no piden tiles: el primer pedido ocurre al abrir Radar |
 | 15 | Divulgación | Label DEMO en About (visible sin abrir la hoja), header y footer de la landing; hoja "Qué es simulado" con 8 ítems |
 
 **Procedimiento lado a lado**: abrir landing + `/expo/` en dos pestañas,
@@ -296,11 +306,18 @@ El basemap no pide estilos remotos: el estilo es local (`src/map/style.ts`) y su
 URLs —TileJSON y glifos— apuntan al host permitido. No hay `sprite` ni capas de íconos,
 y no se usa `setRTLTextPlugin`.
 
-**Worker de MapLibre.** Metro no emite `maplibre-gl-worker.mjs` en el export, así que
-`npm ci` corre `scripts/copy-maplibre-worker.mjs` (postinstall) y deja
+**Worker de MapLibre (artefacto web).** Metro no emite `maplibre-gl-worker.mjs` en el
+export, así que `npm ci` corre `scripts/copy-maplibre-worker.mjs` (postinstall) y deja
 `public/maplibre-gl-worker.js`; `MapBasemap` lo apunta con `setWorkerUrl` contra
 `document.baseURI`. Sin ese archivo el navegador pide un 404, el mapa queda en `loading`
 y cae al SVG: `assemble-site --strict` falla si falta el chunk o el worker.
+
+**Artefacto web.** Todo lo anterior describe el bundle que se publica y lo que audita
+`assemble-site --strict`; el binario no pasa por ahí. En el APK el basemap usa el **mismo**
+`mapStyle()` y no monta los ornamentos del SDK (`attribution={false}`, `logo={false}`,
+`compass={false}`, `scaleBar={false}`): la atribución visible es el texto plano de la
+composición. El host pedible sigue siendo uno solo, y en nativo se garantiza por código, no
+por auditoría de artefacto.
 
 **Centro de demo.** `DEMO_CENTER` (`src/map/basemap.ts`) es una constante de código: el
 mismo viewport para todos los visitantes, sin IP, cookies ni identificadores. El punto del
@@ -365,13 +382,13 @@ Pasos, verificación y rollback:
 
 Los puntos se verifican con el golden de regresión del reducer Expo (digests congelados
 en `shared/golden/expected.json`), los tests de cada app y la auditoría del artefacto.
-La columna “Visual” marca lo que exige un navegador real y queda pendiente hasta la
-revisión con DevTools + lector de pantalla.
+La columna “Visual” marca lo que exige un renderer real —navegador en web, device en el
+APK— y queda pendiente hasta la revisión con DevTools + lector de pantalla.
 
 | # | Automatizado | Visual |
 |---|---|---|
 | 1 | golden (`SET_SELF_INTENTION`), 3 intenciones válidas en `validate-fixtures` | cambio reflejado en perfil y filtro |
-| 2 | `discoveryBody.test.ts` mapea `radar` y `map` a la misma composición, `mapStatus.test.ts` fija idle→loading→ready|failed y `basemap.test.ts` la derivación de zoom | mismo orden/distancias en lista y radar; basemap real visible y atribución legible |
+| 2 | `discoveryBody.test.ts` mapea `radar` y `map` a la misma composición, `mapStatus.test.ts` fija idle→loading→ready|failed y `basemap.test.ts` la derivación de zoom | mismo orden/distancias en lista y radar; basemap real visible **y atribución legible** en web y en el APK |
 | 3 | `selectors.test.ts`: radio 500 m, filtros y vacío | CTA “Limpiar filtros” |
 | 4 | golden timers + widget test de ping enviado/deshabilitado + bandeja con el enviado y su estado | ping entrante a 3.0 s en Expo |
 | 5 | golden (`ACCEPT_PING`, `SEND_MESSAGE`, `REJECT_PING`) | overlay de match a 2.5 s |

@@ -51,6 +51,68 @@ describe('identidad nativa', () => {
   });
 });
 
+describe('plugin del basemap nativo', () => {
+  /**
+   * El mapa del binario no existe sin este plugin: registra el módulo nativo,
+   * escribe `gradle.properties` y engancha el AAR de MapLibre Android en el
+   * `android/` que genera `prebuild`. Sin él `prebuild` compila y el mapa tira
+   * un módulo nativo ausente recién en runtime.
+   */
+  it('declara el plugin del SDK como string plano, no como tupla con props', () => {
+    // Sin props: los defaults del paquete coinciden con la toolchain del SDK 58.
+    // Una tupla acá es un override que hay que sostener en cada prebuild.
+    const entry = (app.plugins ?? []).find(
+      (plugin) => plugin === '@maplibre/maplibre-react-native',
+    );
+
+    expect(entry).toBe('@maplibre/maplibre-react-native');
+    expect(Array.isArray(entry)).toBe(false);
+  });
+
+  it('lo registra después de expo-location', () => {
+    // El orden importa: expo-location fija el texto del permiso y el plugin del
+    // mapa agrega el módulo; invertirlos deja el manifest sin el permiso.
+    const plugins = app.plugins ?? [];
+    const location = plugins.findIndex(
+      (plugin) =>
+        plugin === 'expo-location' || (Array.isArray(plugin) && plugin[0] === 'expo-location'),
+    );
+    const maplibre = plugins.indexOf('@maplibre/maplibre-react-native');
+
+    expect(location).toBeGreaterThanOrEqual(0);
+    expect(maplibre).toBeGreaterThan(location);
+  });
+
+  it('no recorta plataformas: web sigue publicado y android es el piloto', () => {
+    expect(app.platforms).toEqual(['web', 'android', 'ios']);
+  });
+
+  /**
+   * El keep de R8 es lo único que impide que el release recorte las clases del
+   * SDK. Si el plugin local se pierde del config, el APK compila igual y el mapa
+   * revienta en el teléfono: por eso se fija acá y no en un comentario.
+   */
+  const LOCAL_PLUGIN = './plugins/withMapLibreProguard';
+
+  it('declara el keep de R8 después del plugin del SDK', () => {
+    // El SDK registra el módulo; el mod local edita el `android/` ya generado.
+    // Invertirlos deja al plugin local escribiendo antes de que exista el proyecto.
+    const plugins = app.plugins ?? [];
+    const sdk = plugins.indexOf('@maplibre/maplibre-react-native');
+    const local = plugins.indexOf(LOCAL_PLUGIN);
+
+    expect(sdk).toBeGreaterThanOrEqual(0);
+    expect(local).toBeGreaterThan(sdk);
+    expect(plugins[plugins.length - 1]).toBe(LOCAL_PLUGIN);
+  });
+
+  it('el archivo del plugin local existe en disco', () => {
+    // Expo no compila el plugin: una ruta rota no se ve hasta `prebuild` en CI.
+    // El existsSync la agarra en el gate de tests.
+    expect(existsSync(join(ROOT, 'plugins', 'withMapLibreProguard.js'))).toBe(true);
+  });
+});
+
 describe('icono y splash', () => {
   it('usa el icono de 1024 como icono principal', () => {
     // iOS rechaza en App Store cualquier icono que no sea 1024×1024.

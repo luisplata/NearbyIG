@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ComponentRef } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 
 import { Chip } from '../components/Chip';
@@ -10,9 +10,11 @@ import { reduceMapStatus, type MapEvent, type MapPhase } from './mapStatus';
 import { mapStyle } from './style';
 
 /**
- * Basemap real (OpenFreeMap + MapLibre GL JS) montado **sólo en web** y **sólo**
- * en un `useEffect`: el import es dinámico, así que MapLibre no se evalúa en el
- * bundle inicial ni mientras la lista está activa.
+ * Basemap real (OpenFreeMap + MapLibre GL JS) del **bundle web**: Metro resuelve
+ * este archivo sólo donde no hay un `.native.tsx` hermano, así que el binario
+ * monta `MapBasemap.native.tsx` y acá nunca se evalúa en Android. En web el
+ * montaje vive en un único `useEffect` con import dinámico: MapLibre GL JS no
+ * entra al bundle inicial ni mientras la lista está activa.
  *
  * Reglas que no se negocian:
  * - el contenedor es un `div` hijo imperativo: MapLibre le agrega clases y
@@ -89,7 +91,6 @@ export function MapBasemap({ side, radiusM, center, onPhaseChange }: Props) {
   // Montaje: uno por intento (el reintento incrementa `attempt`).
   useEffect(() => {
     if (!armed) return;
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const host = hostRef.current as unknown as HTMLElement | null;
     if (!host) return;
 
