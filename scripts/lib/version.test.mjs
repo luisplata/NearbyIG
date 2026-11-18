@@ -248,3 +248,12 @@ test('el cálculo es monótono sobre la fórmula del versionCode', () => {
     previous = code;
   }
 });
+
+test('toVersionCode aplica el techo de Play también sin pasar por nextVersion', () => {
+  // `toVersionCode` es pública: un baseline mal configurado llegaba hasta acá y
+  // devolvía un código por encima de 2.100.000.000, que Play rechaza recién en
+  // la subida. El techo tiene que vivir donde se calcula.
+  assert.equal(toVersionCode('2099.999.999'), 2_099_999_999);
+  assert.throws(() => toVersionCode('2100.0.0'), VersionGuardError);
+  assert.throws(() => toVersionCode('2500.0.0'), VersionGuardError);
+});

@@ -23,6 +23,9 @@ export class VersionGuardError extends Error {
   }
 }
 
+/** Play rechaza cualquier versionCode por encima de 2.100.000.000. */
+export const PLAY_MAX_MAJOR = 2100;
+
 /**
  * Subject convencional, case-sensitive a propósito: `FEAT: x` no es un `feat`.
  * El `[a-z0-9._-]` del scope sale del regex de esta casa, así que un scope raro
@@ -147,6 +150,15 @@ export function compareVersions(a, b) {
 export function toVersionCode(version) {
   const parts = splitVersion(version, 'la versión');
   for (const key of ['minor', 'patch']) assertComponent(key, parts[key], version);
+  // El techo vive también acá: esta función es pública y se puede llamar con un
+  // `major` arbitrario (por ejemplo desde un baseline mal configurado). Play
+  // rechaza cualquier código por encima de 2.100.000.000 y el error no aparece
+  // hasta subirlo, así que se corta donde se calcula.
+  if (parts.major >= PLAY_MAX_MAJOR) {
+    throw new VersionGuardError(
+      `major ${parts.major} alcanza el techo del versionCode de Play (${PLAY_MAX_MAJOR - 1})`,
+    );
+  }
 
   return parts.major * 1e6 + parts.minor * 1e3 + parts.patch;
 }
