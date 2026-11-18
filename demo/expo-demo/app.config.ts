@@ -6,11 +6,42 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  */
 const baseUrl = (process.env.EXPO_BASE_URL ?? '/expo').replace(/\/+$/, '');
 
+/**
+ * Versión y `versionCode` llegan del build: `scripts/version.mjs` los deriva de
+ * los conventional commits y el workflow los pasa por entorno, porque el número
+ * que Play acepta no puede escribirse a mano sin arriesgar subir dos veces el
+ * mismo código (Play lo rechaza, pero el run ya gastó 30 minutos compilando).
+ *
+ * Sin variables el fallback es el de desarrollo local: `prebuild` y los tests
+ * siguen dando un binario instalable. Presente pero inválida es un error de
+ * tipeo del workflow y se avisa: Play no deja corregir un `versionCode` malo.
+ */
+const SEMVER = /^\d+\.\d+\.\d+$/;
+
+function envVersion(raw: string | undefined): string {
+  if (raw === undefined || raw === '') return '0.1.0';
+  if (SEMVER.test(raw)) return raw;
+
+  console.warn(`[app.config] NEARBYIG_VERSION inválido ("${raw}"); uso 0.1.0`);
+  return '0.1.0';
+}
+
+function envVersionCode(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 1;
+
+  const parsed = Number(raw);
+  // Entero positivo: `2.5` y `-5` compilan igual desde Gradle pero Play los rechaza.
+  if (Number.isInteger(parsed) && parsed > 0) return parsed;
+
+  console.warn(`[app.config] NEARBYIG_VERSION_CODE inválido ("${raw}"); uso 1`);
+  return 1;
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Nearby Social Club',
   slug: 'nearbyig-demo',
-  version: '0.1.0',
+  version: envVersion(process.env.NEARBYIG_VERSION),
   orientation: 'portrait',
   userInterfaceStyle: 'dark',
   backgroundColor: '#09090B',
@@ -27,7 +58,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Package y versionCode se fijan ANTES del .aab firmado: Play no deja
     // cambiarlos después y el cambio del release los da por hechos.
     package: 'com.nearbyig.app',
-    versionCode: 1,
+    versionCode: envVersionCode(process.env.NEARBYIG_VERSION_CODE),
     /**
      * El foreground va al 75 % del canvas porque fuera de eso el recorte del
      * launcher (círculo, squircle) se come el glifo. El fondo se declara acá y
@@ -100,6 +131,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
      * En web este plugin no hace nada: ahí el mapa lo dibuja MapLibre GL JS.
      */
     '@maplibre/maplibre-react-native',
+    /**
+     * Firma de upload de Play. Mod de Gradle: appendea `signingConfigs.release`
+     * y el `release { signingConfig … }` del buildType sobre el `app/build.gradle`
+     * que genera `prebuild`. Va después de los plugins del SDK (necesita el
+     * proyecto creado) y antes del keep de R8, que sigue siendo el último.
+     *
+     * Sin las cuatro variables de firma no escribe nada: `android.yml` compila
+     * el APK del piloto sin secrets y ese run tiene que seguir verde.
+     */
+    './plugins/withReleaseSigning',
     /**
      * Keep de R8 del mapa, versionado porque `android/` es CNG y se regenera en
      * cada `prebuild`. Va DESPUÉS del plugin del SDK a propósito: el SDK registra

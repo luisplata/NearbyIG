@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ConfigContext } from 'expo/config';
-import { describe, expect, it } from 'vitest';
+import type { ConfigContext, ExpoConfig } from 'expo/config';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import appConfig from '../app.config';
 
@@ -17,12 +17,15 @@ import appConfig from '../app.config';
  */
 const ROOT = process.cwd();
 
-const app = appConfig({
+/** El contexto con el que Expo evalúa el config; se reusa en los casos con env. */
+const CONTEXT = {
   projectRoot: ROOT,
   staticConfigPath: join(ROOT, 'app.config.ts'),
   packageJsonPath: join(ROOT, 'package.json'),
   config: {},
-} satisfies ConfigContext);
+} satisfies ConfigContext;
+
+const app = appConfig(CONTEXT);
 
 /** Ruta del asset declarada en el config, chequeada contra el árbol de trabajo. */
 function assetExists(declared: string | undefined): boolean {
@@ -161,5 +164,100 @@ describe('claves fuera del schema de SDK 58', () => {
     expect(app).not.toHaveProperty('splash');
     expect(app).not.toHaveProperty('newArchEnabled');
     expect(app).not.toHaveProperty('edgeToEdgeEnabled');
+  });
+});
+
+/**
+ * La firma de upload es lo que separa el `.aab` que Play acepta del que no: el
+ * plugin local appendea `signingConfigs.release` sobre el `app/build.gradle` que
+ * genera `prebuild`. Si se cae del config el build compila igual, el `.aab` sale
+ * firmado con la debug key y el rechazo aparece recién al subirlo.
+ */
+describe('plugin de firma de upload', () => {
+  const SIGNING_PLUGIN = './plugins/withReleaseSigning';
+  const PROGUARD_PLUGIN = './plugins/withMapLibreProguard';
+
+  it('lo registra después del SDK del mapa y antes del keep de R8', () => {
+    const plugins = app.plugins ?? [];
+    const sdk = plugins.indexOf('@maplibre/maplibre-react-native');
+    const signing = plugins.indexOf(SIGNING_PLUGIN);
+    const proguard = plugins.indexOf(PROGUARD_PLUGIN);
+
+    expect(signing).toBeGreaterThanOrEqual(0);
+    // Mod de Gradle: necesita el `android/` que generan los plugins del SDK.
+    expect(signing).toBeGreaterThan(sdk);
+    expect(proguard).toBeGreaterThan(signing);
+    // El keep de R8 sigue último: corre sobre el android/ ya generado.
+    expect(plugins[plugins.length - 1]).toBe(PROGUARD_PLUGIN);
+  });
+
+  it('los dos plugins locales existen en disco', () => {
+    // Expo no compila ni resuelve los plugins: una ruta rota se ve en `prebuild`.
+    expect(existsSync(join(ROOT, 'plugins', 'withReleaseSigning.js'))).toBe(true);
+    expect(existsSync(join(ROOT, 'plugins', 'withMapLibreProguard.js'))).toBe(true);
+  });
+});
+
+describe('versión desde el entorno del build', () => {
+  /**
+   * `scripts/version.mjs` calcula la versión y el workflow la pasa por entorno.
+   * El config la lee al evaluarse, así que cada caso reimporta el módulo: un
+   * `app.config.ts` ya cargado se queda con el valor del primer load.
+   */
+  async function evaluate(env: Record<string, string>): Promise<ExpoConfig> {
+    vi.resetModules();
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+
+    const { default: config } = await import('../app.config');
+    return config(CONTEXT);
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
+  it('sin variables usa el baseline local', () => {
+    expect(app.version).toBe('0.1.0');
+    expect(app.android?.versionCode).toBe(1);
+  });
+
+  it('toma versión y versionCode del entorno, con versionCode numérico', async () => {
+    const config = await evaluate({ NEARBYIG_VERSION: '0.2.0', NEARBYIG_VERSION_CODE: '2000' });
+
+    expect(config.version).toBe('0.2.0');
+    // Gradle escribe el número en el manifest: un string no llega al `.aab`.
+    expect(config.android?.versionCode).toBe(2000);
+    expect(typeof config.android?.versionCode).toBe('number');
+  });
+
+  it.each(['abc', '-5', '2.5'])(
+    'cae al fallback y avisa cuando el versionCode es "%s"',
+    async (raw) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = await evaluate({ NEARBYIG_VERSION_CODE: raw });
+
+      expect(config.android?.versionCode).toBe(1);
+      // Un aviso, no un throw: `prebuild` local no tiene por qué romperse.
+      expect(warn).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('cae al fallback y avisa cuando la versión no es semver', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // `v0.2.0` es el tag de git, no un versionName: la `v` la pone el tag.
+    const config = await evaluate({ NEARBYIG_VERSION: 'v0.2.0' });
+
+    expect(config.version).toBe('0.1.0');
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('no toca la identidad nativa con las variables puestas', async () => {
+    const config = await evaluate({ NEARBYIG_VERSION: '9.9.9', NEARBYIG_VERSION_CODE: '999999' });
+
+    expect(config.android?.package).toBe('com.nearbyig.app');
+    expect(config.name).toBe('Nearby Social Club');
+    expect(config.icon).toBe('./assets/brand/icon-1024.png');
   });
 });
