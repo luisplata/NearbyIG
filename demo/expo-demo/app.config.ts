@@ -91,5 +91,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           'Nearby Social Club usa tu ubicación sólo mientras usás la demo, para mostrar tu punto en el radar. No se guarda ni se comparte.',
       },
     ],
+    /**
+     * Módulo nativo del basemap. Va como string plano y sin props: los defaults
+     * del paquete (minSdk 24, MapLibre Android 13.6.1, variante opengl) son los
+     * que necesita esta toolchain, y cualquier override acá es superficie de
+     * rotura en el próximo prebuild.
+     *
+     * En web este plugin no hace nada: ahí el mapa lo dibuja MapLibre GL JS.
+     */
+    '@maplibre/maplibre-react-native',
   ],
 });
