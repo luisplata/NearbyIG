@@ -156,6 +156,9 @@ jobs:
         env:
           NEARBYIG_VERSION: ${{ steps.version.outputs.version }}
           NEARBYIG_VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          # Explícita aunque venga por `$GITHUB_ENV`: el plugin la exige y el
+          # contrato tiene que leerse en el paso, no inferirse de un paso anterior.
+          ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}

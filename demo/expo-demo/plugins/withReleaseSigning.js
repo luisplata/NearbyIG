@@ -27,7 +27,11 @@ const MARKER = '// @nearbyig/release-signing';
  * prebuild deja `build.gradle` byte-idéntico y avisa una sola vez.
  */
 const REQUIRED = [
-  'ANDROID_KEYSTORE_BASE64',
+  // El workflow decodifica el base64 a un archivo en `$RUNNER_TEMP` y exporta
+  // esta ruta: el plugin no ve el secreto, ve dónde quedó. Pedir el base64 acá
+  // fue un contrato roto — el paso de prebuild no lo recibe y la firma nunca se
+  // inyectaba.
+  'ANDROID_KEYSTORE_PATH',
   'ANDROID_KEYSTORE_PASSWORD',
   'ANDROID_KEY_ALIAS',
   'ANDROID_KEY_PASSWORD',

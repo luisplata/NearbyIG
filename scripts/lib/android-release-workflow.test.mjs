@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -190,4 +191,23 @@ test('el artefacto queda descargable aunque no se publique el Release', () => {
   // El timeout tiene que cubrir 4 ABIs + Hermes; el default de 360 minutos deja un
   // job colgado casi seis horas y el siguiente run espera por la concurrencia.
   assert.match(source, /^ {4}timeout-minutes: 60\n/m);
+});
+
+test('el prebuild recibe exactamente las variables que el plugin de firma exige', () => {
+  // El contrato entre el plugin y el workflow no lo verifica nadie más: si una
+  // de las dos partes cambia un nombre, el prebuild no inyecta la firma, el
+  // fail-fast corta y el mensaje habla de un marcador ausente, no de la variable.
+  // Pasó una vez: el plugin pedía `ANDROID_KEYSTORE_BASE64` y el prebuild recibía
+  // la ruta decodificada.
+  const require = createRequire(import.meta.url);
+  const plugin = require(resolve(ROOT, 'demo/expo-demo/plugins/withReleaseSigning.js'));
+  const prebuild = step('Expo prebuild');
+
+  for (const name of plugin.REQUIRED) {
+    assert.match(
+      prebuild,
+      new RegExp(`^ {10}${name}: `, 'm'),
+      `el prebuild no recibe ${name}, que el plugin exige`,
+    );
+  }
 });

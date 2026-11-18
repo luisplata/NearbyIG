@@ -38,7 +38,7 @@ const ROOT = process.cwd();
  */
 const FAKE_CREDENTIAL = 'valor-de-prueba';
 const FULL_ENV: Record<string, string> = {
-  ANDROID_KEYSTORE_BASE64: 'ZmFrZS1rZXlzdG9yZQ==',
+  ANDROID_KEYSTORE_PATH: '/tmp/fake-keystore.jks',
   ANDROID_KEYSTORE_PASSWORD: FAKE_CREDENTIAL,
   ANDROID_KEY_ALIAS: 'upload',
   ANDROID_KEY_PASSWORD: FAKE_CREDENTIAL,

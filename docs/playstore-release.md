@@ -27,7 +27,7 @@ códigos de salida más abajo antes de tocar el workflow.
 
 ## 2. Generar la upload key
 
-Una sola vez, en la máquina del dueño de la cuenta. El alias tiene que ser `upload`
+Una sola vez, en la máquina del dueño de la cuenta. El alias lo elegís vos; el keystore de este equipo usa `nearbyig-upload`. Tiene que coincidir exacto con el secret `ANDROID_KEY_ALIAS`, y no se puede cambiar después del primer upload
 porque es lo que espera el secret `ANDROID_KEY_ALIAS`.
 
 ```bash
@@ -36,7 +36,7 @@ keytool -genkeypair -v \
   -storetype JKS \
   -keyalg RSA -keysize 2048 \
   -validity 10000 \
-  -alias upload \
+  -alias nearbyig-upload \
   -dname "CN=Nearby Social Club, O=NearbyIG, L=Buenos Aires, ST=Buenos Aires, C=AR"
 ```
 
