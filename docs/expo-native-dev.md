@@ -111,15 +111,100 @@ EXPO_PUBLIC_API_URL=http://192.168.0.42:3000 npx expo start --tunnel
 - HTTP plano a la LAN funciona en **debug**. En release, Android bloquea cleartext salvo que se
   declare; no lo declares: para el piloto alcanza con debug y con TLS.
 
-Para probar chrome (safe area, barra de estado, back) y el permiso de ubicación sin compilar nada,
-Expo Go alcanza mientras el SDK coincida. Lo que **no** prueba es el APK ni el manifest: eso es
-`run:android` con la toolchain de las secciones 1 y 2.
+Para probar chrome (safe area, barra de estado, back) y el permiso de ubicación **sin** el
+basemap alcanzaba Expo Go; con el módulo nativo ya no: Expo Go trae un conjunto fijo de
+módulos y el del mapa no está (sección 4). Hace falta un dev client, que es exactamente lo
+que compila `run:android`. El APK de release y el manifest tampoco se prueban así: eso es
+`assembleRelease` con la toolchain de las secciones 1 y 2, o el APK que baja el workflow
+`android`.
 
 ```bash
 npx expo run:android        # compila, instala y abre (JDK 17 + SDK 37)
 ```
 
-## 4. iOS: qué falta
+## 4. Basemap nativo (MapLibre)
+
+El basemap del radar es un **módulo nativo**: `@maplibre/maplibre-react-native` compila el
+SDK de MapLibre dentro del binario. El renderer se elige por **extensión de archivo**
+(`MapBasemap.tsx` en web, `MapBasemap.native.tsx` en el teléfono), no por un `if`: en el APK
+el mapa ya no es una ilustración, es un mapa real con el mismo `src/map/style.ts` y la misma
+cámara (`nativeCamera` delega en `centerLngLat`/`zoomForRadius`, cero fórmula propia).
+
+| Pieza | Dónde vive | Por qué |
+|---|---|---|
+| Dependencia | `demo/expo-demo/package.json` (`11.5.1`, exacta) | Fija la versión del SDK de MapLibre: un minor puede mover el `.so` |
+| Registro del módulo | `app.config.ts`, `'@maplibre/maplibre-react-native'` como string | Sin props: los defaults (minSdk 24, SDK 13.6.1, variante opengl) coinciden con la toolchain del SDK 58 |
+| Keep de R8 | `demo/expo-demo/plugins/withMapLibreProguard.js` | El release tiene `minify` on y el AAR viaja **sin** consumer rules |
+| Autolinking | `android/` generado por `prebuild` | No hay archivo propio que versionar: el módulo entra por Gradle |
+
+**Expo Go no sirve para esto.** Expo Go trae un conjunto fijo de módulos y este no está: al
+abrir Radar el componente nativo no existe y la app falla con
+`requireNativeComponent: MLRNMapView was not found`. Necesitás un **dev client** —un build
+propio con el módulo adentro—:
+
+```bash
+npx expo run:android            # compila un dev client y lo instala (JDK 17 + SDK 37, §1 y §2)
+npx expo start --dev-client     # Metro contra ese binario
+```
+
+Para el piloto se instala el APK de release del workflow (`assembleRelease`, firmado con el
+keystore de debug): no necesita Metro ni dev client.
+
+### Tamaño: +≈11 MB con un ABI, +≈41 MB con cuatro
+
+El AAR trae los `.so` ya compilados (≈41 MB, sin NDK: el módulo **no** tiene
+`externalNativeBuild`), así que el crecimiento del APK depende de cuántas ABIs se
+empaqueten:
+
+| ABIs | Delta aproximado del APK | Cuándo |
+|---|---|---|
+| `arm64-v8a` | **+≈11 MB** | Default del piloto: teléfonos actuales |
+| `armeabi-v7a,arm64-v8a,x86,x86_64` | **+≈41 MB** (los cuatro `.so` juntos) | Sólo si necesitás emulador o un teléfono viejo |
+
+Es una estimación de orden de magnitud: el número real lo publica el Summary del run (fila
+`ABIs`) junto al tamaño del APK. Si el APK no entra en el piloto, no toques Gradle: cambiá
+el input del workflow.
+
+### Keep de R8: por plugin, nunca en `android/`
+
+`android/` es salida de CNG (gitignored, `prebuild --clean` lo borra). Un `-keep` escrito a
+mano ahí **no existe** en CI ni en otra máquina, y el fallo aparece recién en runtime —una
+clase JNI que R8 recortó, sin stack útil—.
+
+Por eso el keep vive en `plugins/withMapLibreProguard.js`: un `withDangerousMod('android')`
+que escribe `android/app/proguard-rules.pro` —el archivo que `app/build.gradle` ya declara
+en `proguardFiles`— con un marcador de idempotencia.
+
+```proguard
+// @nearbyig/maplibre-r8
+-keep class org.maplibre.reactnative.** { *; }
+-keep class org.maplibre.android.** { *; }
+```
+
+| Regla | Detalle |
+|---|---|
+| Idempotencia | Si el marcador ya está, el mod devuelve sin escribir: `prebuild` ×2 ⇒ el bloque aparece **una** vez |
+| Orden en `app.config.ts` | El plugin del SDK **antes** del local: el dangerous mod corre sobre el `android/` ya generado |
+| Qué conserva | El keep propio del template (`react-native-reanimated`) queda intacto |
+| Cómo se verifica | `grep -c '@nearbyig/maplibre-r8' android/app/proguard-rules.pro` ⇒ `1` |
+
+El keep cubre dos namespaces a propósito (`org.maplibre.reactnative.**` y
+`org.maplibre.android.**`): los entrypoints JNI no se pueden inferir desde el JS. Infla el
+APK un poco; angostarlo es una optimización posterior, no un requisito del piloto.
+
+### Un ABI por run (workflow `android`)
+
+| Dónde | Qué |
+|---|---|
+| `Actions → android → Run workflow` | Input `abis` (texto), default `arm64-v8a`; acepta lista separada por comas |
+| Gradle | `./gradlew assembleRelease -PreactNativeArchitectures="<abis>"` |
+| Summary del run | Fila `ABIs` con el valor que se compiló de verdad |
+
+El default se resuelve en el shell (`${ABIS:-arm64-v8a}`) y se publica en `$GITHUB_ENV`, así
+Gradle y el Summary leen el mismo valor y no hay dos defaults que puedan divergir. Para
+repetirlo en local: `./gradlew assembleRelease -PreactNativeArchitectures="arm64-v8a"`.
+
+## 5. iOS: qué falta
 
 En Windows no hay forma de compilar: no hay Xcode ni simulador. La config ya está declarada
 (`ios.bundleIdentifier`, `buildNumber`, `supportsTablet: false`), así que el día que exista una Mac
@@ -133,18 +218,20 @@ Queda pendiente para cuando eso pase: las capturas de la ficha, el `PrivacyInfo.
 paquete y el texto de `NSLocationWhenInUseUsageDescription` (sale del plugin `expo-location`, el
 mismo string es-AR que Android). Nada de eso bloquea el piloto en Android.
 
-## 5. Cuando algo no cierra
+## 6. Cuando algo no cierra
 
 | Síntoma | Causa más probable | Qué hacer |
 |---|---|---|
+| La app falla al abrir Radar con `requireNativeComponent: MLRNMapView was not found` | estás en Expo Go: no compila módulos nativos propios | dev client: `npx expo run:android` (sección 4) |
+| El APK del CI pesa o tarda de más | se compilaron las 4 ABIs | re-disparar el workflow con `abis: arm64-v8a` (sección 4) |
 | `No matching toolchains found ... languageVersion=17` | falta JDK 17 o la ruta | sección 1, paso 3 |
 | `Failed to find target with hash string 'android-37'` | plataforma 37 ausente o con otro nombre | sección 2, después el escape hatch |
 | La app abre pero `/presence` falla | `EXPO_PUBLIC_API_URL` no llegó al bundle | reiniciar Metro con la variable puesta |
 | Cambios de `app.config.ts` no aparecen | `android/` es generado | `prebuild --clean` |
 | Warning `Install expo-system-ui in your project` | falta la dependencia | `npx expo install expo-system-ui` |
-| `ninja: error: Filename longer than 260 characters` | ruta absoluta de CMake duplicada | sección 6 |
+| `ninja: error: Filename longer than 260 characters` | ruta absoluta de CMake duplicada | sección 7 |
 
-## 6. Compilar en Windows: MAX_PATH
+## 7. Compilar en Windows: MAX_PATH
 
 | Punto | Detalle |
 |---|---|
