@@ -242,6 +242,22 @@ function storage(): Storage | null {
   }
 }
 
+/**
+ * Query string de la página, o `null` cuando este runtime no tiene DOM.
+ *
+ * `typeof window !== 'undefined'` **no** alcanza para detectar un navegador:
+ * React Native expone `window` como el global, con `location` ausente. Preguntar
+ * por la forma del objeto es la única detección honesta; con el guard viejo, el
+ * arranque en Android moría con `Cannot read property 'search' of undefined`.
+ */
+function locationSearch(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const search = (window as unknown as { location?: { search?: unknown } }).location?.search;
+  return typeof search === 'string' ? search : null;
+}
+
 export function readStoredApi(): string | null {
   try {
     return storage()?.getItem(API_STORAGE_KEY) ?? null;
@@ -390,7 +406,7 @@ export function isClearApiCommand(raw: string | null | undefined): boolean {
  * `expo start` sí, en un runtime sin DOM devuelve `null`.
  */
 export function readRuntimeZone(): string | null {
-  const search = typeof window === 'undefined' ? null : window.location.search;
+  const search = locationSearch();
   const query = readQueryZone(search);
   if (isClearZoneCommand(query)) {
     clearStoredZone();
@@ -412,7 +428,7 @@ export function readRuntimeZone(): string | null {
  * `expo start` sí, en un runtime sin DOM devuelve la del build.
  */
 export function readRuntimeApiBase(envUrl: string | undefined): ApiBaseResolution | null {
-  const search = typeof window === 'undefined' ? null : window.location.search;
+  const search = locationSearch();
   const query = readQueryApi(search);
   if (isClearApiCommand(query)) {
     clearStoredApi();
