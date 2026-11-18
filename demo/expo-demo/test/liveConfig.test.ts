@@ -9,6 +9,7 @@ import {
   readLiveSettings,
   readQueryApi,
   readQueryZone,
+  readRuntimeApiBase,
   readRuntimeZone,
   readStoredZone,
   resolveApiBase,
@@ -316,5 +317,23 @@ describe('auto-reparación del override muerto', () => {
         `buildBase ${String(buildBase)}`,
       ).toBe(false);
     }
+  });
+});
+
+describe('runtime sin DOM (React Native)', () => {
+  const previous = (globalThis as { window?: unknown }).window;
+
+  afterEach(() => {
+    (globalThis as { window?: unknown }).window = previous;
+  });
+
+  it('sin `location` no explota y cae a la base del build', () => {
+    // RN expone `window` sin `location`: el guard por `typeof window` lo daba
+    // por navegador y `window.location.search` tiraba TypeError al arrancar.
+    (globalThis as { window?: unknown }).window = { localStorage: null };
+    expect(() => readRuntimeZone()).not.toThrow();
+    expect(readRuntimeZone()).toBeNull();
+    expect(() => readRuntimeApiBase('https://api.example')).not.toThrow();
+    expect(readRuntimeApiBase('https://api.example')?.origin).toBe('env');
   });
 });

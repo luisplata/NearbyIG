@@ -159,6 +159,28 @@ export type GestureTarget = {
 export const UNLOCK_GESTURES: readonly string[] = ['pointerdown', 'keydown'];
 
 /**
+ * Target del desbloqueo, o `null` si este runtime no tiene eventos de DOM.
+ *
+ * `typeof window !== 'undefined'` **no** detecta un navegador: React Native
+ * expone `window` como el global, sin `addEventListener`. Con ese guard, el
+ * `useEffect` de arranque moría en Android con `undefined is not a function`
+ * antes de pintar el primer frame. Se pregunta por la forma, no por el nombre.
+ */
+function gestureTarget(): GestureTarget | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const candidate = window as unknown as Partial<GestureTarget>;
+  if (
+    typeof candidate.addEventListener !== 'function' ||
+    typeof candidate.removeEventListener !== 'function'
+  ) {
+    return null;
+  }
+  return candidate as GestureTarget;
+}
+
+/**
  * Instala el desbloqueo: el primer `pointerdown`/`keydown` reanuda el contexto y
  * los dos listeners se remueven. `passive` porque un listener de audio no puede
  * bloquear el scroll y no tiene por qué intentarlo.
@@ -167,9 +189,7 @@ export const UNLOCK_GESTURES: readonly string[] = ['pointerdown', 'keydown'];
  */
 export function installGestureUnlock(
   engine: SoundEngine = getSoundEngine(),
-  target: GestureTarget | null = typeof window === 'undefined'
-    ? null
-    : (window as unknown as GestureTarget),
+  target: GestureTarget | null = gestureTarget(),
 ): () => void {
   if (target === null) {
     return () => undefined;

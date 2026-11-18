@@ -178,4 +178,17 @@ describe('desbloqueo por gesto', () => {
     const cleanup = installGestureUnlock(engine, null);
     expect(() => cleanup()).not.toThrow();
   });
+  it('con un `window` sin eventos (React Native) no instala nada y no explota', () => {
+    // React Native expone `window` como el global, sin DOM: el guard por
+    // `typeof window` lo tomaba por navegador y moría en el arranque.
+    const previous = (globalThis as { window?: unknown }).window;
+    (globalThis as { window?: unknown }).window = { localStorage: null };
+    try {
+      const engine = createSoundEngine({ player: fakePlayer() });
+      const cleanup = installGestureUnlock(engine);
+      expect(() => cleanup()).not.toThrow();
+    } finally {
+      (globalThis as { window?: unknown }).window = previous;
+    }
+  });
 });
