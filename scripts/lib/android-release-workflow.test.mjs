@@ -68,22 +68,38 @@ test('el checkout trae la historia y los tags que necesita el CLI de versión', 
   assert.match(checkout, /fetch-tags: true/);
 });
 
-test('ningún env global puede hornear la API en el bundle', () => {
+test('la única API horneable es el origen canónico de producción', () => {
+  const CANONICAL = 'https://api.nearbyig.tech';
+
   // Un `env:` a nivel workflow entra a TODOS los pasos, incluido el de Gradle que
-  // corre Metro: `EXPO_PUBLIC_API_URL` se inlinea en el bundle y sobrevive al build.
-  assert.ok(!/^env:/m.test(source), 'el workflow no debe declarar env a nivel workflow');
-  // Un `KEY: valor` en la indentación de un `env:` (4 espacios) es la forma en que
-  // la variable entra al build. El guard `${...}` del paso de verificación no
-  // cuenta: ahí la variable es la que se está controlando.
-  assert.ok(
-    !/^ {4,}EXPO_PUBLIC_API_URL:/m.test(source),
-    'ningún paso debe asignar EXPO_PUBLIC_API_URL',
+  // corre Metro: `EXPO_PUBLIC_API_URL` se inlinea en el bundle y sobrevive al
+  // build. Por eso el valor tiene que ser el canónico y nada más — un túnel acá
+  // queda pegado en el `.aab` y muere la tarde que se apaga.
+  const workflowEnv = source.match(/^env:\n((?: {2}[^\n]*\n)+)/m);
+  assert.ok(workflowEnv, 'el workflow debe declarar `env:` con el origen canónico');
+  assert.match(
+    workflowEnv[1],
+    new RegExp(`^ {2}EXPO_PUBLIC_API_URL: ${CANONICAL}$`, 'm'),
+    'el `env:` del workflow debe ser exactamente el origen canónico',
   );
 
-  // La defensa es la assertion: se chequea antes de compilar y otra vez sobre el
-  // bundle empaquetado.
-  const guards = source.match(/\$\{EXPO_PUBLIC_API_URL:-/g) ?? [];
-  assert.ok(guards.length >= 2, `esperaba el guard antes de prebuild y en la verificación, encontré ${guards.length}`);
+  // Ningún paso puede pisarlo con otro host (`KEY: valor` a 4+ espacios es la
+  // forma en que la variable entra al build de ese paso).
+  for (const assignment of source.matchAll(/^ {4,}EXPO_PUBLIC_API_URL: *(.*)$/gm)) {
+    assert.equal(assignment[1].trim(), CANONICAL, 'un paso asignó una API distinta de la canónica');
+  }
+
+  // Doble defensa: se chequea antes de compilar y otra vez sobre el `.aab`.
+  const guards = source.match(/EXPO_PUBLIC_API_URL:-\}/g) ?? [];
+  assert.ok(guards.length >= 2, `esperaba los dos guards de EXPO_PUBLIC_API_URL, encontré ${guards.length}`);
+
+  // Y sobre el artefacto: el host canónico tiene que estar adentro, y ningún
+  // túnel. Sin esto el guard podría pasar y el bundle llevar otra cosa.
+  assert.ok(
+    source.includes(`grep -aqF '${CANONICAL}'`),
+    'la verificación del .aab debe exigir el origen canónico dentro del bundle',
+  );
+  assert.ok(source.includes('trycloudflare'), 'el check de host de túnel no debe desaparecer');
 });
 
 test('el .aab sale con las 4 ABIs de gradle.properties', () => {

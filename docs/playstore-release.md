@@ -58,7 +58,7 @@ Settings → Secrets and variables → Actions → New repository secret.
 |---|---|
 | `ANDROID_KEYSTORE_BASE64` | El keystore entero, en base64 (abajo). |
 | `ANDROID_KEYSTORE_PASSWORD` | El `-storepass` del paso 2. |
-| `ANDROID_KEY_ALIAS` | `upload` |
+| `ANDROID_KEY_ALIAS` | `nearbyig-upload` (el alias real del keystore de este equipo; tiene que coincidir exacto) |
 | `ANDROID_KEY_PASSWORD` | El `-keypass` del paso 2. |
 
 `ANDROID_KEYSTORE_PATH` **no es un secret y no se carga**: el workflow decodifica el
@@ -190,10 +190,11 @@ lo que instala el tester** y no se puede deshacer.
 
 ## 10. Lo que este release NO hace
 
-- **No hornea la API.** El workflow falla si `EXPO_PUBLIC_API_URL` está definida y
-  verifica el bundle empaquetado para que no quede un host de túnel adentro. Hoy el
-  `.aab` corre con el **dataset mock**; conectar el backend real es una decisión aparte
-  (y un cambio en este workflow).
+- **Hornea una sola API: el origen canónico.** `EXPO_PUBLIC_API_URL` vale
+  `https://api.nearbyig.tech` a nivel workflow y no se puede pisar por paso; el
+  workflow falla si el valor es otro y verifica el bundle empaquetado para que no
+  quede adentro ningún host de túnel (`*.trycloudflare.com`). El `.aab` conecta al
+  backend real desde el primer arranque.
 - **No sube nada a Play.** El upload es manual: no hay Play Developer API ni service
   account en este repo.
 - **No requiere Data Safety.** El formulario de seguridad de datos no es requisito para
