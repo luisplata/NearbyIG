@@ -1,0 +1,43 @@
+# Overlay del VPS ÚNICO. Se usa SIEMPRE el último, después de compose.prod.yml:
+#
+#   docker compose --env-file .env.vps \
+#     -f compose.yml -f compose.prod.yml -f compose.vps.yml \
+#     --profile local-db up -d
+#
+# Qué agrega sobre `compose.prod.yml`:
+#
+#   * **Nada se construye acá.** `build: !reset null` borra el `build:` heredado:
+#     la imagen llega ya construida (`docker load` o `docker pull`). En 1 vCPU un
+#     `docker build` de la API son 10-20 min con el server sin CPU para servir.
+#     Si falta la imagen, el deploy falla rápido en vez de empezar a compilar.
+#   * **Postgres tuneado para 4 GB.** Los defaults de la imagen asumen un server
+#     mucho más grande (`shared_buffers` 128MB suena poco pero `work_mem` 4MB por
+#     operación y `maintenance_work_mem` 64MB por proceso se acumulan). Con SSE
+#     no queremos que el OOM killer elija entre la API y la base.
+#   * **`shm_size` para Postgres.** El default de Docker es 64MB; con paralelismo
+#     de consultas espaciales se queda corto.
+name: nearbyig
+
+services:
+  db:
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=25
+    shm_size: 256mb
+
+  migrate:
+    build: !reset null
+    image: ${NEARBYIG_IMAGE:-nearbyig-api:local}
+
+  api:
+    build: !reset null
+    image: ${NEARBYIG_IMAGE:-nearbyig-api:local}
