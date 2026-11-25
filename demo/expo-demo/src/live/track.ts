@@ -10,7 +10,7 @@
  * **Qué NO hace.** No pide posiciones, no decide cuándo leer, no guarda nada y
  * no conoce el controlador. Es una función de dos puntos y un número.
  *
- * **Por qué haversine y no la diferencia de grados.** A la latitud de CDMX un
+ * **Por qué haversine y no la diferencia de grados.** A la latitud de Cancún un
  * grado de longitud mide ~105 km y en Bogotá ~111 km: comparar `dLat + dLng`
  * daría un umbral distinto en cada ciudad. La distancia esférica es la misma
  * cuenta para las dos zonas del catálogo y no necesita dependencias.

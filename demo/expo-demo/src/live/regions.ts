@@ -57,7 +57,7 @@ export function isDemoZoneKey(zoneKey: string | null | undefined): zoneKey is st
  *
  * Es el único puente `regionKey → geografía`. El mapa no elige ciudad por su
  * cuenta ni por el punto del GPS: si la sesión es `mx`, la zona demo es `cdmx`
- * y el basemap muestra CDMX. Sin región (dataset del build o antes de elegir
+ * (Cancún) y el basemap muestra esa zona. Sin región (dataset del build o antes de elegir
  * zona) cae en el centro de la demo, que es Buenos Aires.
  */
 export function centerForRegion(regionKey: string | null | undefined): LngLat {

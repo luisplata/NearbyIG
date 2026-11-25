@@ -618,9 +618,9 @@ describe('cierre', () => {
 });
 
 describe('presencia con ubicación real', () => {
-  const GPS_CDMX = {
+  const GPS_CANCUN = {
     status: 'ok' as const,
-    point: { lat: 19.432608, lng: -99.13321 },
+    point: { lat: 21.1619, lng: -86.8515 },
     accuracyM: 20,
   };
   const GPS_BOGOTA = { status: 'ok' as const, point: { lat: 4.6832, lng: -74.0974 }, accuracyM: 30 };
@@ -683,7 +683,7 @@ describe('presencia con ubicación real', () => {
     const server = makeServer();
     const { controller, presenceCalls, sessions, geoCalls, bodyOf } = makeGeoController(
       server,
-      async () => GPS_CDMX,
+      async () => GPS_CANCUN,
     );
 
     expect(await controller.start()).toBe(true);
@@ -697,14 +697,14 @@ describe('presencia con ubicación real', () => {
 
   it('con GPS en la misma región la presencia va con el punto y la barra dice GPS', async () => {
     const server = makeServer();
-    const { controller, calls, presenceCalls } = makeGeoController(server, async () => GPS_CDMX);
+    const { controller, calls, presenceCalls } = makeGeoController(server, async () => GPS_CANCUN);
 
     await controller.start();
     await controller.requestLocation();
     expect(controller.getState().location).toBe('gps');
     expect(controller.getState().notice).toBeNull();
     expect(JSON.parse(String(presenceCalls().at(-1)?.body))).toEqual({
-      point: { lat: 19.432608, lng: -99.13321 },
+      point: { lat: 21.1619, lng: -86.8515 },
     });
 
     // El punto no se repite: ninguna otra URL lo lleva en la query.
@@ -763,7 +763,7 @@ describe('presencia con ubicación real', () => {
         };
       },
     });
-    const { controller } = makeGeoController(server, async () => GPS_CDMX);
+    const { controller } = makeGeoController(server, async () => GPS_CANCUN);
 
     await controller.start();
     await controller.requestLocation();
@@ -787,7 +787,7 @@ describe('presencia con ubicación real', () => {
       createEventSource: () => null,
       requestPoint: async () => {
         geoCalls += 1;
-        return GPS_CDMX;
+        return GPS_CANCUN;
       },
       pollMs: 1_000,
       heartbeatMs: 50,
@@ -807,7 +807,7 @@ describe('presencia con ubicación real', () => {
     let attempt = 0;
     const { controller, sessions } = makeGeoController(server, async () => {
       attempt += 1;
-      return attempt === 1 ? { status: 'denied' } : GPS_CDMX;
+      return attempt === 1 ? { status: 'denied' } : GPS_CANCUN;
     });
 
     await controller.start();
@@ -825,7 +825,7 @@ describe('presencia con ubicación real', () => {
   it('elegir una zona de otra región cierra la sesión y abre otra en la correcta', async () => {
     const server = makeServer();
     const { controller, calls, presenceCalls, sessions, persistedZones, bodyOf } =
-      makeGeoController(server, async () => GPS_CDMX);
+      makeGeoController(server, async () => GPS_CANCUN);
 
     await controller.start();
     expect(controller.getState().session?.regionKey).toBe('mx');
@@ -856,7 +856,7 @@ describe('presencia con ubicación real', () => {
     const server = makeServer();
     const { controller, presenceCalls, sessions, persistedZones } = makeGeoController(
       server,
-      async () => GPS_CDMX,
+      async () => GPS_CANCUN,
     );
 
     await controller.start();
@@ -869,7 +869,7 @@ describe('presencia con ubicación real', () => {
 
   it('el diagnóstico queda en el estado y no guarda coordenadas en las métricas', async () => {
     const server = makeServer();
-    const { controller } = makeGeoController(server, async () => GPS_CDMX);
+    const { controller } = makeGeoController(server, async () => GPS_CANCUN);
 
     await controller.start();
     await controller.requestLocation();
@@ -882,8 +882,8 @@ describe('presencia con ubicación real', () => {
       fallbackRequired: false,
     });
     // El punto vive en memoria para centrar el mapa; el diagnóstico no lo copia.
-    expect(point).toEqual({ lat: 19.432608, lng: -99.13321 });
-    expect(JSON.stringify(diagnostics)).not.toMatch(/lat|lng|19\.4|-99\.1/);
+    expect(point).toEqual({ lat: 21.1619, lng: -86.8515 });
+    expect(JSON.stringify(diagnostics)).not.toMatch(/lat|lng|21\.1|-86\.8/);
   });
 
   it('los logs de diagnóstico llevan prefijo [geo] y no coordenadas', async () => {
@@ -894,7 +894,7 @@ describe('presencia con ubicación real', () => {
       initialZoneKey: 'cdmx',
       fetchImpl: server.fetchImpl as never,
       createEventSource: () => null,
-      requestPoint: async () => GPS_CDMX,
+      requestPoint: async () => GPS_CANCUN,
       log: (message) => logs.push(message),
       heartbeatMs: 10_000,
       pollMs: 10,

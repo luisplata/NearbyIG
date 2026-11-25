@@ -53,10 +53,10 @@ describe('estado de la barra', () => {
     expect(liveStatusText('dataset', state({ status: 'needs-zone' }))).toBe('elegí una zona demo');
   });
 
-  it('la ubicación se cuenta con la zona: "zona demo (CDMX)" no es "zona demo"', () => {
+  it('la ubicación se cuenta con la zona: "zona demo (Cancún)" no es "zona demo"', () => {
     expect(liveLocationText(emptyLiveState())).toBeNull();
     expect(liveLocationText(state({ location: 'gps', zoneKey: 'bogota' }))).toBe('GPS');
-    expect(liveLocationText(state({ location: 'demo', zoneKey: 'cdmx' }))).toBe('zona demo (CDMX)');
+    expect(liveLocationText(state({ location: 'demo', zoneKey: 'cdmx' }))).toBe('zona demo (Cancún)');
     expect(liveLocationText(state({ location: 'demo', zoneKey: 'bogota' }))).toBe(
       'zona demo (Bogotá)',
     );

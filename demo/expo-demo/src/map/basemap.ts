@@ -4,7 +4,7 @@
  *
  * **Centro = geografía de la región activa.** El basemap tiene que mostrar la
  * zona de la que hablan las distancias del radar: si la sesión es `mx` el mapa
- * es CDMX, si es `co` es Bogotá, y sin región (o en el dataset del build) es la
+ * es Cancún, si es `co` es Bogotá, y sin región (o en el dataset del build) es la
  * zona del guion, Buenos Aires. Un zoom con el cos(lat) de otra ciudad miente en
  * la escala, así que el centro viaja junto al cálculo y no como adorno.
  *
@@ -31,7 +31,9 @@ export const DEMO_CENTER: LngLat = { lon: -58.4306, lat: -34.5889 };
  * leyendo el catálogo. `live/regions.ts` traduce `regionKey → zoneKey`.
  */
 export const ZONE_CENTERS: Readonly<Record<string, LngLat>> = {
-  cdmx: { lon: -99.124, lat: 19.4062 },
+  // Clave histórica `cdmx`: la zona `mx` es Cancún. Temporal, hasta que el
+  // change `generated-geography` (S2/S4) derive el centro del catálogo.
+  cdmx: { lon: -86.8328, lat: 21.1155 },
   bogota: { lon: -74.0974, lat: 4.6832 },
 };
 
@@ -75,7 +77,7 @@ export function metersPerPixel(zoom: number, center: LngLat = DEMO_CENTER): numb
  * Zoom que hace que `radiusM` ocupe el radio útil de un cuadrado de `sidePx`.
  * Puro, monótono no creciente en el radio y con clamp; `sidePx` 0 no divide.
  *
- * El cos(lat) del centro entra en la fórmula: a 19° (CDMX) el mismo radio ocupa
+ * El cos(lat) del centro entra en la fórmula: a 21° (Cancún) el mismo radio ocupa
  * menos metros por píxel que a 34° (Buenos Aires), así que el zoom sube. Usar la
  * latitud de otra ciudad desalinearía anillos y cuadras.
  */

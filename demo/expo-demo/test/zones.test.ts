@@ -93,7 +93,7 @@ describe('punto → zona', () => {
 
   it('un punto de Bogotá no cae en CDMX, ni al revés', () => {
     expect(zoneForPoint({ lat: 4.6832, lng: -74.0974 })).toBe('bogota');
-    expect(zoneForPoint({ lat: 19.4062, lng: -99.124 })).toBe('cdmx');
+    expect(zoneForPoint({ lat: 21.1619, lng: -86.8515 })).toBe('cdmx');
   });
 
   it('fuera de México y Colombia no hay zona: se pide la elección', () => {
@@ -103,13 +103,13 @@ describe('punto → zona', () => {
   });
 
   it('justo afuera del anillo tampoco, aunque esté cerca', () => {
-    // Al oeste del vértice más occidental de CDMX.
-    expect(zoneForPoint({ lat: 19.4062, lng: -99.3 })).toBeNull();
+    // Al oeste del vértice más occidental de Cancún.
+    expect(zoneForPoint({ lat: 21.1619, lng: -86.95 })).toBeNull();
   });
 
   it('un punto con NaN no explota: no hay zona', () => {
-    expect(zoneForPoint({ lat: Number.NaN, lng: -99.124 })).toBeNull();
-    expect(zoneForPoint({ lat: 19.4062, lng: Number.POSITIVE_INFINITY })).toBeNull();
+    expect(zoneForPoint({ lat: Number.NaN, lng: -86.8515 })).toBeNull();
+    expect(zoneForPoint({ lat: 21.1619, lng: Number.POSITIVE_INFINITY })).toBeNull();
   });
 });
 

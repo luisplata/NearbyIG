@@ -9,7 +9,7 @@
     {
       "path": "catalog/zones.json",
       "rows": 2,
-      "sha256": "b9b69604bce315af18aa9c8a81cab3b2f40196354b02e29d3f6e6195c91f1ab5"
+      "sha256": "d3cde113fd70d63c183579b6ec4f67a8056e09e24bbb2c792c4307b617f16b6b"
     },
     {
       "path": "catalog/profiles.mx.json",
@@ -22,7 +22,7 @@
       "sha256": "61ab943115e59b3bc86093350ac83d81fef50fa24050be9f44a43b490d01fe13"
     }
   ],
-  "seedId": "seed-02b5fb0594be",
+  "seedId": "seed-2cded141bc59",
   "seedVersion": 1,
   "sources": {
     "fixtures": {

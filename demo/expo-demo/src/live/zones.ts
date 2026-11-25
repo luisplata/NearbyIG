@@ -44,15 +44,19 @@ export const DEMO_ZONE_POLYGONS: readonly DemoZonePolygon[] = [
     ],
   },
   {
+    // Clave histórica `cdmx`: la zona `mx` es Cancún desde la demo del fin de
+    // semana. Se conserva la clave para no tocar el freeze del contrato ni los
+    // tests de integración; el change `generated-geography` (S2/S4) convierte la
+    // geografía en dato y esta excepción desaparece.
     zoneKey: 'cdmx',
     ring: [
-      [-99.1915, 19.405],
-      [-99.165, 19.485],
-      [-99.09, 19.475],
-      [-99.055, 19.395],
-      [-99.085, 19.33],
-      [-99.155, 19.335],
-      [-99.1915, 19.405],
+      [-86.89, 21.03],
+      [-86.91, 21.19],
+      [-86.82, 21.22],
+      [-86.76, 21.15],
+      [-86.755, 21.07],
+      [-86.79, 21.02],
+      [-86.89, 21.03],
     ],
   },
 ];
