@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Política de privacidad — Nearby Social Club</title>
+<meta name="description" content="Qué datos guarda Nearby Social Club, por qué, cuánto tiempo y cómo pedir su eliminación.">
+<style>
+  :root { --ground:#0b0f14; --ink:#e6edf3; --muted:#9aa4b2; --accent:#f5e600; --line:#21262d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink);
+         font:16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { border-bottom:1px solid var(--line); }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 24px; }
+  header .wrap { display:flex; align-items:center; gap:12px; height:64px; }
+  header img { width:28px; height:28px; border-radius:8px; }
+  header a { color:var(--ink); text-decoration:none; font-weight:600; font-size:15px; }
+  main { padding: 48px 0 80px; }
+  h1 { font-size: clamp(28px, 5vw, 40px); line-height:1.1; letter-spacing:-.02em; margin:0 0 8px; }
+  .date { color:var(--muted); font-size:14px; margin:0 0 36px; }
+  h2 { font-size:19px; letter-spacing:-.01em; margin:36px 0 10px; }
+  p, li { color:#c9d1d9; }
+  ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  strong { color: var(--ink); }
+  a { color: var(--accent); }
+  table { width:100%; border-collapse: collapse; margin: 14px 0; font-size:15px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align: top; }
+  th { color:var(--muted); font-weight:500; font-size:13px; text-transform:uppercase; letter-spacing:.06em; }
+  .note { border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin:28px 0; background:#11161c; }
+  footer { border-top:1px solid var(--line); padding:24px 0 48px; color:var(--muted); font-size:14px; }
+  footer a { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <img src="../assets/brand/icon.svg" alt="">
+    <a href="../">Nearby Social Club</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <h1>Política de privacidad</h1>
+  <p class="date">Última actualización: 25 de noviembre de 2026</p>
+
+  <p>Nearby Social Club es una app de cercanía para cowork café: muestra personas que están a pocos metros y permite mandar un ping y abrir un chat cuando hay match. Esta página explica qué datos se guardan, para qué, cuánto tiempo y cómo pedir que se borren.</p>
+
+  <div class="note">
+    <strong>Versión actual: demo.</strong> No hay cuentas ni contraseñas. Cada vez que abrís la app se crea una <em>sesión de demo</em> con un perfil de prueba. No se pide nombre real, email ni teléfono.
+  </div>
+
+  <h2>1. Qué datos se guardan</h2>
+  <table>
+    <tr><th>Dato</th><th>Para qué</th><th>Cuánto dura</th></tr>
+    <tr><td>Sesión de demo (identificador y perfil asignado)</td><td>Mantener tu sesión y mostrarte en el listado</td><td>2 horas, o hasta que cierres la sesión</td></tr>
+    <tr><td>Ubicación (latitud y longitud)</td><td>Calcular quién está cerca tuyo y a qué distancia</td><td>12 segundos desde la última actualización</td></tr>
+    <tr><td>Pings, matches, mensajes de chat, bloqueos y reportes</td><td>Que la conversación y las reglas de seguridad funcionen</td><td>Mientras dure la demo</td></tr>
+    <tr><td>Notificaciones</td><td>Avisarte de un ping, un match o un mensaje</td><td>Mientras dure la demo</td></tr>
+    <tr><td>Registros técnicos del servidor (dirección IP, agente del navegador, identificador de request)</td><td>Diagnosticar errores y abuso</td><td>Lo que dure el archivo de log rotativo</td></tr>
+  </table>
+
+  <p><strong>No</strong> se guardan datos de pago, contactos del teléfono, fotos, ni el historial de navegación. <strong>No</strong> hay publicidad ni perfiles publicitarios.</p>
+
+  <h2>2. Ubicación: cómo se usa</h2>
+  <ul>
+    <li>La ubicación se usa <strong>sólo</strong> para calcular distancias y ordenar el listado.</li>
+    <li>El listado muestra <strong>distancias redondeadas</strong> (por ejemplo «240 m»), no coordenadas.</li>
+    <li>Con el <strong>modo fantasma</strong> activo no se publica tu presencia: seguís viendo a los demás, pero no aparecés en el listado.</li>
+    <li>La presencia caduca sola a los 12 segundos: si cerrás la app, dejás de estar «en línea».</li>
+  </ul>
+
+  <h2>3. Con quién se comparte</h2>
+  <ul>
+    <li><strong>Otros usuarios de la demo:</strong> tu perfil de prueba, tu intención declarada y la distancia redondeada. Nunca tus coordenadas exactas ni tu sesión.</li>
+    <li><strong>Proveedor de mapas</strong> (<code>tiles.openfreemap.org</code>): recibe la IP y el recuadro de mapa que se pide. No recibe tu ubicación precisa.</li>
+    <li><strong>Proveedor de alojamiento:</strong> el servidor donde corre la app y su base de datos.</li>
+    <li>No se venden datos ni se ceden a anunciantes. No hay rastreadores de terceros en la app.</li>
+  </ul>
+
+  <h2>4. Seguridad</h2>
+  <p>El tráfico va cifrado con HTTPS. La base de datos no está expuesta a internet y el acceso al servidor es sólo por clave SSH. Ningún sistema es infalible: si detectás un incidente, escribinos.</p>
+
+  <h2>5. Tus derechos</h2>
+  <p>Podés pedir <strong>acceso</strong>, <strong>corrección</strong> o <strong>eliminación</strong> de tus datos, y oponerte a su tratamiento, escribiendo a <a href="mailto:luisplata@gmail.com">luisplata@gmail.com</a>. Respondemos dentro de los 15 días hábiles siguientes.</p>
+  <p>Como la demo no guarda identidad real, para localizar tus datos vamos a pedirte el identificador de sesión que aparece en la app o la fecha y hora aproximada de uso.</p>
+
+  <h2>6. Menores de edad</h2>
+  <p>La app es para personas mayores de 18 años. No recopilamos datos de menores de forma consciente; si detectamos una cuenta o sesión de un menor, la eliminamos.</p>
+
+  <h2>7. Cambios</h2>
+  <p>Si esta política cambia, se actualiza esta página y la fecha del encabezado. Los cambios importantes se avisan dentro de la app.</p>
+
+  <h2>8. Contacto</h2>
+  <p>Responsable del tratamiento: Luis Plata · <a href="mailto:luisplata@gmail.com">luisplata@gmail.com</a></p>
+  <!-- Documento base redactado para la ficha de Play. Revisar con asesoría legal antes de un lanzamiento comercial con cuentas reales. -->
+</main>
+
+<footer>
+  <div class="wrap">
+    <a href="../">Inicio</a> · <a href="../terminos/">Términos y condiciones</a>
+  </div>
+</footer>
+</body>
+</html>
