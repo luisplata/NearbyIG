@@ -1,102 +1,521 @@
 <!doctype html>
 <html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <meta name="color-scheme" content="dark" />
-    <title>Nearby Social Club — Cowork Café</title>
-    <link rel="icon" type="image/png" href="assets/brand/icon-192.png" />
-    <link rel="apple-touch-icon" href="assets/brand/icon-192.png" />
-    <link rel="stylesheet" href="generated/tokens.css" />
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body id="top">
-    <header class="site-header">
-      <img
-        class="brand-icon"
-        src="assets/brand/icon.svg"
-        width="32"
-        height="32"
-        alt=""
-        data-copy-alt="about.brand"
-      />
-      <p class="brand-name" data-copy="about.brand"></p>
-      <span class="chip" data-copy="common.demoChip"></span>
-    </header>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Nearby Social Club — gente real a metros</title>
+<meta name="description" content="Nearby Social Club te muestra quién está cerca ahora y a qué distancia real. Presencia que caduca a los 12 segundos.">
+<meta name="robots" content="noindex, nofollow">
+<style>
+  :root {
+    --ground: #0b0f14;
+    --panel: #0e1319;
+    --panel-2: #121821;
+    --ink: #e6edf3;
+    --muted: #8b96a5;
+    --hair: #21262d;
+    --acc: #f5e600;
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --ease: cubic-bezier(.22,1,.36,1);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--ground); color: var(--ink);
+    font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  /* grano sutil: le saca el plástico al negro */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 60;
+    opacity: .035; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .wrap { width: min(1180px, calc(100% - 48px)); margin: 0 auto; }
+  a { color: inherit; }
 
-    <main>
-      <section class="hero" aria-labelledby="hero-title">
-        <p class="eyebrow" data-copy="landing.eyebrow"></p>
-        <h1 id="hero-title" data-copy="landing.title"></h1>
-        <p class="lede" data-copy="landing.subtitle"></p>
-        <p class="dataset">
-          <span data-copy="common.datasetId"></span>
-          <code data-dataset-id></code>
-        </p>
-        <p class="dataset">
-          <span data-copy="common.schemaVersion"></span>
-          <code data-schema-version></code>
-        </p>
-        <p class="note" data-copy="landing.datasetNote"></p>
-      </section>
+  /* ---------- barra ---------- */
+  .top {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--ground) 82%, transparent);
+    border-bottom: 1px solid var(--hair);
+  }
+  .top .inner {
+    display: flex; align-items: center; justify-content: space-between; padding: 16px 0;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; font-size: 12px; letter-spacing: .22em; text-transform: uppercase; }
+  .brand b { font-weight: 700; }
+  .brand span { color: var(--muted); letter-spacing: .18em; }
+  .top nav { display: flex; gap: 22px; align-items: center; }
+  .top nav a { color: var(--muted); text-decoration: none; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; transition: color .2s; }
+  .top nav a:hover { color: var(--acc); }
 
-      <section class="demos" aria-labelledby="demos-title">
-        <h2 id="demos-title" data-copy="landing.demosTitle"></h2>
-        <div class="cards">
-          <article class="card">
-            <div class="card-top">
-              <h3 data-copy="landing.expo.title"></h3>
-              <span class="tag" data-copy="landing.expo.tag"></span>
-            </div>
-            <p data-copy="landing.expo.description"></p>
-            <a class="cta" href="./expo/" data-copy="landing.openExpo"></a>
-          </article>
+  /* ---------- hero ---------- */
+  .hero { position: relative; overflow: hidden; }
+  .hero-grid {
+    display: grid; grid-template-columns: 1.05fr .95fr; gap: 40px;
+    align-items: center; padding: 56px 0 64px; min-height: 82vh;
+  }
+  .kicker { font-size: 11px; letter-spacing: .28em; text-transform: uppercase; color: var(--acc); margin-bottom: 18px; }
+  h1 {
+    font-size: clamp(38px, 6.2vw, 82px); line-height: .94;
+    letter-spacing: -.05em; font-weight: 700; text-transform: uppercase;
+  }
+  h1 .line { display: block; overflow: hidden; }
+  h1 .line > span {
+    display: block; transform: translateY(105%); opacity: 0;
+    animation: rise 1s var(--ease) forwards;
+  }
+  h1 .line:nth-child(1) > span { animation-delay: .05s; }
+  h1 .line:nth-child(2) > span { animation-delay: .18s; }
+  @keyframes rise { to { transform: translateY(0); opacity: 1; } }
+  h1 em { font-style: normal; color: var(--acc); }
+  .lede { margin-top: 22px; max-width: 44ch; color: #b9c2cd; font-size: 17px; }
+  .actions { display: flex; gap: 14px; align-items: center; margin-top: 32px; flex-wrap: wrap; }
+  .btn {
+    position: relative; display: inline-flex; align-items: center; gap: 10px; overflow: hidden;
+    background: var(--acc); color: #0b0f14; text-decoration: none; font-weight: 700;
+    font-size: 13px; letter-spacing: .12em; text-transform: uppercase;
+    padding: 15px 24px; border-radius: 8px;
+    transition: transform .35s var(--ease), box-shadow .35s var(--ease);
+  }
+  .btn::after {
+    content: ""; position: absolute; inset: 0; background: #fff9a3;
+    transform: translateY(101%); transition: transform .45s var(--ease);
+  }
+  .btn span { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 10px; }
+  .btn:hover::after { transform: translateY(0); }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 14px 40px -18px var(--acc); }
+  .btn .arrow { transition: transform .35s var(--ease); }
+  .btn:hover .arrow { transform: translateX(4px); }
+  .btn-ghost {
+    color: var(--ink); text-decoration: none; font-size: 13px; letter-spacing: .12em;
+    text-transform: uppercase; border-bottom: 1px solid var(--hair); padding-bottom: 4px;
+    transition: color .2s, border-color .2s;
+  }
+  .btn-ghost:hover { border-color: var(--acc); color: var(--acc); }
+
+  /* ---------- scope ---------- */
+  .scope-wrap { position: relative; width: min(100%, 460px); justify-self: end; will-change: transform; }
+  .scope {
+    position: relative; aspect-ratio: 1; width: 100%;
+    border: 1px solid var(--hair); border-radius: 4px; overflow: hidden;
+    background: radial-gradient(circle at 50% 50%, rgba(245,230,0,.055), transparent 62%), var(--panel);
+    transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+    transition: transform .5s var(--ease);
+  }
+  .scope svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .sweep {
+    position: absolute; inset: 0; transform-origin: 50% 50%; mix-blend-mode: screen;
+    background: conic-gradient(from 0deg, rgba(245,230,0,.32) 0deg, rgba(245,230,0,.07) 24deg, transparent 44deg);
+    animation: spin 5.5s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ping {
+    position: absolute; left: 50%; top: 50%; width: 10px; height: 10px;
+    margin: -5px 0 0 -5px; border: 1px solid var(--acc); border-radius: 50%;
+    opacity: 0; animation: ping 4s ease-out infinite;
+  }
+  .ping:nth-of-type(2) { animation-delay: 1.3s; }
+  .ping:nth-of-type(3) { animation-delay: 2.6s; }
+  @keyframes ping {
+    0% { transform: scale(1); opacity: .55; }
+    70% { opacity: .08; }
+    100% { transform: scale(34); opacity: 0; }
+  }
+  .blip { position: absolute; transform: translate(-50%, -50%); }
+  .blip i {
+    display: block; width: 8px; height: 8px; border-radius: 50%; background: var(--acc);
+    animation: breathe 3s ease-in-out infinite;
+  }
+  .blip:nth-of-type(2) i { animation-delay: .8s; }
+  .blip:nth-of-type(3) i { animation-delay: 1.6s; }
+  @keyframes breathe {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(245,230,0,.12); }
+    50% { box-shadow: 0 0 0 9px rgba(245,230,0,.03); }
+  }
+  .blip b {
+    position: absolute; left: 14px; top: -9px; white-space: nowrap; font-size: 10px;
+    letter-spacing: .12em; text-transform: uppercase; font-weight: 500;
+  }
+  .blip b span { color: var(--acc); font-variant-numeric: tabular-nums; }
+  .live {
+    display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 11px;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--muted);
+  }
+  .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--acc); animation: breathe 2s ease-in-out infinite; }
+  .live b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
+  .bar { margin-top: 8px; height: 2px; background: var(--hair); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--acc); animation: drain 12s linear infinite; }
+  @keyframes drain { from { width: 100%; } to { width: 0%; } }
+
+  /* ---------- ticker ---------- */
+  .ticker {
+    border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
+    overflow: hidden; padding: 12px 0; white-space: nowrap;
+  }
+  .ticker .track { display: inline-flex; gap: 42px; animation: slide 26s linear infinite; will-change: transform; }
+  .ticker span {
+    font-size: 11px; letter-spacing: .24em; text-transform: uppercase; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .ticker span b { color: var(--acc); font-weight: 500; }
+  @keyframes slide { to { transform: translateX(-50%); } }
+
+  /* ---------- lecturas ---------- */
+  .readings { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--hair); }
+  .reading {
+    padding: 34px 26px; border-right: 1px solid var(--hair); position: relative; overflow: hidden;
+    transition: background .4s var(--ease);
+  }
+  .reading:last-child { border-right: 0; }
+  .reading:hover { background: var(--panel); }
+  .reading::before {
+    content: ""; position: absolute; left: 0; top: 0; height: 2px; width: 0; background: var(--acc);
+    transition: width .6s var(--ease);
+  }
+  .reading:hover::before { width: 100%; }
+  .reading .n { font-size: 11px; letter-spacing: .2em; color: var(--muted); text-transform: uppercase; margin-bottom: 14px; }
+  .reading .big {
+    font-size: 46px; line-height: 1; letter-spacing: -.04em; font-weight: 700;
+    font-variant-numeric: tabular-nums; margin-bottom: 8px;
+  }
+  .reading .big small { font-size: 14px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-left: 6px; }
+  .reading h3 { font-size: 17px; margin-bottom: 6px; }
+  .reading p { color: var(--muted); font-size: 14.5px; }
+
+  /* ---------- secciones ---------- */
+  .section { padding: 84px 0; border-bottom: 1px solid var(--hair); }
+  .section h2 { font-size: clamp(24px, 3vw, 36px); letter-spacing: -.025em; margin-bottom: 10px; }
+  .section .sub { color: var(--muted); max-width: 58ch; margin-bottom: 36px; }
+
+  /* cards del listado */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; perspective: 1200px; }
+  .card {
+    position: relative; padding: 22px; border: 1px solid var(--hair); border-radius: 12px;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    transform-style: preserve-3d; will-change: transform;
+    transition: transform .35s var(--ease), border-color .35s var(--ease), box-shadow .35s var(--ease);
+  }
+  .card:hover { border-color: #33404f; box-shadow: 0 24px 60px -34px #000; }
+  .card .avatar {
+    width: 44px; height: 44px; border-radius: 50%; margin-bottom: 16px;
+    background: radial-gradient(circle at 30% 30%, #2b3a4d, #121821 70%);
+    border: 1px solid var(--hair);
+  }
+  .card .name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 17px; }
+  .card .name .v { width: 14px; height: 14px; border-radius: 50%; background: rgba(59,130,246,.18); color: #6ba8ff; font-size: 9px; display: grid; place-items: center; border: 1px solid rgba(107,168,255,.45); }
+  .card .name .on { width: 7px; height: 7px; border-radius: 50%; background: #38d39f; box-shadow: 0 0 0 3px rgba(56,211,159,.13); }
+  .card p { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .card .meta { display: flex; align-items: baseline; justify-content: space-between; margin-top: 18px; }
+  .card .intent { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  .card .dist { color: var(--acc); font-size: 15px; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+  .card .spark {
+    position: absolute; inset: 0; border-radius: 12px; pointer-events: none; opacity: 0;
+    background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(245,230,0,.10), transparent 60%);
+    transition: opacity .3s;
+  }
+  .card:hover .spark { opacity: 1; }
+
+  /* stats */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--hair); border: 1px solid var(--hair); border-radius: 12px; overflow: hidden; }
+  .stat { background: var(--ground); padding: 28px 24px; }
+  .stat .k { font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
+  .stat .v { font-size: 15px; }
+  .stat .v b { color: var(--ink); }
+
+  /* cierre */
+  .close { padding: 110px 0; position: relative; overflow: hidden; }
+  .close h2 { font-size: clamp(30px, 4.6vw, 56px); letter-spacing: -.04em; max-width: 20ch; line-height: 1.02; }
+  .close p { color: var(--muted); margin: 18px 0 30px; max-width: 50ch; }
+  .close .glow {
+    position: absolute; right: -10%; top: 50%; width: 520px; height: 520px; translate: 0 -50%;
+    background: radial-gradient(circle, rgba(245,230,0,.10), transparent 62%); pointer-events: none;
+  }
+
+  footer { border-top: 1px solid var(--hair); padding: 26px 0 56px; }
+  footer .f { display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  footer a { color: var(--muted); text-decoration: none; transition: color .2s; }
+  footer a:hover { color: var(--acc); }
+  footer .links { display: flex; gap: 18px; }
+
+  /* ---------- reveal ---------- */
+  /* Sin JS todo es visible: el estado inicial oculto sólo existe si el script corre. */
+  .js .rv { opacity: 0; transform: translateY(26px); transition: opacity .8s var(--ease), transform .8s var(--ease); }
+  .js .rv.in { opacity: 1; transform: none; }
+  .rv[data-d="1"] { transition-delay: .08s; }
+  .rv[data-d="2"] { transition-delay: .16s; }
+  .rv[data-d="3"] { transition-delay: .24s; }
+  .rv[data-d="4"] { transition-delay: .32s; }
+  .rv[data-d="5"] { transition-delay: .40s; }
+
+  @media (max-width: 1080px) { .cards { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 700px)  { .cards { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 34px; min-height: 0; padding: 34px 0 44px; }
+    .scope-wrap { max-width: 420px; justify-self: start; }
+    .readings, .stats { grid-template-columns: 1fr; }
+    .reading { border-right: 0; border-bottom: 1px solid var(--hair); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+    .rv { opacity: 1; transform: none; }
+    h1 .line > span { transform: none; opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap inner">
+    <div class="brand"><b>Nearby</b> <span>Social Club</span></div>
+    <nav>
+      <a href="#barrio">El barrio</a>
+      <a href="#privacidad">Privacidad</a>
+      <a href="./expo/">Abrir la app</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="kicker">Ciudad de México · Bogotá</p>
+        <h1>
+          <span class="line"><span>Gente real</span></span>
+          <span class="line"><span>a <em>240 m</em></span></span>
+        </h1>
+        <p class="lede">
+          Nearby muestra quién está cerca <b>ahora</b> y a qué distancia real.
+          No es un catálogo de perfiles: la presencia caduca a los 12 segundos.
+        </p>
+        <div class="actions">
+          <a class="btn" href="./expo/" data-magnetic><span>Abrir la app <span class="arrow">→</span></span></a>
+          <a class="btn-ghost" href="#barrio">Ver el barrio</a>
         </div>
-      </section>
+      </div>
 
-      <section class="shared" aria-labelledby="shared-title">
-        <h2 id="shared-title" data-copy="landing.compareTitle"></h2>
-        <ul class="checks">
-          <li data-copy="landing.compare.dataset"></li>
-          <li data-copy="landing.compare.screens"></li>
-          <li data-copy="landing.compare.timers"></li>
-          <li data-copy="landing.compare.offline"></li>
-          <li data-copy="landing.compare.reset"></li>
-        </ul>
-        <p class="note" data-copy="landing.compare.diff"></p>
-      </section>
+      <div class="scope-wrap" id="scopeWrap">
+        <div class="scope" id="scope" role="img" aria-label="Radar con tres personas a 240 metros, 1,2 kilómetros y 2,6 kilómetros">
+          <svg viewBox="0 0 400 400" aria-hidden="true">
+            <g fill="none" stroke="#21262d" stroke-width="1">
+              <circle cx="200" cy="200" r="60" /><circle cx="200" cy="200" r="110" /><circle cx="200" cy="200" r="160" />
+              <line x1="200" y1="40" x2="200" y2="360" /><line x1="40" y1="200" x2="360" y2="200" />
+            </g>
+            <circle cx="200" cy="200" r="5" fill="#f5e600" />
+            <circle cx="200" cy="200" r="12" fill="none" stroke="#f5e600" stroke-opacity=".35" />
+          </svg>
+          <div class="sweep" aria-hidden="true"></div>
+          <div class="ping" aria-hidden="true"></div>
+          <div class="ping" aria-hidden="true"></div>
+          <div class="ping" aria-hidden="true"></div>
+          <div class="blip" style="left:63%;top:38%"><i></i><b>Vale <span>240 m</span></b></div>
+          <div class="blip" style="left:38%;top:66%"><i></i><b>Tomi <span>1,2 km</span></b></div>
+          <div class="blip" style="left:72%;top:72%"><i></i><b>Cami <span>2,6 km</span></b></div>
+        </div>
+        <div class="live"><span class="dot"></span> Presencia activa · expira en <b id="cd">11</b> s</div>
+        <div class="bar" aria-hidden="true"><i></i></div>
+      </div>
+    </div>
+  </section>
 
-      <section class="sim" aria-labelledby="sim-title">
-        <h2 id="sim-title" data-copy="common.simTitle"></h2>
-        <p class="note" data-copy="landing.simIntro"></p>
-        <ol class="sim-list">
-          <li data-copy="common.simItems.1"></li>
-          <li data-copy="common.simItems.2"></li>
-          <li data-copy="common.simItems.3"></li>
-          <li data-copy="common.simItems.4"></li>
-          <li data-copy="common.simItems.5"></li>
-          <li data-copy="common.simItems.6"></li>
-          <li data-copy="common.simItems.7"></li>
-          <li data-copy="common.simItems.8"></li>
-        </ol>
-      </section>
-    </main>
+  <div class="ticker" aria-hidden="true">
+    <div class="track">
+      <span>Vale <b>240 m</b></span><span>Nico <b>480 m</b></span><span>Tomi <b>1,2 km</b></span><span>Juli <b>1,5 km</b></span><span>Fran <b>2,0 km</b></span><span>Cami <b>2,6 km</b></span><span>Lean <b>3,2 km</b></span><span>Mica <b>3,9 km</b></span>
+      <span>Vale <b>240 m</b></span><span>Nico <b>480 m</b></span><span>Tomi <b>1,2 km</b></span><span>Juli <b>1,5 km</b></span><span>Fran <b>2,0 km</b></span><span>Cami <b>2,6 km</b></span><span>Lean <b>3,2 km</b></span><span>Mica <b>3,9 km</b></span>
+    </div>
+  </div>
 
-    <footer class="site-footer">
-      <p data-copy="landing.footer"></p>
-      <p class="footer-demo"><span class="chip" data-copy="common.demoChip"></span></p>
-      <p class="footer-legal">
-        <a href="./privacidad/">Política de privacidad</a>
-        <span aria-hidden="true"> · </span>
-        <a href="./terminos/">Términos y condiciones</a>
-        <span aria-hidden="true"> · </span>
-        <a href="./eliminar-cuenta/">Eliminar mi cuenta</a>
+  <section class="wrap">
+    <div class="readings">
+      <div class="reading rv">
+        <p class="n">01 · Distancia</p>
+        <p class="big">240<small>m</small></p>
+        <h3>Medida, no sugerida</h3>
+        <p>Ordenado por metros reales entre vos y cada persona conectada. Sin “cerca tuyo” inventado por un algoritmo.</p>
+      </div>
+      <div class="reading rv" data-d="1">
+        <p class="n">02 · Presencia</p>
+        <p class="big">12<small>s</small></p>
+        <h3>Y después se apaga</h3>
+        <p>Si cerrás la app, dejás de estar en línea. El listado muestra quién está ahí mientras lo estás mirando.</p>
+      </div>
+      <div class="reading rv" data-d="2">
+        <p class="n">03 · Privacidad</p>
+        <p class="big">1<small>toque</small></p>
+        <h3>Fantasma cuando quieras</h3>
+        <p>Ves a los demás sin aparecer en el listado. Nunca mostramos coordenadas exactas, sólo distancias.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="barrio">
+    <div class="wrap">
+      <h2 class="rv">El barrio, ahora</h2>
+      <p class="sub rv" data-d="1">Datos reales de una sesión de demostración: son las distancias que devuelve el backend, no un ejemplo ilustrativo. Pasá el mouse por una tarjeta.</p>
+      <div class="cards">
+        <article class="card rv" data-tilt>
+          <span class="spark"></span>
+          <div class="avatar"></div>
+          <div class="name">Vale <span class="v">✓</span> <span class="on"></span></div>
+          <p>De paso por el barrio.</p>
+          <div class="meta"><span class="intent">Networking</span><span class="dist">240 m</span></div>
+        </article>
+        <article class="card rv" data-d="1" data-tilt>
+          <span class="spark"></span>
+          <div class="avatar"></div>
+          <div class="name">Nico <span class="on"></span></div>
+          <p>Buscando plan para hoy.</p>
+          <div class="meta"><span class="intent">Amistad</span><span class="dist">480 m</span></div>
+        </article>
+        <article class="card rv" data-d="2" data-tilt>
+          <span class="spark"></span>
+          <div class="avatar"></div>
+          <div class="name">Tomi <span class="on"></span></div>
+          <p>Saliendo a correr.</p>
+          <div class="meta"><span class="intent">Actividades</span><span class="dist">1,2 km</span></div>
+        </article>
+        <article class="card rv" data-d="3" data-tilt>
+          <span class="spark"></span>
+          <div class="avatar"></div>
+          <div class="name">Cami <span class="v">✓</span> <span class="on"></span></div>
+          <p>Caminando sin apuro.</p>
+          <div class="meta"><span class="intent">Amistad</span><span class="dist">2,6 km</span></div>
+        </article>
+        <article class="card rv" data-d="4" data-tilt>
+          <span class="spark"></span>
+          <div class="avatar"></div>
+          <div class="name">Lean <span class="on"></span></div>
+          <p>En el taller de cerámica.</p>
+          <div class="meta"><span class="intent">Actividades</span><span class="dist">3,2 km</span></div>
+        </article>
+      </div>
+      <p class="sub rv" data-d="5" style="margin-top:22px;margin-bottom:0">
+        <b style="color:var(--ink)">Por qué importa:</b> el ping nace de una distancia que podés verificar. Si la persona se va, la tarjeta desaparece.
       </p>
-      <p><a href="#top" data-copy="landing.backToTop"></a></p>
-    </footer>
+    </div>
+  </section>
 
-    <script src="generated/dataset.js"></script>
-    <script src="main.js"></script>
-  </body>
+  <section class="section" id="privacidad">
+    <div class="wrap">
+      <h2 class="rv">Lo que no hacemos</h2>
+      <p class="sub rv" data-d="1">La cercanía sólo funciona si es segura. Estas son reglas del producto, no promesas de marketing.</p>
+      <div class="stats rv" data-d="2">
+        <div class="stat"><p class="k">Coordenadas</p><p class="v"><b>Nunca exactas.</b> Distancias redondeadas; tu ubicación precisa no se publica.</p></div>
+        <div class="stat"><p class="k">Rastreo</p><p class="v"><b>Sin analytics.</b> Ni píxeles de terceros ni perfiles publicitarios. El único servicio externo son los mapas.</p></div>
+        <div class="stat"><p class="k">Control</p><p class="v"><b>Bloquear y reportar</b> desde cada tarjeta, sin formularios. El modo fantasma te saca del listado.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="close">
+    <div class="glow"></div>
+    <div class="wrap">
+      <h2 class="rv">¿Quién está a metros tuyo ahora mismo?</h2>
+      <p class="rv" data-d="1">Abrí la app y mirá. Si no te convence en un minuto, cerraste la pestaña y no pasó nada.</p>
+      <a class="btn rv" data-d="2" href="./expo/" data-magnetic><span>Abrir la app <span class="arrow">→</span></span></a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap f">
+    <span>Nearby Social Club · demostración <code data-dataset-id style="color:#5f6b7a;font-size:11px;margin-left:6px"></code></span>
+    <div class="links">
+      <a href="./privacidad/">Privacidad</a>
+      <a href="./terminos/">Términos</a>
+      <a href="./eliminar-cuenta/">Eliminar mi cuenta</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  document.documentElement.classList.add("js");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* 1 · contador de presencia */
+  var cd = document.getElementById("cd");
+  if (cd && !reduce) {
+    var n = 12;
+    setInterval(function () { n = n <= 1 ? 12 : n - 1; cd.textContent = String(n); }, 1000);
+  }
+
+  /* 2 · reveal al entrar en viewport */
+  var items = [].slice.call(document.querySelectorAll(".rv"));
+  if (!("IntersectionObserver" in window) || reduce) {
+    items.forEach(function (el) { el.classList.add("in"); });
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { rootMargin: "0px 0px -12% 0px", threshold: .12 });
+    items.forEach(function (el) { io.observe(el); });
+  }
+
+  /* 3 · tilt 3D + luz que sigue al mouse en las tarjetas */
+  if (!reduce && window.matchMedia("(hover: hover)").matches) {
+    document.querySelectorAll("[data-tilt]").forEach(function (card) {
+      card.addEventListener("mousemove", function (ev) {
+        var r = card.getBoundingClientRect();
+        var px = (ev.clientX - r.left) / r.width;
+        var py = (ev.clientY - r.top) / r.height;
+        card.style.transform =
+          "perspective(900px) rotateY(" + ((px - .5) * 9).toFixed(2) + "deg) rotateX(" +
+          ((.5 - py) * 9).toFixed(2) + "deg) translateY(-4px)";
+        card.style.setProperty("--mx", (px * 100).toFixed(1) + "%");
+        card.style.setProperty("--my", (py * 100).toFixed(1) + "%");
+      });
+      card.addEventListener("mouseleave", function () { card.style.transform = ""; });
+    });
+
+    /* 4 · el scope responde al mouse */
+    var scope = document.getElementById("scope");
+    if (scope) {
+      var wrap = document.getElementById("scopeWrap");
+      wrap.addEventListener("mousemove", function (ev) {
+        var r = wrap.getBoundingClientRect();
+        var px = (ev.clientX - r.left) / r.width;
+        var py = (ev.clientY - r.top) / r.height;
+        scope.style.setProperty("--ry", ((px - .5) * 10).toFixed(2) + "deg");
+        scope.style.setProperty("--rx", ((.5 - py) * 10).toFixed(2) + "deg");
+      });
+      wrap.addEventListener("mouseleave", function () {
+        scope.style.setProperty("--ry", "0deg"); scope.style.setProperty("--rx", "0deg");
+      });
+    }
+
+    /* 5 · botones magnéticos */
+    document.querySelectorAll("[data-magnetic]").forEach(function (btn) {
+      btn.addEventListener("mousemove", function (ev) {
+        var r = btn.getBoundingClientRect();
+        var dx = (ev.clientX - (r.left + r.width / 2)) / r.width;
+        var dy = (ev.clientY - (r.top + r.height / 2)) / r.height;
+        btn.style.transform = "translate(" + (dx * 6).toFixed(1) + "px," + (dy * 5).toFixed(1) + "px)";
+      });
+      btn.addEventListener("mouseleave", function () { btn.style.transform = ""; });
+    });
+  }
+
+  /* 6 · parallax suave del scope */
+  if (!reduce) {
+    var sw = document.getElementById("scopeWrap");
+    var ticking = false;
+    window.addEventListener("scroll", function () {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () {
+        var y = window.scrollY;
+        if (sw && y < 900) sw.style.translate = "0 " + (y * -0.06).toFixed(1) + "px";
+        ticking = false;
+      });
+    }, { passive: true });
+  }
+})();
+</script>
+</body>
 </html>
