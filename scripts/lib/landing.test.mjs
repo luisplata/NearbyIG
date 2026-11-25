@@ -21,20 +21,35 @@ test('la landing toma todo el texto del catálogo de copy', () => {
   const html = landingFile('index.html');
   const keys = [...html.matchAll(/data-copy(?:-alt)?="([^"]+)"/g)].map((match) => match[1]);
 
-  assert.ok(keys.length >= 20, `esperaba al menos 20 claves, encontré ${keys.length}`);
+  // El rebuild inlineó el cuerpo de la landing a propósito, así que un mínimo de
+  // claves ya no mide "todo el texto viene del catálogo". Lo que sí garantiza este
+  // test: ninguna clave referenciada falta en copy.json, los 8 ítems de
+  // "Qué es simulado" están referenciados y el chip DEMO vive en header y footer.
   for (const key of keys) {
     assert.ok(key in copy, `index.html referencia una clave inexistente: ${key}`);
   }
 
-  const simItems = keys.filter((key) => key.startsWith('common.simItems.'));
-  assert.equal(simItems.length, 8, 'la landing lista los 8 ítems de "Qué es simulado"');
+  const simItems = keys
+    .filter((key) => key.startsWith('common.simItems.'))
+    .sort();
+  assert.deepEqual(
+    simItems,
+    [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `common.simItems.${n}`),
+    'la landing lista los 8 ítems de "Qué es simulado"',
+  );
+
+  assert.equal(
+    keys.filter((key) => key === 'common.demoChip').length,
+    2,
+    'el chip DEMO aparece en el header y en el footer',
+  );
 });
 
 test('la landing declara noindex y un enlace relativo a la demo publicada', () => {
   const html = landingFile('index.html');
 
   assert.match(html, /<html lang="es">/);
-  assert.match(html, /<meta name="robots" content="noindex, nofollow" \/>/);
+  assert.match(html, /<meta name="robots" content="noindex, nofollow"\s*\/?>/);
   assert.ok(html.includes('href="./expo/"'), 'falta el enlace relativo a ./expo/');
   assert.ok(html.includes('data-dataset-id'), 'falta el placeholder del datasetId');
   assert.ok(html.includes('data-schema-version'), 'falta el placeholder del schemaVersion');
@@ -72,7 +87,22 @@ test('la landing sólo usa variables generadas desde design-tokens.json', () => 
 });
 
 test('la landing no pide nada a dominios externos', () => {
+  // Sólo importan los canales que disparan un request: src, href, url(...) y
+  // @import. Un xmlns es un identificador XML, no una URL que se descargue, y una
+  // URI data: viaja embebida en el documento. Ignorarlos evita falsos positivos
+  // como el SVG inline con xmlns="http://www.w3.org/2000/svg".
+  const external = /^(?:https?:)?\/\//i;
   for (const name of ['index.html', 'styles.css', 'main.js', 'generated/dataset.js', 'generated/tokens.css']) {
-    assert.ok(!/https?:\/\//i.test(landingFile(name)), `${name} contiene una URL externa`);
+    const text = landingFile(name);
+    const targets = [
+      ...text.matchAll(/\b(?:src|href)\s*=\s*["']([^"']+)["']/gi),
+      ...text.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi),
+      ...text.matchAll(/@import\s+["']([^"']+)["']/gi),
+    ].map((match) => match[1].trim());
+
+    for (const target of targets) {
+      if (target.startsWith('data:')) continue;
+      assert.ok(!external.test(target), `${name} pide a un host externo: ${target}`);
+    }
   }
 });

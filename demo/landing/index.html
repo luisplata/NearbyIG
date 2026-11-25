@@ -45,12 +45,19 @@
   .top .inner {
     display: flex; align-items: center; justify-content: space-between; padding: 16px 0;
   }
-  .brand { display: flex; align-items: baseline; gap: 10px; font-size: 12px; letter-spacing: .22em; text-transform: uppercase; }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 12px; letter-spacing: .22em; text-transform: uppercase; }
   .brand b { font-weight: 700; }
   .brand span { color: var(--muted); letter-spacing: .18em; }
   .top nav { display: flex; gap: 22px; align-items: center; }
   .top nav a { color: var(--muted); text-decoration: none; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; transition: color .2s; }
   .top nav a:hover { color: var(--acc); }
+  .chip {
+    display: inline-flex; align-items: center; padding: 3px 7px;
+    border: 1px solid var(--acc); border-radius: 4px;
+    color: var(--acc); font-size: 10px; font-weight: 700; line-height: 1;
+    letter-spacing: .16em; text-transform: uppercase; white-space: nowrap;
+  }
+  .brand .chip { color: var(--acc); letter-spacing: .16em; }
 
   /* ---------- hero ---------- */
   .hero { position: relative; overflow: hidden; }
@@ -226,6 +233,19 @@
   .stat .v { font-size: 15px; }
   .stat .v b { color: var(--ink); }
 
+  /* qué es simulado */
+  .sim {
+    list-style: none; display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 1px; background: var(--hair); border: 1px solid var(--hair);
+    border-radius: 12px; overflow: hidden;
+  }
+  .sim li { position: relative; background: var(--ground); padding: 18px 22px 18px 42px; font-size: 14.5px; color: var(--muted); }
+  .sim li::before {
+    content: ""; position: absolute; left: 22px; top: 24px;
+    width: 7px; height: 7px; border-radius: 50%;
+    border: 1px solid var(--acc); background: rgba(245,230,0,.14);
+  }
+
   /* cierre */
   .close { padding: 110px 0; position: relative; overflow: hidden; }
   .close h2 { font-size: clamp(30px, 4.6vw, 56px); letter-spacing: -.04em; max-width: 20ch; line-height: 1.02; }
@@ -256,8 +276,15 @@
   @media (max-width: 900px) {
     .hero-grid { grid-template-columns: 1fr; gap: 34px; min-height: 0; padding: 34px 0 44px; }
     .scope-wrap { max-width: 420px; justify-self: start; }
-    .readings, .stats { grid-template-columns: 1fr; }
+    .readings, .stats, .sim { grid-template-columns: 1fr; }
     .reading { border-right: 0; border-bottom: 1px solid var(--hair); }
+  }
+  @media (max-width: 860px) {
+    /* Marca + slogan + chip ya ocupan el ancho: la nav deja lugar y los CTA del hero siguen. */
+    .top nav { display: none; }
+  }
+  @media (max-width: 480px) {
+    .brand { font-size: 11px; letter-spacing: .18em; gap: 7px; }
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
@@ -270,7 +297,11 @@
 
 <header class="top">
   <div class="wrap inner">
-    <div class="brand"><b>Nearby</b> <span>Social Club</span></div>
+    <div class="brand">
+      <b data-copy="about.brand"></b>
+      <span data-copy="landing.eyebrow"></span>
+      <span class="chip" data-copy="common.demoChip"></span>
+    </div>
     <nav>
       <a href="#barrio">El barrio</a>
       <a href="#privacidad">Privacidad</a>
@@ -283,7 +314,7 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <p class="kicker">Ciudad de México · Bogotá</p>
+        <p class="kicker">Cancún · Bogotá</p>
         <h1>
           <span class="line"><span>Gente real</span></span>
           <span class="line"><span>a <em>240 m</em></span></span>
@@ -411,6 +442,23 @@
     </div>
   </section>
 
+  <section class="section" id="simulado">
+    <div class="wrap">
+      <h2 class="rv" data-copy="common.simTitle"></h2>
+      <p class="sub rv" data-d="1" data-copy="about.disclaimer"></p>
+      <ul class="sim rv" data-d="2">
+        <li data-copy="common.simItems.1"></li>
+        <li data-copy="common.simItems.2"></li>
+        <li data-copy="common.simItems.3"></li>
+        <li data-copy="common.simItems.4"></li>
+        <li data-copy="common.simItems.5"></li>
+        <li data-copy="common.simItems.6"></li>
+        <li data-copy="common.simItems.7"></li>
+        <li data-copy="common.simItems.8"></li>
+      </ul>
+    </div>
+  </section>
+
   <section class="close">
     <div class="glow"></div>
     <div class="wrap">
@@ -423,8 +471,9 @@
 
 <footer>
   <div class="wrap f">
-    <span>Nearby Social Club · demostración <code data-dataset-id style="color:#5f6b7a;font-size:11px;margin-left:6px"></code></span>
+    <span>Nearby Social Club · demostración <code data-dataset-id style="color:#5f6b7a;font-size:11px;margin-left:6px"></code> <code data-schema-version style="color:#5f6b7a;font-size:11px"></code></span>
     <div class="links">
+      <span class="chip" data-copy="common.demoChip"></span>
       <a href="./privacidad/">Privacidad</a>
       <a href="./terminos/">Términos</a>
       <a href="./eliminar-cuenta/">Eliminar mi cuenta</a>
@@ -432,6 +481,8 @@
   </div>
 </footer>
 
+<script src="generated/dataset.js"></script>
+<script src="main.js"></script>
 <script>
 (function () {
   document.documentElement.classList.add("js");
