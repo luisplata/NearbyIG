@@ -35,7 +35,7 @@ curl -s -X POST https://api.example.com/demo/reset \
   teléfono) → Network filtrado por `discovery`.
 - Silenciá notificaciones del sistema: **no hay push** en esta demo (por diseño).
 
-**Regiones:** `mx` (CDMX) y `co` (Bogotá) están **aisladas**. Los dos
+**Regiones:** `mx` (Cancún) y `co` (Bogotá) están **aisladas**. Los dos
 dispositivos van a la **misma** región y a la **misma zona** (`mx` / `cdmx`). Si
 uno elige `bogota`, no se ven: eso está bien y se explica en el Acto 3.
 
@@ -65,7 +65,7 @@ está “en uso”, usá **takeover** en `B`.
 
 ## 3. Acto 3 — Zona y GPS (1 min)
 
-**Hacer:** los dos eligen **CDMX**. En `A` **aceptá** el permiso de ubicación; en
+**Hacer:** los dos eligen **Cancún**. En `A` **aceptá** el permiso de ubicación; en
 `B` **denegalo**.
 
 **Decir:**
@@ -226,3 +226,21 @@ down -v`, ni mostrar el `Authorization` en DevTools/URLs.
 - [ ] Reset propio aislado; el otro dispositivo intacto.
 - [ ] En Network no hay coordenadas.
 - [ ] El mock sigue disponible como fallback.
+
+## 13. Simular ubicación en Cancún
+
+La zona `mx` es **Cancún** (la clave interna sigue siendo `cdmx`: `?zone=cdmx` no
+cambia). Dos caminos, uno por dispositivo:
+
+**(a) Sin GPS, elegí la zona demo.** No pide permisos y funciona en remoto: el
+selector de zona y el sheet ofrecen Cancún y Bogotá, y el radar usa el centroide
+del polígono de la zona.
+
+**(b) Con GPS simulado en Chrome/Edge.** DevTools → ⋯ → More tools → Sensors →
+Location → **Custom** y poné `21.161900, -86.851500` (centro de Cancún). Recargá:
+el punto cae dentro del polígono, la app resuelve la zona y abre sesión `mx` sin
+pasar por el sheet.
+
+El radar corta en **5 km**, así que las dos sesiones tienen que estar en la
+**misma zona**: una en Cancún y otra en Bogotá (o con el GPS simulado en otra
+ciudad) no se ven, y eso no es un bug.
