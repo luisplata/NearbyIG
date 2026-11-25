@@ -9,8 +9,8 @@ dueño de la cuenta, porque todavía no hay Play Developer API.
 | # | Dónde | Qué pasa |
 |---|---|---|
 | 1 | Actions → `android-release` → Run workflow | `dry_run=true` la primera vez: compila y verifica sin tag ni Release |
-| 2 | Actions → run verde | El `.aab` queda como artifact `nearbyig-android-aab` (90 días) |
-| 3 | Repo → Releases | Fuera de dry run: `vX.Y.Z` con el `.aab` adjunto |
+| 2 | Actions → run verde | El `.aab` queda como artifact `NearbySocialClub-<versión>` (90 días) |
+| 3 | Repo → Releases | Fuera de dry run: `vX.Y.Z` con `NearbySocialClub-<versión>.aab` adjunto |
 | 4 | Play Console → Internal testing | Subís el `.aab`, agregás testers, compartís el link |
 
 Si el paso `Read the release version` falla, no se compiló nada: mirá la tabla de

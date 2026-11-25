@@ -317,11 +317,25 @@ jobs:
       # Se sube también en `dry_run`: es la forma de bajar y probar el artefacto
       # antes de que exista un Release. 90 días porque el upload manual a Console
       # puede esperar semanas.
+      # El nombre del archivo es lo primero que se ve al descargar: `app-release.aab`
+      # no dice qué producto ni qué versión es. Se copia a
+      # `NearbySocialClub-<versión>.aab` y de ahí sale tanto el artifact como el
+      # asset del Release.
+      - name: Name the aab after the product and version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          src="demo/expo-demo/android/app/build/outputs/bundle/release/app-release.aab"
+          out="$RUNNER_TEMP/NearbySocialClub-$VERSION.aab"
+          cp "$src" "$out"
+          ls -l "$out"
+
       - name: Upload aab artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nearbyig-android-aab
-          path: demo/expo-demo/android/app/build/outputs/bundle/release/app-release.aab
+          name: NearbySocialClub-${{ steps.version.outputs.version }}
+          path: ${{ runner.temp }}/NearbySocialClub-${{ steps.version.outputs.version }}.aab
           if-no-files-found: error
           retention-days: 90
 
@@ -339,6 +353,10 @@ jobs:
         run: |
           set -euo pipefail
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          # Mismo nombre que el artifact: quien descarga el Release ve
+          # `NearbySocialClub-<versión>.aab`, no `app-release.aab`.
+          ASSET="$RUNNER_TEMP/NearbySocialClub-$VERSION.aab"
+          cp "$AAB" "$ASSET"
           NOTES="$RUNNER_TEMP/notes.md"
           # Sin tag previo no hay ventana: `git log ..HEAD` sería un rango inválido.
           range="HEAD"
@@ -361,7 +379,7 @@ jobs:
           } > "$NOTES"
 
           gh release create "v$VERSION" \
-            "$AAB#Nearby Social Club $VERSION (com.nearbyig.app)" \
+            "$ASSET" \
             --target "$GITHUB_SHA" \
             --title "Nearby Social Club $VERSION" \
             --notes-file "$NOTES"

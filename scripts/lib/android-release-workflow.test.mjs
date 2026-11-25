@@ -195,12 +195,21 @@ test('publica sólo fuera del dry run y ancla el tag al commit del checkout', ()
   // Sin `--target`, `gh` taggea el HEAD remoto, que puede haber avanzado mientras
   // el job compilaba: el Release apuntaría a un commit distinto del artefacto.
   assert.match(release, /--target "\$GITHUB_SHA"/);
+  // El asset se publica con el nombre del producto y la versión, no con el que
+  // Gradle le pone al archivo: `app-release.aab` no dice qué es.
+  assert.match(release, /ASSET="\$RUNNER_TEMP\/NearbySocialClub-\$VERSION\.aab"/);
+  assert.match(release, /gh release create "v\$VERSION" \\\n\s+"\$ASSET"/);
+  assert.ok(
+    !release.includes('app-release.aab#'),
+    'el asset no debe subirse con el nombre crudo de Gradle ni con label',
+  );
 });
 
 test('el artefacto queda descargable aunque no se publique el Release', () => {
   const upload = step('Upload aab artifact');
   assert.match(upload, /actions\/upload-artifact@v4/);
-  assert.match(upload, /name: nearbyig-android-aab/);
+  // El nombre lo ve quien descarga: producto + versión, no `app-release.aab`.
+  assert.match(upload, /name: NearbySocialClub-\$\{\{ steps\.version\.outputs\.version \}\}/);
   assert.match(upload, /retention-days: 90/);
   assert.match(upload, /if-no-files-found: error/, 'un .aab ausente no puede pasar como éxito');
 
