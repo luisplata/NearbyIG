@@ -1,0 +1,7 @@
+# Artefactos de la herramienta: se regeneran con `check` / `snapshot`.
+.hyperframes/
+check*.log
+node_modules/
+
+# El render final SÍ se versiona (es el entregable).
+!renders/*.mp4

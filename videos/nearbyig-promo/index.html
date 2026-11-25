@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "Inter"; src: url("assets/fonts/inter-400.woff2") format("woff2"); font-weight: 400; }
+      @font-face { font-family: "Inter"; src: url("assets/fonts/inter-500.woff2") format("woff2"); font-weight: 500; }
+      @font-face { font-family: "Inter"; src: url("assets/fonts/inter-700.woff2") format("woff2"); font-weight: 700; }
+
+      :root {
+        --ground: #0b0f14;
+        --ink: #e6edf3;
+        --accent: #f5e600;
+        --line: #21262d;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--ground); }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--ground);
+        font-family: "Inter", system-ui, sans-serif;
+        color: var(--ink);
+      }
+      .shot { position: absolute; inset: 0; overflow: hidden; }
+      /* Pantalla real de la app: 1080x1920 centrada; la cámara la mueve con transform. */
+      .screen {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 1080px;
+        height: 1920px;
+        margin-left: -540px;
+        margin-top: -960px;
+        will-change: transform;
+      }
+      .cursor {
+        position: absolute;
+        width: 96px;
+        height: 96px;
+        left: 1195px;
+        top: 540px;
+        filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.55));
+      }
+      .ring {
+        position: absolute;
+        width: 84px;
+        height: 84px;
+        left: 1168px;
+        top: 518px;
+        border: 4px solid var(--accent);
+        border-radius: 50%;
+        opacity: 0;
+      }
+      .rowglow {
+        position: absolute;
+        left: 58px;
+        top: 309px;
+        width: 1804px;
+        height: 462px;
+        border: 4px solid var(--accent);
+        border-radius: 44px;
+        background: rgba(245, 230, 0, 0.07);
+        opacity: 0;
+      }
+      .type { position: absolute; left: 96px; top: 300px; width: 470px; }
+      .type .kicker {
+        font-size: 26px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--accent); margin-bottom: 22px;
+      }
+      .type h2 { font-size: 88px; line-height: 1.02; letter-spacing: -0.035em; font-weight: 700; }
+      .type .n { color: var(--accent); }
+      .type p { margin-top: 22px; font-size: 30px; line-height: 1.35; color: #9aa4b2; }
+      .chips { position: absolute; left: 96px; top: 700px; display: flex; gap: 14px; }
+      .chip {
+        font-size: 26px; font-weight: 500; padding: 14px 26px; border-radius: 999px;
+        border: 2px solid var(--line); color: #9aa4b2;
+      }
+      .chip.on { border-color: var(--accent); color: var(--accent); }
+      .big {
+        position: absolute; left: 96px; top: 430px; width: 420px;
+        font-size: 132px; font-weight: 700; letter-spacing: -0.05em; color: var(--accent);
+      }
+      .big small { display: block; font-size: 40px; letter-spacing: -0.01em; color: var(--ink); font-weight: 500; margin-top: 6px; }
+      .claim { position: absolute; left: 96px; top: 340px; width: 1500px; }
+      .claim h2 { font-size: 116px; line-height: 1.04; letter-spacing: -0.045em; font-weight: 700; }
+      .claim h2 em { font-style: normal; color: var(--accent); }
+      .endcard { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 44px; }
+      .endcard .icon { width: 384px; height: 384px; }
+      .endcard .word { font-size: 92px; font-weight: 700; letter-spacing: -0.04em; line-height: 1.05; }
+      .endcard .domain { margin-top: 18px; font-size: 38px; font-weight: 500; color: var(--accent); letter-spacing: -0.01em; }
+      .dot {
+        position: absolute; left: 1100px; top: 1120px; width: 46px; height: 46px;
+        border-radius: 50%; background: #ff2f6d; box-shadow: 0 0 0 10px rgba(255, 47, 109, 0.18);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="27" data-width="1920" data-height="1080">
+
+      <!-- 1 · HOOK: Vale a 240 m -->
+      <section class="shot clip" id="s1" data-start="0" data-duration="4.5" data-track-index="0" data-track-kind="graphics">
+        <img class="screen" id="s1-screen" src="assets/lista.png" alt="" />
+        <div class="rowglow" id="s1-glow"></div>
+        <svg class="cursor" id="s1-cursor" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 2 L4 19 L9 14.5 L12.5 21.5 L15.5 20 L12 13 L18.5 13 Z" fill="#E6EDF3" stroke="#0B0F14" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+        <div class="ring" id="s1-ring"></div>
+      </section>
+
+      <!-- 2 · PROOF 1: el barrio entero -->
+      <section class="shot clip" id="s2" data-start="4.5" data-duration="6.5" data-track-index="0" data-track-kind="graphics">
+        <img class="screen" id="s2-screen" src="assets/lista.png" alt="" />
+        <div class="type">
+          <div class="kicker" id="s2-k">Cerca tuyo</div>
+          <h2 id="s2-t1"><span class="n">5 personas</span></h2>
+          <h2 id="s2-t2">en 5,0 km</h2>
+          <p id="s2-p">Ordenadas por distancia real, no por un algoritmo.</p>
+        </div>
+        <div class="chips">
+          <span class="chip" id="s2-c1">500 m</span>
+          <span class="chip" id="s2-c2">1,0 km</span>
+          <span class="chip" id="s2-c3">2,0 km</span>
+          <span class="chip on" id="s2-c4">5,0 km</span>
+        </div>
+      </section>
+
+      <!-- 3 · PROOF 2: el radar -->
+      <section class="shot clip" id="s3" data-start="11" data-duration="5.5" data-track-index="0" data-track-kind="graphics">
+        <img class="screen" id="s3-screen" src="assets/radar.png" alt="" />
+      </section>
+
+      <!-- 4 · PAYOFF: la distancia se vuelve nombre -->
+      <section class="shot clip" id="s4" data-start="16.5" data-duration="3" data-track-index="0" data-track-kind="graphics">
+        <img class="screen" id="s4-screen" src="assets/lista.png" alt="" />
+        <div class="big" id="s4-big">240 m<small>Vale · en línea ahora</small></div>
+      </section>
+
+      <!-- 5 · CLAIM -->
+      <section class="shot clip" id="s5" data-start="19.5" data-duration="3" data-track-index="0" data-track-kind="graphics">
+        <img class="screen" id="s5-screen" src="assets/lista.png" alt="" />
+        <div class="claim"><h2 id="s5-claim">Distancias reales,<br />no perfiles de <em>catálogo</em></h2></div>
+      </section>
+
+      <!-- 6 · END CARD -->
+      <section class="shot clip" id="s6" data-start="22.5" data-duration="4.5" data-track-index="0" data-track-kind="graphics">
+        <div class="endcard">
+          <img class="icon" id="s6-icon" src="assets/icon.svg" alt="" />
+          <div>
+            <div class="word" id="s6-word">Nearby Social Club</div>
+            <div class="domain" id="s6-domain">nearbyig.tech</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Música: CC0 (dominio público) — ver assets/audio/CREDITS.md -->
+      <audio id="music" class="clip" data-start="0" data-duration="27" data-track-index="4" data-volume="0.6" src="assets/audio/music.mp3"></audio>
+      <!-- SFX libres (Pixabay Content License): acción visible, sonido seco -->
+      <audio id="sfx-click" class="clip" data-start="2.78" data-duration="0.4" data-track-index="3" data-volume="0.7" src="assets/audio/sfx-click.mp3"></audio>
+      <audio id="sfx-impact" class="clip" data-start="10.95" data-duration="0.9" data-track-index="3" data-volume="0.55" src="assets/audio/sfx-impact.mp3"></audio>
+      <audio id="sfx-chime" class="clip" data-start="16.6" data-duration="1.8" data-track-index="3" data-volume="0.5" src="assets/audio/sfx-chime.mp3"></audio>
+
+    </div>
+
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      // 1 · HOOK — push-in sobre la fila de Vale, el ping la enciende
+      tl.fromTo("#s1-screen", { scale: 2.35, y: 553 }, { scale: 2.2, y: 517, duration: 1.4, ease: "power2.out" }, 0);
+      tl.fromTo("#s1-cursor", { x: 300, y: 120, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.7, ease: "power3.out" }, 1.7);
+      tl.to("#s1-cursor", { y: 30, duration: 0.22, ease: "power2.out" }, 2.55);
+      tl.to("#s1-ring", { opacity: 1, scale: 0.9, duration: 0.14, ease: "power2.out" }, 2.78);
+      tl.to("#s1-ring", { opacity: 0, scale: 1.7, duration: 0.34, ease: "power2.out" }, 2.94);
+      tl.to("#s1-glow", { opacity: 1, duration: 0.18, ease: "power2.out" }, 2.78);
+      tl.to("#s1-cursor", { opacity: 0, duration: 0.3, ease: "power1.out" }, 3.3);
+
+      // 2 · PROOF 1 — pull-back al listado completo
+      tl.fromTo("#s2-screen", { scale: 2.2, y: 517, x: 0 }, { scale: 1, y: 0, x: 180, duration: 0.95, ease: "power2.inOut" }, 4.5);
+      tl.fromTo("#s2-k", { opacity: 0, x: -36 }, { opacity: 1, x: 0, duration: 0.35, ease: "power3.out" }, 4.85);
+      tl.fromTo("#s2-t1", { opacity: 0, x: -36 }, { opacity: 1, x: 0, duration: 0.4, ease: "power3.out" }, 5.15);
+      tl.fromTo("#s2-t2", { opacity: 0, x: -36 }, { opacity: 1, x: 0, duration: 0.4, ease: "power3.out" }, 5.45);
+      tl.fromTo("#s2-p", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 5.9);
+      tl.fromTo(".chip", { opacity: 0, y: 12 }, { opacity: 1, y: 0, stagger: 0.1, duration: 0.28, ease: "power2.out" }, 7.9);
+
+      // 3 · PROOF 2 — el radar prueba la distancia
+      tl.fromTo("#s3-screen", { scale: 1.55 }, { scale: 1.35, duration: 1.2, ease: "power2.out" }, 11);
+      tl.fromTo("#s3-screen", { filter: "brightness(0.88)" }, { filter: "brightness(1)", duration: 0.9, ease: "power2.out" }, 13.6);
+
+      // 4 · PAYOFF — la fila vuelve, la distancia se hace número
+      tl.fromTo("#s4-screen", { scale: 1.9, y: 430, x: 240 }, { scale: 1.7, y: 400, x: 240, duration: 0.8, ease: "power2.out" }, 16.5);
+      tl.fromTo("#s4-big", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.4, ease: "power3.out" }, 16.7);
+
+      // 5 · CLAIM — la app sale de cuadro, entra el titular
+      tl.to("#s5-screen", { x: -1500, duration: 0.75, ease: "power2.inOut" }, 19.5);
+      tl.fromTo("#s5-claim", { opacity: 0, x: 140 }, { opacity: 1, x: 0, duration: 0.55, ease: "power3.out" }, 19.75);
+
+      // 6 · END CARD — la marca se revela de abajo hacia arriba
+      tl.fromTo("#s6-icon", { clipPath: "inset(100% 0 0 0)" }, { clipPath: "inset(0% 0 0 0)", duration: 0.7, ease: "power3.out" }, 22.5);
+      tl.fromTo("#s6-word", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.55, ease: "power3.out" }, 23);
+      tl.fromTo("#s6-domain", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 23.5);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

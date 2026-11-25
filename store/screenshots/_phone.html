@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>phone frame</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 576px; overflow: hidden; background: #0b0f14; }
+  /* 576x1024 = 9:16 exacto. Sin transform: el iframe renderiza a tamaño real. */
+  iframe { width: 576px; height: 1024px; border: 0; display: block; background: #0b0f14; }
+</style>
+</head>
+<body>
+  <iframe id="app"
+    src="https://nearbyig.tech/expo/?api=https://api.nearbyig.tech&zone=cdmx"
+    allow="geolocation"></iframe>
+</body>
+</html>
