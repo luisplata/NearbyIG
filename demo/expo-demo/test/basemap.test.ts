@@ -23,7 +23,7 @@ import { centerForRegion } from '../src/live/regions';
  * invariante que fija este test es físico —"el radio útil del cuadrado son
  * `radiusM` metros"— y no una banda de zoom copiada de una tabla.
  *
- * **Latitud.** El invariante se verifica en dos ciudades: CDMX (19°) y Buenos
+ * **Latitud.** El invariante se verifica en dos ciudades: Cancún (21°) y Buenos
  * Aires (-34°). Si el cos(lat) se comiera el centro y quedara fijo, uno de los
  * dos fallaría por varios metros.
  */
@@ -93,7 +93,7 @@ describe('el zoom depende de la latitud del centro', () => {
     const cdmx = zoomForRadius(2000, SIDE, CDMX);
     const bogota = zoomForRadius(2000, SIDE, BOGOTA);
     const buenosAires = zoomForRadius(2000, SIDE);
-    // cos(4.7°) > cos(19.4°) > cos(-34.6°): cuanto más cerca del ecuador, más
+    // cos(4.7°) > cos(21.1°) > cos(-34.6°): cuanto más cerca del ecuador, más
     // metros por píxel a igual zoom, así que para el mismo radio hace falta más.
     expect(bogota).toBeGreaterThan(cdmx);
     expect(cdmx).toBeGreaterThan(buenosAires);
@@ -140,7 +140,7 @@ describe('centro por región', () => {
   it('mx → CDMX y co → Bogotá, no Buenos Aires', () => {
     expect(centerForRegion('mx')).toEqual(CDMX);
     expect(centerForRegion('co')).toEqual(BOGOTA);
-    expect(centerLngLat(centerForRegion('mx'))).toEqual([-99.124, 19.4062]);
+    expect(centerLngLat(centerForRegion('mx'))).toEqual([-86.8328, 21.1155]);
     expect(centerLngLat(centerForRegion('co'))).toEqual([-74.0974, 4.6832]);
     expect(centerForRegion('mx')).not.toEqual(DEMO_CENTER);
     expect(centerForRegion('co')).not.toEqual(DEMO_CENTER);

@@ -108,8 +108,8 @@ function makeServer() {
   return { fetchImpl };
 }
 
-/** Punto de partida: el centro de CDMX. */
-const A = { lat: 19.432608, lng: -99.13321 };
+/** Punto de partida: el centro de Cancún, dentro del polígono de la zona `mx`. */
+const A = { lat: 21.1619, lng: -86.8515 };
 
 /** `meters` al norte de la latitud base (un grado de latitud ≈ 111.195 m). */
 function north(meters: number): { lat: number; lng: number } {

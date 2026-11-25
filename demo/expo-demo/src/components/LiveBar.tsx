@@ -22,7 +22,7 @@ import { LiveDebug } from './LiveDebug';
  * **No hay switch.** Cuando el build tiene API, la sesión arranca sola —si hay
  * zona elegida— y la barra cuenta qué pasa: estado, línea de sesión, transporte,
  * perfiles y si las distancias salen del GPS o de la zona demo (`zona demo
- * (CDMX)`). El dataset del build no es un modo que se elija: es el catálogo con
+ * (Cancún)`). El dataset del build no es un modo que se elija: es el catálogo con
  * el que la app arranca y al que vuelve si la API no responde.
  *
  * **La ubicación no se pide sola.** El chip "Usar mi ubicación" es el gesto que

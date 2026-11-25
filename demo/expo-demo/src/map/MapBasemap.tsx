@@ -25,7 +25,7 @@ import { mapStyle } from './style';
  *
  * **Centro.** El `center` que llega puede ser el punto del GPS (memoria del
  * cliente, nunca persistido) o el centroide de la zona demo. El zoom se calcula
- * con el `cos(lat)` **de ese** centro: a 4° (Bogotá) y a 19° (CDMX) el mismo
+ * con el `cos(lat)` **de ese** centro: a 4° (Bogotá) y a 21° (Cancún) el mismo
  * radio ocupa distinto zoom, y usar otra latitud desalinearía anillos y cuadras.
  *
  * **Errores.** Antes cualquier evento `error` mataba el basemap (`failed` era
