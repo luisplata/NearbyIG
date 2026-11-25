@@ -43,6 +43,14 @@ on:
 permissions:
   contents: write
 
+# Origen canónico del API de producción. Es el ÚNICO valor que puede quedar
+# horneado en el `.aab`: un dominio estable que controlamos, no un túnel que se
+# apaga. Los dos guards de abajo comparan contra este valor, así que un
+# `env:` que se cuele con otro host falla el run en vez de publicar una app
+# que no conecta.
+env:
+  EXPO_PUBLIC_API_URL: https://api.nearbyig.tech
+
 # Un solo release a la vez: dos runs paralelos calcularían el mismo versionCode
 # desde el mismo `ls-remote` y el segundo chocaría contra el tag del primero.
 concurrency:
@@ -138,19 +146,23 @@ jobs:
           RELEASE_TYPE: ${{ inputs.release_type }}
         run: node scripts/version.mjs --release-type="$RELEASE_TYPE"
 
-      # El bundle de Play no lleva API horneada. Se chequea antes de compilar
-      # porque un `env:` global que se cuele no rompe nada hasta que el tester
-      # abre la app y el host ya no existe.
-      - name: Assert the API url is not baked in
+      # El bundle de Play lleva UNA sola base de API: el origen canónico. Se
+      # chequea antes de compilar porque un `env:` que se cuele con otro host no
+      # rompe nada hasta que el tester abre la app y el host no existe.
+      - name: Assert the API url is the canonical origin
         run: |
           set -euo pipefail
-          if [ -n "${EXPO_PUBLIC_API_URL:-}" ]; then
-            echo "::error::EXPO_PUBLIC_API_URL está definida (${EXPO_PUBLIC_API_URL}); el .aab de Play no lleva API horneada"
+          expected='https://api.nearbyig.tech'
+          if [ "${EXPO_PUBLIC_API_URL:-}" != "$expected" ]; then
+            echo "::error::EXPO_PUBLIC_API_URL debe ser ${expected} (actual: '${EXPO_PUBLIC_API_URL:-<vacío>}')"
             exit 1
           fi
 
       # `prebuild` regenera `android/` (salida de CNG, gitignored) y ahí corre el
       # plugin de firma: necesita las 4 variables en SU entorno, no en el del job.
+      # `ANDROID_KEYSTORE_BASE64` es una de las 4 que exige `REQUIRED` en
+      # `withReleaseSigning.js`: sin ella el plugin devuelve el template intacto y
+      # el fail-fast de abajo aborta con `marcadores: 0` después de ~2 min.
       - name: Expo prebuild
         working-directory: demo/expo-demo
         env:
@@ -159,6 +171,7 @@ jobs:
           # Explícita aunque venga por `$GITHUB_ENV`: el plugin la exige y el
           # contrato tiene que leerse en el paso, no inferirse de un paso anterior.
           ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -278,12 +291,16 @@ jobs:
           grep -Eq '^base/dex/classes[0-9]*\.dex$' "$ENTRIES" \
             || die "el .aab no contiene ningún base/dex/classes*.dex"
 
-          # 6. Sin API horneada. `grep -a` porque el bundle de Hermes es binario
-          #    (sin `-a` sólo diría "Binary file matches" y no el host). La variable
-          #    no puede estar seteada en ningún lado: si un `env:` global la
-          #    reintroduce, este check la ve antes que el tester.
-          [ -z "${EXPO_PUBLIC_API_URL:-}" ] \
-            || die "EXPO_PUBLIC_API_URL está definida (${EXPO_PUBLIC_API_URL}); el .aab de Play no lleva API horneada"
+          # 6. Base de API: exactamente el origen canónico y NINGÚN host efímero.
+          #    `grep -a` porque el bundle de Hermes es binario (sin `-a` sólo dice
+          #    "Binary file matches" y no el host). El guard de arriba ya falla si
+          #    la variable tiene otro valor; esto verifica lo que realmente quedó
+          #    dentro del artefacto y que el valor no sea un túnel apagado.
+          [ "${EXPO_PUBLIC_API_URL:-}" = "https://api.nearbyig.tech" ] \
+            || die "EXPO_PUBLIC_API_URL no es el origen canónico ('${EXPO_PUBLIC_API_URL:-<vacío>}')"
+          unzip -p "$AAB" base/assets/index.android.bundle \
+            | grep -aqF 'https://api.nearbyig.tech' \
+            || die "el bundle no lleva el origen canónico del API"
           if unzip -p "$AAB" base/assets/index.android.bundle \
             | grep -aoE '[a-z0-9-]+\.trycloudflare\.com'; then
             die "el bundle lleva un host de API horneado: el .aab de Play no puede apuntar a un túnel"

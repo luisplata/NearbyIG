@@ -1,0 +1,103 @@
+name: backend-image
+
+# Construye la imagen de la API y la publica en GHCR.
+#
+# Por qué existe: en el VPS (1 vCPU) un `docker build` de la API son 10-20 min
+# con el server sin CPU para servir. El deploy no compila: hace `docker pull`.
+#
+#   docker pull ghcr.io/luisplata/nearbyig-api:latest
+#
+# El tag con el SHA es el que se usa para desplegar (inmutable y auditable);
+# `latest` es sólo comodidad para pruebas.
+#
+# Para que el VPS pueda bajar la imagen sin credenciales, el paquete tiene que
+# ser PÚBLICO: GitHub → Packages → nearbyig-api → Package settings →
+# Change visibility → Public. El repo ya es público, así que no expone nada nuevo.
+# Si preferís dejarlo privado, hay que hacer `docker login ghcr.io` en el server
+# con un PAT con scope `read:packages` (y entonces sí, ese es un secreto más).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'contract/**'
+      - '.github/workflows/backend-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: backend-image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/nearbyig-api
+
+jobs:
+  build:
+    name: build and push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # El context del Dockerfile es la raíz del repo (lee `contract/`), así que
+      # no hay `context:` que ajustar: se construye desde acá.
+      - name: Build the runtime image
+        run: |
+          set -euo pipefail
+          docker build \
+            --file backend/Dockerfile \
+            --target runtime \
+            --tag "$IMAGE:${{ github.sha }}" \
+            --tag "$IMAGE:latest" \
+            .
+
+      # Smoke test antes de publicar: la imagen tiene que arrancar Node y traer
+      # `dist/main.js`, `sql/` y `scripts/migrate.mjs`. No levanta la API (necesita
+      # base), pero atrapa el caso "la imagen se construyó y está vacía".
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          test -f backend/sql/001_init.sql || { echo "::error::backend/sql no está en el contexto"; exit 1; }
+          docker run --rm --entrypoint sh "$IMAGE:${{ github.sha }}" -c '
+            set -e
+            node --version
+            test -f /app/dist/main.js
+            test -d /app/sql
+            test -f /app/scripts/migrate.mjs
+            test -f /app/scripts/seed.mjs
+            test -d /seed/catalog
+            test -d /seed/seed
+            id -u | grep -qx 1000   # corre como `node`, no como root
+            echo "imagen ok"
+          '
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Push
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Imagen publicada"
+            echo ""
+            echo '```'
+            echo "$IMAGE:${{ github.sha }}"
+            echo "$IMAGE:latest"
+            echo '```'
+            echo ""
+            echo "Deploy en el VPS:"
+            echo '```bash'
+            echo "NEARBYIG_IMAGE=$IMAGE:${{ github.sha }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

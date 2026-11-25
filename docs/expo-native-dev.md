@@ -111,6 +111,12 @@ EXPO_PUBLIC_API_URL=http://192.168.0.42:3000 npx expo start --tunnel
 - HTTP plano a la LAN funciona en **debug**. En release, Android bloquea cleartext salvo que se
   declare; no lo declares: para el piloto alcanza con debug y con TLS.
 
+**Release vs desarrollo.** El `.aab` de Play no usa esta variable para apuntar a tu
+LAN: el workflow la fija en `https://api.nearbyig.tech` y falla si alguien la cambia
+por otro host. Es decir, el binario de release siempre habla con producción; para
+probar contra un backend local seguí usando `npx expo start`, que no pasa por ese
+workflow.
+
 Para probar chrome (safe area, barra de estado, back) y el permiso de ubicación **sin** el
 basemap alcanzaba Expo Go; con el módulo nativo ya no: Expo Go trae un conjunto fijo de
 módulos y el del mapa no está (sección 4). Hace falta un dev client, que es exactamente lo
